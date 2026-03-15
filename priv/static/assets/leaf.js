@@ -104,6 +104,19 @@
     ".leaf-resize-handle--sw { cursor: sw-resize; }",
     ".leaf-resize-handle--se { cursor: se-resize; }",
 
+    // Drag-and-drop indicator
+    ".leaf-drop-indicator {",
+    "  position: absolute; left: 0; right: 0; height: 3px;",
+    "  background: var(--color-primary, #3b82f6);",
+    "  border-radius: 2px; pointer-events: none; z-index: 50;",
+    "  transition: top 0.05s ease-out;",
+    "}",
+    ".content-editor-visual img.leaf-dragging {",
+    "  opacity: 0.35;",
+    "  outline: 2px dashed var(--color-primary, #3b82f6);",
+    "  outline-offset: 2px;",
+    "}",
+
     // Horizontal rule
     ".content-editor-visual hr {",
     "  border: none;",
@@ -470,6 +483,7 @@
       this._setupToolbar();
       this._setupModeSwitcher();
       this._setupLinkPopover();
+      this._setupImageDragAndDrop();
       this._registerMarkdownHelpers();
       this._setupMarkdownTextarea();
       this._setupHtmlTextarea();
@@ -520,6 +534,12 @@
       }
       if (this._htmlDebounceTimer) {
         clearTimeout(this._htmlDebounceTimer);
+      }
+
+      this._cleanupDrag();
+      if (this._imgObserver) {
+        this._imgObserver.disconnect();
+        this._imgObserver = null;
       }
 
       this._dismissLinkPopover();
@@ -1530,6 +1550,263 @@
       document.addEventListener("mouseup", onUp);
     },
 
+    // -- Image drag-and-drop reordering --
+
+    _setupImageDragAndDrop: function () {
+      if (!this._visualEl) return;
+      var self = this;
+
+      this._dragIndicator = null;
+      this._dragSourceImg = null;
+      this._dragDropTarget = null;
+
+      // Ensure existing images are draggable
+      var imgs = this._visualEl.querySelectorAll("img");
+      for (var i = 0; i < imgs.length; i++) {
+        imgs[i].setAttribute("draggable", "true");
+      }
+
+      // Watch for new images and mark them draggable
+      this._imgObserver = new MutationObserver(function (mutations) {
+        mutations.forEach(function (m) {
+          m.addedNodes.forEach(function (node) {
+            if (node.nodeType !== Node.ELEMENT_NODE) return;
+            if (node.tagName && node.tagName.toLowerCase() === "img") {
+              node.setAttribute("draggable", "true");
+            }
+            var childImgs = node.querySelectorAll && node.querySelectorAll("img");
+            if (childImgs) {
+              for (var j = 0; j < childImgs.length; j++) {
+                childImgs[j].setAttribute("draggable", "true");
+              }
+            }
+          });
+        });
+      });
+      this._imgObserver.observe(this._visualEl, { childList: true, subtree: true });
+
+      // dragstart
+      this._visualEl.addEventListener("dragstart", function (e) {
+        var img = e.target;
+        if (!img || img.tagName.toLowerCase() !== "img") return;
+        if (self._readonly) { e.preventDefault(); return; }
+
+        // Don't drag if popover is open (resize handles active)
+        if (self._imagePopoverTarget === img) {
+          e.preventDefault();
+          return;
+        }
+
+        self._dismissImagePopover();
+        self._dismissLinkPopover();
+
+        self._dragSourceImg = img;
+        img.classList.add("leaf-dragging");
+
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", "leaf-image-drag");
+
+        var indicator = document.createElement("div");
+        indicator.className = "leaf-drop-indicator";
+        indicator.style.display = "none";
+        self._visualWrapper.style.position = "relative";
+        self._visualWrapper.appendChild(indicator);
+        self._dragIndicator = indicator;
+      });
+
+      // dragover
+      this._visualEl.addEventListener("dragover", function (e) {
+        if (!self._dragSourceImg) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+
+        var target = self._findDropTarget(e.clientY);
+        if (target) {
+          self._dragDropTarget = target;
+          self._positionDropIndicator(target);
+        }
+      });
+
+      // dragleave
+      this._visualEl.addEventListener("dragleave", function (e) {
+        if (!self._visualEl.contains(e.relatedTarget)) {
+          if (self._dragIndicator) self._dragIndicator.style.display = "none";
+          self._dragDropTarget = null;
+        }
+      });
+
+      // drop
+      this._visualEl.addEventListener("drop", function (e) {
+        e.preventDefault();
+        if (!self._dragSourceImg || !self._dragDropTarget) {
+          self._cleanupDrag();
+          return;
+        }
+
+        var img = self._dragSourceImg;
+        var targetEl = self._dragDropTarget.element;
+        var position = self._dragDropTarget.position;
+
+        // Capture references before any DOM mutation
+        var refNext = targetEl.nextSibling;
+        var refParent = targetEl.parentNode;
+
+        // Check if the target will be invalidated by removing the image
+        // (e.g., image is inside a <p> that IS the target)
+        var imgBlock = img.parentNode;
+        var removingBlock = (imgBlock && imgBlock !== self._visualEl &&
+            imgBlock.tagName.toLowerCase() === "p" &&
+            imgBlock.childNodes.length === 1);
+        var targetIsImgBlock = removingBlock && imgBlock === targetEl;
+
+        // Remove image from current location
+        if (removingBlock) {
+          imgBlock.remove();
+        } else {
+          img.remove();
+        }
+
+        // If target was the block we just removed, skip insertion
+        // (image was dropped back near itself)
+        if (targetIsImgBlock) {
+          // Re-insert at roughly the same spot using saved refs
+          if (refNext && refNext.parentNode) {
+            refParent.insertBefore(img, refNext);
+          } else if (refParent) {
+            refParent.appendChild(img);
+          }
+        } else if (!targetEl.parentNode) {
+          // Target was somehow removed — use saved references
+          if (refNext && refNext.parentNode) {
+            refParent.insertBefore(img, refNext);
+          } else if (refParent) {
+            refParent.appendChild(img);
+          }
+        } else if (position === "before") {
+          targetEl.parentNode.insertBefore(img, targetEl);
+        } else {
+          if (targetEl.nextSibling) {
+            targetEl.parentNode.insertBefore(img, targetEl.nextSibling);
+          } else {
+            targetEl.parentNode.appendChild(img);
+          }
+        }
+
+        // Ensure image is a direct child of visual editor, not nested in a block
+        if (img.parentNode && img.parentNode !== self._visualEl) {
+          var wrapper = img.parentNode;
+          self._visualEl.insertBefore(img, wrapper.nextSibling);
+          if (wrapper.innerHTML.trim() === "" || wrapper.innerHTML === "<br>") {
+            wrapper.remove();
+          }
+        }
+
+        self._cleanupDrag();
+        self._debouncedPushVisualChange();
+      });
+
+      // dragend (cleanup on cancel/escape)
+      this._visualEl.addEventListener("dragend", function () {
+        self._cleanupDrag();
+      });
+    },
+
+    _findDropTarget: function (clientY) {
+      var BLOCK_TAGS = {
+        p: true, h1: true, h2: true, h3: true, h4: true, h5: true, h6: true,
+        blockquote: true, pre: true, ul: true, ol: true, hr: true, img: true,
+        div: true, figure: true, table: true
+      };
+
+      var children = this._visualEl.childNodes;
+      var blocks = [];
+
+      for (var i = 0; i < children.length; i++) {
+        var child = children[i];
+        if (child.nodeType !== Node.ELEMENT_NODE) continue;
+        var tag = child.tagName.toLowerCase();
+        if (BLOCK_TAGS[tag]) {
+          blocks.push(child);
+        }
+      }
+
+      if (blocks.length === 0) return null;
+
+      var best = null;
+      var bestDist = Infinity;
+
+      for (var j = 0; j < blocks.length; j++) {
+        var block = blocks[j];
+        if (block === this._dragSourceImg) continue;
+        if (block.contains && block.contains(this._dragSourceImg)) continue;
+
+        var rect = block.getBoundingClientRect();
+
+        var distTop = Math.abs(clientY - rect.top);
+        if (distTop < bestDist) {
+          bestDist = distTop;
+          best = { element: block, position: "before" };
+        }
+
+        var distBottom = Math.abs(clientY - rect.bottom);
+        if (distBottom < bestDist) {
+          bestDist = distBottom;
+          best = { element: block, position: "after" };
+        }
+      }
+
+      // Edge: above first block
+      var firstBlock = blocks[0];
+      if (firstBlock !== this._dragSourceImg) {
+        var firstRect = firstBlock.getBoundingClientRect();
+        if (clientY < firstRect.top) {
+          return { element: firstBlock, position: "before" };
+        }
+      }
+
+      // Edge: below last block
+      var lastBlock = blocks[blocks.length - 1];
+      if (lastBlock !== this._dragSourceImg) {
+        var lastRect = lastBlock.getBoundingClientRect();
+        if (clientY > lastRect.bottom) {
+          return { element: lastBlock, position: "after" };
+        }
+      }
+
+      return best;
+    },
+
+    _positionDropIndicator: function (target) {
+      if (!this._dragIndicator || !target) return;
+
+      var wrapperRect = this._visualWrapper.getBoundingClientRect();
+      var blockRect = target.element.getBoundingClientRect();
+      var y;
+
+      if (target.position === "before") {
+        y = blockRect.top - wrapperRect.top - 2;
+      } else {
+        y = blockRect.bottom - wrapperRect.top + 1;
+      }
+
+      y = Math.max(0, Math.min(y, this._visualWrapper.offsetHeight));
+
+      this._dragIndicator.style.top = y + "px";
+      this._dragIndicator.style.display = "block";
+    },
+
+    _cleanupDrag: function () {
+      if (this._dragSourceImg) {
+        this._dragSourceImg.classList.remove("leaf-dragging");
+        this._dragSourceImg = null;
+      }
+      if (this._dragIndicator) {
+        this._dragIndicator.remove();
+        this._dragIndicator = null;
+      }
+      this._dragDropTarget = null;
+    },
+
     _dismissImagePopover: function () {
       // Remove selection class
       if (this._imagePopoverTarget) {
@@ -1563,7 +1840,7 @@
               payload.url +
               '" alt="' +
               (payload.alt || "").replace(/"/g, "&quot;") +
-              '" />';
+              '" draggable="true" />';
             document.execCommand("insertHTML", false, imgHtml);
             this._debouncedPushVisualChange();
           }
