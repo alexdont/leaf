@@ -121,8 +121,8 @@
     ".leaf-drag-handle {",
     "  position: absolute; z-index: 52;",
     "  display: flex; align-items: center; justify-content: center;",
-    "  width: 20px; height: 20px;",
-    "  cursor: grab; border-radius: 4px;",
+    "  width: 28px; height: 28px;",
+    "  cursor: grab; border-radius: 6px;",
     "  color: color-mix(in oklab, var(--color-base-content, #1f2937) 30%, transparent);",
     "  background: transparent;",
     "  transition: color 0.1s, background 0.1s;",
@@ -133,7 +133,7 @@
     "  background: color-mix(in oklab, var(--color-base-content, #1f2937) 8%, transparent);",
     "}",
     ".leaf-drag-handle:active { cursor: grabbing; }",
-    ".leaf-drag-handle svg { width: 14px; height: 14px; pointer-events: none; }",
+    ".leaf-drag-handle svg { width: 18px; height: 18px; pointer-events: none; }",
 
     // Horizontal rule
     ".content-editor-visual hr {",
@@ -1844,7 +1844,7 @@
       var blockRect = block.getBoundingClientRect();
 
       var top = blockRect.top - wrapperRect.top;
-      var left = blockRect.left - wrapperRect.left - 24;
+      var left = blockRect.left - wrapperRect.left - 30;
 
       this._dragHandle.style.top = top + "px";
       this._dragHandle.style.left = Math.max(0, left) + "px";
