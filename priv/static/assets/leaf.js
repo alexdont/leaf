@@ -1155,12 +1155,24 @@
 
       this._linkPopoverEl = null;
       this._linkPopoverAnchor = null;
+      this._imagePopoverEl = null;
+      this._imagePopoverTarget = null;
 
       this._visualEl.addEventListener("click", function (e) {
         if (self._readonly) return;
 
+        var target = e.target;
+
+        // Check if clicked on an <img>
+        if (target.tagName && target.tagName.toLowerCase() === "img") {
+          e.preventDefault();
+          self._dismissLinkPopover();
+          self._showImagePopover(target);
+          return;
+        }
+
         // Walk up from click target to find an <a> inside the editor
-        var node = e.target;
+        var node = target;
         var anchor = null;
         while (node && node !== self._visualEl) {
           if (node.tagName && node.tagName.toLowerCase() === "a") {
@@ -1172,17 +1184,23 @@
 
         if (anchor) {
           e.preventDefault();
+          self._dismissImagePopover();
           self._showLinkPopover(anchor);
         } else {
           self._dismissLinkPopover();
+          self._dismissImagePopover();
         }
       });
 
-      // Dismiss when clicking outside the editor + popover
+      // Dismiss when clicking outside the editor + popovers
       this._onDocClickForPopover = function (e) {
         if (self._linkPopoverEl && !self._linkPopoverEl.contains(e.target) &&
             !self._visualEl.contains(e.target)) {
           self._dismissLinkPopover();
+        }
+        if (self._imagePopoverEl && !self._imagePopoverEl.contains(e.target) &&
+            !self._visualEl.contains(e.target)) {
+          self._dismissImagePopover();
         }
       };
       document.addEventListener("mousedown", this._onDocClickForPopover);
@@ -1292,6 +1310,110 @@
         parent.insertBefore(anchorEl.firstChild, anchorEl);
       }
       parent.removeChild(anchorEl);
+    },
+
+    // -- Image popover --
+
+    _showImagePopover: function (imgEl) {
+      this._dismissImagePopover();
+      this._imagePopoverTarget = imgEl;
+
+      var src = imgEl.getAttribute("src") || "";
+      var alt = imgEl.getAttribute("alt") || "";
+      var self = this;
+
+      var pop = document.createElement("div");
+      pop.className = "leaf-link-popover";
+
+      // Image icon
+      var imgIcon = document.createElement("span");
+      imgIcon.style.cssText = "display:flex;align-items:center;opacity:0.5;flex-shrink:0;";
+      imgIcon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="13" height="13"><path fill-rule="evenodd" d="M2 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4Zm10.5 5.707L10.354 7.56a.5.5 0 0 0-.708 0L6.5 10.707 5.354 9.56a.5.5 0 0 0-.708 0L3.5 10.707V4a.5.5 0 0 1 .5-.5h8a.5.5 0 0 1 .5.5v5.707ZM11 6a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z" clip-rule="evenodd"/></svg>';
+      pop.appendChild(imgIcon);
+
+      // Alt text input
+      var altInput = document.createElement("input");
+      altInput.type = "text";
+      altInput.value = alt;
+      altInput.placeholder = "Alt text...";
+      altInput.title = "Image alt text";
+      altInput.style.cssText = [
+        "background: color-mix(in oklab, var(--color-base-content, #1f2937) 8%, transparent);",
+        "border: none; border-radius: 0.25rem; padding: 0.2rem 0.4rem;",
+        "font-size: 0.8125rem; color: inherit; outline: none; width: 160px;",
+      ].join("");
+      altInput.addEventListener("mousedown", function (e) { e.stopPropagation(); });
+      altInput.addEventListener("input", function () {
+        imgEl.setAttribute("alt", altInput.value);
+      });
+      altInput.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") {
+          self._dismissImagePopover();
+        }
+      });
+      pop.appendChild(altInput);
+
+      // Actions group
+      var actions = document.createElement("span");
+      actions.className = "leaf-popover-actions";
+
+      // Open in new tab button
+      var openBtn = document.createElement("button");
+      openBtn.type = "button";
+      openBtn.title = "Open image";
+      openBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="13" height="13"><path d="M8.22 2.97a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06l2.97-2.97H3.75a.75.75 0 0 1 0-1.5h7.44L8.22 4.03a.75.75 0 0 1 0-1.06Z"/></svg>';
+      openBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      openBtn.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (src) window.open(src, "_blank");
+      });
+      actions.appendChild(openBtn);
+
+      // Divider
+      var d1 = document.createElement("span");
+      d1.className = "leaf-popover-divider";
+      actions.appendChild(d1);
+
+      // Remove button
+      var removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.title = "Remove image";
+      removeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="13" height="13"><path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L6.94 8l-1.72 1.72a.75.75 0 1 0 1.06 1.06L8 9.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L9.06 8l1.72-1.72a.75.75 0 0 0-1.06-1.06L8 6.94 6.28 5.22Z"/></svg>';
+      removeBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      removeBtn.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        imgEl.remove();
+        self._dismissImagePopover();
+        self._debouncedPushVisualChange();
+      });
+      actions.appendChild(removeBtn);
+
+      pop.appendChild(actions);
+
+      // Position below the image
+      this.el.style.position = "relative";
+      var editorRect = this.el.getBoundingClientRect();
+      var imgRect = imgEl.getBoundingClientRect();
+
+      pop.style.left = (imgRect.left - editorRect.left) + "px";
+      pop.style.top = (imgRect.bottom - editorRect.top + 8) + "px";
+
+      this.el.appendChild(pop);
+      this._imagePopoverEl = pop;
+
+      // Focus the alt input
+      setTimeout(function () { altInput.focus(); altInput.select(); }, 50);
+    },
+
+    _dismissImagePopover: function () {
+      if (this._imagePopoverEl) {
+        this._imagePopoverEl.remove();
+        this._imagePopoverEl = null;
+        this._imagePopoverTarget = null;
+        this._debouncedPushVisualChange();
+      }
     },
 
     // -- Commands from parent --
