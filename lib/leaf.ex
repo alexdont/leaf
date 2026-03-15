@@ -95,7 +95,7 @@ defmodule Leaf do
      |> push_event("leaf-set-html:#{socket.assigns.id}", %{html: html})}
   end
 
-  def update(%{action: :set_mode, mode: mode}, socket) when mode in [:visual, :markdown] do
+  def update(%{action: :set_mode, mode: mode}, socket) when mode in [:visual, :markdown, :html] do
     {:ok,
      socket
      |> assign(:mode, mode)
@@ -380,6 +380,14 @@ defmodule Leaf do
           >
             <.icon name="hero-code-bracket" class="w-3.5 h-3.5" /> M
           </button>
+          <button
+            type="button"
+            data-mode-tab="html"
+            class={["btn btn-xs px-2", (@mode == :html && "btn-active") || "btn-ghost"]}
+            title={t("HTML mode")}
+          >
+            &lt;/&gt;
+          </button>
         </div>
       </div>
 
@@ -415,6 +423,21 @@ defmodule Leaf do
           readonly={@readonly}
           phx-debounce={@debounce}
         ><%= @content %></textarea>
+      </div>
+
+      <%!-- HTML Mode: Plain textarea --%>
+      <div data-html-wrapper class={[@mode != :html && "hidden"]}>
+        <textarea
+          id={"#{@id}-html-textarea"}
+          class={[
+            "textarea textarea-bordered w-full font-mono text-sm leading-relaxed",
+            @readonly && "opacity-70 cursor-not-allowed"
+          ]}
+          style={"min-height: #{@height}; resize: vertical;"}
+          placeholder="<p>Write HTML here...</p>"
+          readonly={@readonly}
+          phx-debounce={@debounce}
+        ><%= @visual_html %></textarea>
       </div>
     </div>
     """
@@ -484,10 +507,34 @@ defmodule Leaf do
     {:noreply, socket}
   end
 
+  def handle_event("html_content_changed", %{"content" => html}, socket) do
+    send(
+      self(),
+      {:leaf_changed,
+       %{
+         editor_id: socket.assigns.id,
+         markdown: socket.assigns.content,
+         html: html
+       }}
+    )
+
+    {:noreply, socket}
+  end
+
   def handle_event("sync_markdown_to_visual", %{"markdown" => markdown}, socket) do
     html = markdown_to_html(markdown)
 
     {:noreply, push_event(socket, "leaf-set-html:#{socket.assigns.id}", %{html: html})}
+  end
+
+  def handle_event("sync_html_to_visual", %{"html" => html}, socket) do
+    {:noreply, push_event(socket, "leaf-set-html:#{socket.assigns.id}", %{html: html})}
+  end
+
+  def handle_event("convert_markdown_to_html", %{"markdown" => markdown}, socket) do
+    html = markdown_to_html(markdown)
+
+    {:noreply, push_event(socket, "leaf-set-html-textarea:#{socket.assigns.id}", %{html: html})}
   end
 
   # -- Helpers --
@@ -507,8 +554,17 @@ defmodule Leaf do
 
   defp markdown_to_html(markdown) do
     case Earmark.as_html(markdown) do
-      {:ok, html, _} -> html
+      {:ok, html, _} -> clean_html(html)
       {:error, _, _} -> "<p>#{Phoenix.HTML.html_escape(markdown)}</p>"
     end
+  end
+
+  # Earmark outputs newlines after opening tags (e.g. "<h1>\nText</h1>\n").
+  # Collapse those so HTML mode shows clean single-line tags.
+  defp clean_html(html) do
+    html
+    |> String.replace(~r/<(h[1-6]|p|li|blockquote|a)([^>]*)>\n/, "<\\1\\2>")
+    |> String.replace(~r/\s*<\/(h[1-6]|p|li|blockquote|a)>/, "</\\1>")
+    |> String.trim()
   end
 end

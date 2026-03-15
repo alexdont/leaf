@@ -410,12 +410,14 @@
       this._readonly = this.el.dataset.readonly === "true";
       this._debounceTimer = null;
       this._markdownDebounceTimer = null;
+      this._htmlDebounceTimer = null;
 
       this._visualEl = this.el.querySelector("[data-editor-visual]");
       this._visualWrapper = this.el.querySelector("[data-visual-wrapper]");
       this._markdownWrapper = this.el.querySelector(
         "[data-markdown-wrapper]"
       );
+      this._htmlWrapper = this.el.querySelector("[data-html-wrapper]");
 
       if (this._visualEl) {
         document.execCommand("defaultParagraphSeparator", false, "p");
@@ -445,6 +447,7 @@
       this._setupLinkPopover();
       this._registerMarkdownHelpers();
       this._setupMarkdownTextarea();
+      this._setupHtmlTextarea();
 
       // Handle commands from LiveView
       this.handleEvent(
@@ -458,6 +461,17 @@
         function (payload) {
           if (this._visualEl && payload.html !== undefined) {
             this._visualEl.innerHTML = payload.html || "<p><br></p>";
+          }
+        }.bind(this)
+      );
+
+      // Handle HTML pushed to the HTML textarea (markdown→html conversion)
+      this.handleEvent(
+        "leaf-set-html-textarea:" + this._editorId,
+        function (payload) {
+          var ta = this._getHtmlTextarea();
+          if (ta && payload.html !== undefined) {
+            ta.value = payload.html;
           }
         }.bind(this)
       );
@@ -478,6 +492,9 @@
       }
       if (this._markdownDebounceTimer) {
         clearTimeout(this._markdownDebounceTimer);
+      }
+      if (this._htmlDebounceTimer) {
+        clearTimeout(this._htmlDebounceTimer);
       }
 
       this._dismissLinkPopover();
@@ -542,6 +559,36 @@
       var self = this;
       this._markdownDebounceTimer = setTimeout(function () {
         self.pushEventTo(self.el, "markdown_content_changed", {
+          editor_id: self._editorId,
+          content: content,
+        });
+      }, this._debounceMs);
+    },
+
+    // -- HTML textarea setup --
+
+    _setupHtmlTextarea: function () {
+      var self = this;
+      var textarea = this._getHtmlTextarea();
+      if (!textarea) return;
+
+      textarea.addEventListener("input", function () {
+        self._debouncedPushHtmlChange(textarea.value);
+      });
+    },
+
+    _getHtmlTextarea: function () {
+      return document.getElementById(
+        this._editorId + "-html-textarea"
+      );
+    },
+
+    _debouncedPushHtmlChange: function (content) {
+      if (this._htmlDebounceTimer)
+        clearTimeout(this._htmlDebounceTimer);
+      var self = this;
+      this._htmlDebounceTimer = setTimeout(function () {
+        self.pushEventTo(self.el, "html_content_changed", {
           editor_id: self._editorId,
           content: content,
         });
@@ -668,11 +715,8 @@
 
           self._dismissLinkPopover();
 
-          if (newMode === "markdown") {
-            self._syncVisualToMarkdown();
-          } else {
-            self._syncMarkdownToVisual();
-          }
+          var oldMode = self._mode;
+          self._syncModes(oldMode, newMode);
 
           self._mode = newMode;
           self._applyModeVisibility(newMode);
@@ -700,40 +744,81 @@
     },
 
     _applyModeVisibility: function (mode) {
-      if (mode === "visual") {
-        if (this._visualWrapper)
-          this._visualWrapper.classList.remove("hidden");
-        if (this._markdownWrapper)
-          this._markdownWrapper.classList.add("hidden");
-      } else {
-        if (this._visualWrapper)
-          this._visualWrapper.classList.add("hidden");
-        if (this._markdownWrapper)
-          this._markdownWrapper.classList.remove("hidden");
-      }
-    },
-
-    _syncVisualToMarkdown: function () {
-      if (!this._visualEl) return;
-      var html = this._visualEl.innerHTML;
-      var markdown = htmlToMarkdown(html);
-
-      var textarea = this._getMarkdownTextarea();
-      if (textarea) {
-        textarea.value = markdown;
-      }
-    },
-
-    _syncMarkdownToVisual: function () {
-      var textarea = this._getMarkdownTextarea();
-      if (!textarea) return;
-
-      var markdown = textarea.value;
-
-      this.pushEventTo(this.el, "sync_markdown_to_visual", {
-        editor_id: this._editorId,
-        markdown: markdown,
+      var wrappers = [
+        { el: this._visualWrapper, mode: "visual" },
+        { el: this._markdownWrapper, mode: "markdown" },
+        { el: this._htmlWrapper, mode: "html" },
+      ];
+      wrappers.forEach(function (w) {
+        if (!w.el) return;
+        if (w.mode === mode) {
+          w.el.classList.remove("hidden");
+        } else {
+          w.el.classList.add("hidden");
+        }
       });
+
+      // Hide formatting toolbar in html mode (raw editing)
+      var toolbarButtons = this.el.querySelector("[data-visual-toolbar-buttons]");
+      if (toolbarButtons) {
+        if (mode === "html") {
+          toolbarButtons.classList.add("hidden");
+          toolbarButtons.classList.remove("contents");
+        } else {
+          toolbarButtons.classList.remove("hidden");
+          toolbarButtons.classList.add("contents");
+        }
+      }
+    },
+
+    _syncModes: function (from, to) {
+      var self = this;
+
+      if (from === "visual") {
+        // Visual → get innerHTML
+        var visualHtml = this._visualEl ? this._visualEl.innerHTML : "";
+
+        if (to === "markdown") {
+          var mdTa = this._getMarkdownTextarea();
+          if (mdTa) mdTa.value = htmlToMarkdown(visualHtml);
+        } else if (to === "html") {
+          var htmlTa = this._getHtmlTextarea();
+          if (htmlTa) htmlTa.value = visualHtml;
+        }
+
+      } else if (from === "markdown") {
+        var mdTa = this._getMarkdownTextarea();
+        var markdown = mdTa ? mdTa.value : "";
+
+        if (to === "visual") {
+          // Server converts markdown→html, pushes back via leaf-set-html event
+          this.pushEventTo(this.el, "sync_markdown_to_visual", {
+            editor_id: this._editorId,
+            markdown: markdown,
+          });
+        } else if (to === "html") {
+          // Server converts markdown→html, pushes to html textarea
+          this.pushEventTo(this.el, "convert_markdown_to_html", {
+            editor_id: this._editorId,
+            markdown: markdown,
+          });
+        }
+
+      } else if (from === "html") {
+        var htmlTa = this._getHtmlTextarea();
+        var rawHtml = htmlTa ? htmlTa.value : "";
+
+        if (to === "visual") {
+          // Set innerHTML directly
+          if (this._visualEl) {
+            this._visualEl.innerHTML = rawHtml || "<p><br></p>";
+          }
+        } else if (to === "markdown") {
+          // Client-side HTML→markdown conversion
+          var mdTa = this._getMarkdownTextarea();
+          if (mdTa) mdTa.value = htmlToMarkdown(rawHtml);
+        }
+      }
     },
 
     _getMarkdownTextarea: function () {
