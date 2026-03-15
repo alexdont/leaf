@@ -32,7 +32,7 @@
     // Placeholder
     ".content-editor-visual:empty::before {",
     "  content: attr(data-placeholder);",
-    "  color: oklch(var(--bc) / 0.35);",
+    "  color: color-mix(in oklab, var(--color-base-content, #1f2937) 35%, transparent);",
     "  pointer-events: none;",
     "  position: absolute;",
     "}",
@@ -53,13 +53,13 @@
     ".content-editor-visual s, .content-editor-visual del, .content-editor-visual strike { text-decoration: line-through; }",
     ".content-editor-visual u { text-decoration: underline; }",
     ".content-editor-visual code {",
-    "  background: oklch(var(--b2)); border-radius: 0.25rem;",
+    "  background: var(--color-base-200, #e5e7eb); border-radius: 0.25rem;",
     "  padding: 0.1em 0.35em; font-family: monospace; font-size: 0.9em;",
     "}",
 
     // Code blocks
     ".content-editor-visual pre {",
-    "  background: oklch(var(--b2)); border-radius: 0.5rem;",
+    "  background: var(--color-base-200, #e5e7eb); border-radius: 0.5rem;",
     "  padding: 0.75rem 1rem; margin: 0.75em 0; overflow-x: auto;",
     "  font-family: monospace; font-size: 0.875rem; line-height: 1.6;",
     "}",
@@ -67,8 +67,9 @@
 
     // Blockquote
     ".content-editor-visual blockquote {",
-    "  border-left: 3px solid oklch(var(--bc) / 0.25);",
-    "  padding-left: 1rem; margin: 0.75em 0; color: oklch(var(--bc) / 0.7);",
+    "  border-left: 3px solid color-mix(in oklab, var(--color-base-content, #1f2937) 25%, transparent);",
+    "  padding-left: 1rem; margin: 0.75em 0;",
+    "  color: color-mix(in oklab, var(--color-base-content, #1f2937) 70%, transparent);",
     "}",
 
     // Lists
@@ -78,7 +79,7 @@
     ".content-editor-visual li > p { margin: 0; }",
 
     // Links
-    ".content-editor-visual a { color: oklch(var(--p)); text-decoration: underline; cursor: text; }",
+    ".content-editor-visual a { color: var(--color-primary, #3b82f6); text-decoration: underline; cursor: text; }",
     ".content-editor-visual a:hover { opacity: 0.8; }",
 
     // Images
@@ -89,12 +90,52 @@
 
     // Horizontal rule
     ".content-editor-visual hr {",
-    "  border: none; border-top: 1px solid oklch(var(--bc) / 0.15); margin: 1.5em 0;",
+    "  border: none;",
+    "  border-top: 1px solid color-mix(in oklab, var(--color-base-content, #1f2937) 15%, transparent);",
+    "  margin: 1.5em 0;",
     "}",
 
     // Selection
     ".content-editor-visual ::selection { background-color: Highlight !important; color: HighlightText !important; }",
     ".content-editor-visual *::selection { background-color: Highlight !important; color: HighlightText !important; }",
+
+    // Link popover — floating island
+    ".leaf-link-popover {",
+    "  position: absolute; z-index: 50;",
+    "  display: flex; align-items: center; gap: 0.5rem;",
+    "  background: var(--color-base-200, #e5e7eb); color: var(--color-base-content, #1f2937);",
+    "  border: 1px solid var(--color-base-300, #d1d5db);",
+    "  border-radius: 9999px; padding: 0.4rem 0.5rem 0.4rem 0.75rem;",
+    "  box-shadow: 0 4px 16px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.08);",
+    "  font-size: 0.8125rem; line-height: 1;",
+    "  animation: leaf-popover-in 0.15s ease-out;",
+    "  white-space: nowrap;",
+    "}",
+    "@keyframes leaf-popover-in { from { opacity: 0; transform: translateY(6px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }",
+    ".leaf-link-popover a {",
+    "  color: var(--color-primary, #3b82f6); text-decoration: none; max-width: 220px;",
+    "  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;",
+    "}",
+    ".leaf-link-popover a:hover { text-decoration: underline; }",
+    ".leaf-link-popover .leaf-popover-actions {",
+    "  display: flex; align-items: center; gap: 0.125rem;",
+    "  background: color-mix(in oklab, var(--color-base-content, #1f2937) 8%, transparent);",
+    "  border-radius: 9999px; padding: 0.125rem;",
+    "}",
+    ".leaf-link-popover button {",
+    "  background: none; border: none; cursor: pointer; padding: 0.3rem;",
+    "  border-radius: 9999px; color: color-mix(in oklab, var(--color-base-content, #1f2937) 50%, transparent);",
+    "  display: flex; align-items: center;",
+    "  transition: background 0.1s, color 0.1s;",
+    "}",
+    ".leaf-link-popover button:hover {",
+    "  background: color-mix(in oklab, var(--color-base-content, #1f2937) 12%, transparent);",
+    "  color: var(--color-base-content, #1f2937);",
+    "}",
+    ".leaf-link-popover .leaf-popover-divider {",
+    "  width: 1px; height: 0.875rem;",
+    "  background: color-mix(in oklab, var(--color-base-content, #1f2937) 15%, transparent);",
+    "}",
   ].join("\n");
 
   function injectStyles() {
@@ -401,6 +442,7 @@
 
       this._setupToolbar();
       this._setupModeSwitcher();
+      this._setupLinkPopover();
       this._registerMarkdownHelpers();
       this._setupMarkdownTextarea();
 
@@ -436,6 +478,11 @@
       }
       if (this._markdownDebounceTimer) {
         clearTimeout(this._markdownDebounceTimer);
+      }
+
+      this._dismissLinkPopover();
+      if (this._onDocClickForPopover) {
+        document.removeEventListener("mousedown", this._onDocClickForPopover);
       }
 
       // Clean up global markdown helper functions
@@ -505,6 +552,7 @@
 
     _onVisualInput: function () {
       if (this._mode !== "visual") return;
+      this._dismissLinkPopover();
       this._debouncedPushVisualChange();
     },
 
@@ -617,6 +665,8 @@
           e.preventDefault();
           var newMode = tab.dataset.modeTab;
           if (newMode === self._mode) return;
+
+          self._dismissLinkPopover();
 
           if (newMode === "markdown") {
             self._syncVisualToMarkdown();
@@ -1010,6 +1060,153 @@
         node = node.parentNode;
       }
       return false;
+    },
+
+    // -- Link popover --
+
+    _setupLinkPopover: function () {
+      if (!this._visualEl) return;
+      var self = this;
+
+      this._linkPopoverEl = null;
+      this._linkPopoverAnchor = null;
+
+      this._visualEl.addEventListener("click", function (e) {
+        if (self._readonly) return;
+
+        // Walk up from click target to find an <a> inside the editor
+        var node = e.target;
+        var anchor = null;
+        while (node && node !== self._visualEl) {
+          if (node.tagName && node.tagName.toLowerCase() === "a") {
+            anchor = node;
+            break;
+          }
+          node = node.parentNode;
+        }
+
+        if (anchor) {
+          e.preventDefault();
+          self._showLinkPopover(anchor);
+        } else {
+          self._dismissLinkPopover();
+        }
+      });
+
+      // Dismiss when clicking outside the editor + popover
+      this._onDocClickForPopover = function (e) {
+        if (self._linkPopoverEl && !self._linkPopoverEl.contains(e.target) &&
+            !self._visualEl.contains(e.target)) {
+          self._dismissLinkPopover();
+        }
+      };
+      document.addEventListener("mousedown", this._onDocClickForPopover);
+    },
+
+    _showLinkPopover: function (anchorEl) {
+      this._dismissLinkPopover();
+      this._linkPopoverAnchor = anchorEl;
+
+      var href = anchorEl.getAttribute("href") || "";
+      var self = this;
+
+      // Build popover
+      var pop = document.createElement("div");
+      pop.className = "leaf-link-popover";
+
+      // Link icon
+      var linkIcon = document.createElement("span");
+      linkIcon.style.cssText = "display:flex;align-items:center;opacity:0.5;flex-shrink:0;";
+      linkIcon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="13" height="13"><path fill-rule="evenodd" d="M8.914 6.025a.75.75 0 0 1 1.06 0 3.5 3.5 0 0 1 0 4.95l-2 2a3.5 3.5 0 0 1-5.396-4.402.75.75 0 0 1 1.251.827 2 2 0 0 0 3.085 2.514l2-2a2 2 0 0 0 0-2.828.75.75 0 0 1 0-1.06Z" clip-rule="evenodd"/><path fill-rule="evenodd" d="M7.086 9.975a.75.75 0 0 1-1.06 0 3.5 3.5 0 0 1 0-4.95l2-2a3.5 3.5 0 0 1 5.396 4.402.75.75 0 0 1-1.251-.827 2 2 0 0 0-3.085-2.514l-2 2a2 2 0 0 0 0 2.828.75.75 0 0 1 0 1.06Z" clip-rule="evenodd"/></svg>';
+      pop.appendChild(linkIcon);
+
+      // URL display/link
+      var urlLink = document.createElement("a");
+      urlLink.href = href;
+      urlLink.target = "_blank";
+      urlLink.rel = "noopener";
+      urlLink.textContent = href || "(no url)";
+      urlLink.title = href;
+      pop.appendChild(urlLink);
+
+      // Actions group (pill within pill)
+      var actions = document.createElement("span");
+      actions.className = "leaf-popover-actions";
+
+      // Edit button
+      var editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.title = "Edit link";
+      editBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="13" height="13"><path d="M13.488 2.513a1.75 1.75 0 0 0-2.475 0L3.05 10.476a.75.75 0 0 0-.188.335l-.95 3.507a.75.75 0 0 0 .92.92l3.507-.95a.75.75 0 0 0 .335-.188l7.963-7.963a1.75 1.75 0 0 0 0-2.475l-.149-.149ZM11.72 3.22a.25.25 0 0 1 .354 0l.149.149a.25.25 0 0 1 0 .354L5.106 10.84l-1.575.427.427-1.575 7.11-7.11.652-.362Z"/></svg>';
+      editBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      editBtn.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var newUrl = prompt("Edit URL:", href);
+        if (newUrl === null) return;
+        if (newUrl === "") {
+          self._unwrapLink(anchorEl);
+          self._dismissLinkPopover();
+        } else {
+          anchorEl.setAttribute("href", newUrl);
+          urlLink.href = newUrl;
+          urlLink.textContent = newUrl;
+          urlLink.title = newUrl;
+          href = newUrl;
+        }
+        self._debouncedPushVisualChange();
+      });
+      actions.appendChild(editBtn);
+
+      // Divider inside actions
+      var d1 = document.createElement("span");
+      d1.className = "leaf-popover-divider";
+      actions.appendChild(d1);
+
+      // Remove button
+      var removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.title = "Remove link";
+      removeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="13" height="13"><path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L6.94 8l-1.72 1.72a.75.75 0 1 0 1.06 1.06L8 9.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L9.06 8l1.72-1.72a.75.75 0 0 0-1.06-1.06L8 6.94 6.28 5.22Z"/></svg>';
+      removeBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      removeBtn.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        self._unwrapLink(anchorEl);
+        self._dismissLinkPopover();
+        self._debouncedPushVisualChange();
+      });
+      actions.appendChild(removeBtn);
+
+      pop.appendChild(actions);
+
+      // Position below the anchor element
+      this.el.style.position = "relative";
+      var editorRect = this.el.getBoundingClientRect();
+      var anchorRect = anchorEl.getBoundingClientRect();
+
+      pop.style.left = (anchorRect.left - editorRect.left) + "px";
+      pop.style.top = (anchorRect.bottom - editorRect.top + 8) + "px";
+
+      this.el.appendChild(pop);
+      this._linkPopoverEl = pop;
+    },
+
+    _dismissLinkPopover: function () {
+      if (this._linkPopoverEl) {
+        this._linkPopoverEl.remove();
+        this._linkPopoverEl = null;
+        this._linkPopoverAnchor = null;
+      }
+    },
+
+    _unwrapLink: function (anchorEl) {
+      // Replace the <a> with its text content
+      var parent = anchorEl.parentNode;
+      while (anchorEl.firstChild) {
+        parent.insertBefore(anchorEl.firstChild, anchorEl);
+      }
+      parent.removeChild(anchorEl);
     },
 
     // -- Commands from parent --
