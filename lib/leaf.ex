@@ -367,26 +367,29 @@ defmodule Leaf do
           <button
             type="button"
             data-mode-tab="visual"
-            class={["btn btn-xs px-2", (@mode == :visual && "btn-active") || "btn-ghost"]}
+            class={["btn btn-xs px-2 gap-1", (@mode == :visual && "btn-active") || "btn-ghost"]}
             title={t("Visual mode")}
           >
-            <.icon name="hero-eye" class="w-3.5 h-3.5" /> V
+            <.icon name="hero-eye" class="w-3.5 h-3.5" /> {t("Visual")}
           </button>
           <button
             type="button"
             data-mode-tab="markdown"
-            class={["btn btn-xs px-2", (@mode == :markdown && "btn-active") || "btn-ghost"]}
+            class={["btn btn-xs px-2 gap-1", (@mode == :markdown && "btn-active") || "btn-ghost"]}
             title={t("Markdown mode")}
           >
-            <.icon name="hero-code-bracket" class="w-3.5 h-3.5" /> M
+            <svg viewBox="0 0 208 128" fill="currentColor" class="w-4 h-3">
+              <path d="M30 98V30h20l20 25 20-25h20v68H90V59L70 84 50 59v39zm125 0l-30-33h20V30h20v35h20z" />
+            </svg>
+            {t("Markdown")}
           </button>
           <button
             type="button"
             data-mode-tab="html"
-            class={["btn btn-xs px-2", (@mode == :html && "btn-active") || "btn-ghost"]}
+            class={["btn btn-xs px-2 gap-1", (@mode == :html && "btn-active") || "btn-ghost"]}
             title={t("HTML mode")}
           >
-            &lt;/&gt;
+            &lt;/&gt; {t("HTML")}
           </button>
         </div>
       </div>
