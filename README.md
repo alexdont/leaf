@@ -2,6 +2,8 @@
 
 Dual-mode visual WYSIWYG + markdown editor for Phoenix LiveView.
 
+![Leaf Editor](priv/static/images/leaf-editor.png)
+
 - **Visual mode**: contenteditable div with toolbar formatting (bold, italic, headings, lists, links, code blocks, etc.)
 - **Markdown mode**: plain textarea with toolbar support
 - Content syncs between modes via [Earmark](https://hex.pm/packages/earmark) and client-side HTML→Markdown conversion

@@ -2,7 +2,7 @@ defmodule Leaf.MixProject do
   use Mix.Project
 
   @version "0.1.0"
-  @source_url "https://github.com/phoenixkit/leaf"
+  @source_url "https://github.com/alexdont/leaf"
 
   def project do
     [
