@@ -1,0 +1,1047 @@
+/**
+ * Leaf — Dual Mode Content Editor (Visual + Markdown)
+ *
+ * Standalone vanilla JS. No build step, no npm dependencies.
+ * Visual mode uses contenteditable + execCommand.
+ * Markdown mode uses a plain textarea with toolbar support.
+ * Content syncs between modes via server-side conversion (Earmark) and
+ * client-side HTML→Markdown conversion.
+ *
+ * SETUP: Add the hook to your app.js:
+ *
+ *   import "../../../deps/leaf/priv/static/assets/leaf.js"
+ *
+ *   let Hooks = {
+ *     Leaf: window.LeafHooks.Leaf,
+ *     // ... your other hooks
+ *   }
+ */
+(function () {
+  "use strict";
+
+  if (window.LeafEditorLoaded) return;
+  window.LeafEditorLoaded = true;
+
+  window.LeafHooks = window.LeafHooks || {};
+
+  // =========================================================================
+  // Inject CSS styles for the visual editor
+  // =========================================================================
+
+  var EDITOR_CSS = [
+    // Placeholder
+    ".content-editor-visual:empty::before {",
+    "  content: attr(data-placeholder);",
+    "  color: oklch(var(--bc) / 0.35);",
+    "  pointer-events: none;",
+    "  position: absolute;",
+    "}",
+    ".content-editor-visual { position: relative; -webkit-user-select: text; user-select: text; }",
+
+    // Typography
+    ".content-editor-visual h1 { font-size: 2em; font-weight: 700; margin: 0.67em 0; line-height: 1.2; }",
+    ".content-editor-visual h2 { font-size: 1.5em; font-weight: 600; margin: 0.6em 0; line-height: 1.3; }",
+    ".content-editor-visual h3 { font-size: 1.25em; font-weight: 600; margin: 0.5em 0; line-height: 1.4; }",
+    ".content-editor-visual h4 { font-size: 1.1em; font-weight: 600; margin: 0.4em 0; line-height: 1.4; }",
+    ".content-editor-visual p { margin: 0.5em 0; }",
+    ".content-editor-visual p:first-child, .content-editor-visual h1:first-child,",
+    "  .content-editor-visual h2:first-child, .content-editor-visual h3:first-child { margin-top: 0; }",
+
+    // Inline
+    ".content-editor-visual strong, .content-editor-visual b { font-weight: 700; }",
+    ".content-editor-visual em, .content-editor-visual i { font-style: italic; }",
+    ".content-editor-visual s, .content-editor-visual del, .content-editor-visual strike { text-decoration: line-through; }",
+    ".content-editor-visual u { text-decoration: underline; }",
+    ".content-editor-visual code {",
+    "  background: oklch(var(--b2)); border-radius: 0.25rem;",
+    "  padding: 0.1em 0.35em; font-family: monospace; font-size: 0.9em;",
+    "}",
+
+    // Code blocks
+    ".content-editor-visual pre {",
+    "  background: oklch(var(--b2)); border-radius: 0.5rem;",
+    "  padding: 0.75rem 1rem; margin: 0.75em 0; overflow-x: auto;",
+    "  font-family: monospace; font-size: 0.875rem; line-height: 1.6;",
+    "}",
+    ".content-editor-visual pre code { background: none; padding: 0; border-radius: 0; font-size: inherit; }",
+
+    // Blockquote
+    ".content-editor-visual blockquote {",
+    "  border-left: 3px solid oklch(var(--bc) / 0.25);",
+    "  padding-left: 1rem; margin: 0.75em 0; color: oklch(var(--bc) / 0.7);",
+    "}",
+
+    // Lists
+    ".content-editor-visual ul { list-style-type: disc; padding-left: 1.5rem; margin: 0.5em 0; }",
+    ".content-editor-visual ol { list-style-type: decimal; padding-left: 1.5rem; margin: 0.5em 0; }",
+    ".content-editor-visual li { margin: 0.2em 0; }",
+    ".content-editor-visual li > p { margin: 0; }",
+
+    // Links
+    ".content-editor-visual a { color: oklch(var(--p)); text-decoration: underline; cursor: text; }",
+    ".content-editor-visual a:hover { opacity: 0.8; }",
+
+    // Images
+    ".content-editor-visual img {",
+    "  max-width: 100%; height: auto; border-radius: 0.5rem; margin: 0.75em 0;",
+    "  cursor: default;",
+    "}",
+
+    // Horizontal rule
+    ".content-editor-visual hr {",
+    "  border: none; border-top: 1px solid oklch(var(--bc) / 0.15); margin: 1.5em 0;",
+    "}",
+
+    // Selection
+    ".content-editor-visual ::selection { background-color: Highlight !important; color: HighlightText !important; }",
+    ".content-editor-visual *::selection { background-color: Highlight !important; color: HighlightText !important; }",
+  ].join("\n");
+
+  function injectStyles() {
+    if (document.getElementById("leaf-content-editor-css")) return;
+    var style = document.createElement("style");
+    style.id = "leaf-content-editor-css";
+    style.textContent = EDITOR_CSS;
+    document.head.appendChild(style);
+  }
+
+  // =========================================================================
+  // HTML → Markdown converter (pure DOM walking)
+  // =========================================================================
+
+  function htmlToMarkdown(html) {
+    var container = document.createElement("div");
+    container.innerHTML = html;
+    return nodeToMarkdown(container).trim();
+  }
+
+  function nodeToMarkdown(node) {
+    var result = "";
+    for (var i = 0; i < node.childNodes.length; i++) {
+      result += convertNode(node.childNodes[i]);
+    }
+    return result;
+  }
+
+  function convertNode(node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return node.textContent;
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return "";
+    }
+
+    var tag = node.tagName.toLowerCase();
+    var inner = nodeToMarkdown(node);
+
+    switch (tag) {
+      case "h1":
+        return "\n# " + inner.trim() + "\n\n";
+      case "h2":
+        return "\n## " + inner.trim() + "\n\n";
+      case "h3":
+        return "\n### " + inner.trim() + "\n\n";
+      case "h4":
+        return "\n#### " + inner.trim() + "\n\n";
+      case "h5":
+        return "\n##### " + inner.trim() + "\n\n";
+      case "h6":
+        return "\n###### " + inner.trim() + "\n\n";
+
+      case "p":
+        return inner.trim() + "\n\n";
+
+      case "br":
+        return "\n";
+
+      case "strong":
+      case "b":
+        return "**" + inner + "**";
+
+      case "em":
+      case "i":
+        return "*" + inner + "*";
+
+      case "s":
+      case "del":
+      case "strike":
+        return "~~" + inner + "~~";
+
+      case "code":
+        if (
+          node.parentElement &&
+          node.parentElement.tagName.toLowerCase() === "pre"
+        ) {
+          return inner;
+        }
+        return "`" + inner + "`";
+
+      case "pre":
+        return "\n```\n" + inner.trim() + "\n```\n\n";
+
+      case "a":
+        var href = node.getAttribute("href") || "";
+        return "[" + inner + "](" + href + ")";
+
+      case "img":
+        var src = node.getAttribute("src") || "";
+        var alt = node.getAttribute("alt") || "";
+        return "![" + alt + "](" + src + ")";
+
+      case "blockquote":
+        return (
+          "\n" +
+          inner
+            .trim()
+            .split("\n")
+            .map(function (line) {
+              return "> " + line;
+            })
+            .join("\n") +
+          "\n\n"
+        );
+
+      case "ul":
+        return "\n" + convertList(node, "ul") + "\n";
+
+      case "ol":
+        return "\n" + convertList(node, "ol") + "\n";
+
+      case "li":
+        return inner;
+
+      case "hr":
+        return "\n---\n\n";
+
+      case "div":
+        return inner + "\n";
+
+      default:
+        return inner;
+    }
+  }
+
+  function convertList(listNode, type) {
+    var items = [];
+    var index = 1;
+    for (var i = 0; i < listNode.children.length; i++) {
+      var child = listNode.children[i];
+      if (child.tagName.toLowerCase() === "li") {
+        var prefix = type === "ol" ? index + ". " : "- ";
+        var content = nodeToMarkdown(child).trim();
+        items.push(prefix + content);
+        index++;
+      }
+    }
+    return items.join("\n");
+  }
+
+  // =========================================================================
+  // Clean paste — strips Word/Google Docs junk, keeps structure
+  // =========================================================================
+
+  function cleanPastedHtml(html) {
+    var container = document.createElement("div");
+    container.innerHTML = html;
+
+    container.querySelectorAll("[style]").forEach(function (el) {
+      el.removeAttribute("style");
+    });
+
+    container.querySelectorAll("[class]").forEach(function (el) {
+      el.removeAttribute("class");
+    });
+
+    container.querySelectorAll("span").forEach(function (span) {
+      var parent = span.parentNode;
+      while (span.firstChild) {
+        parent.insertBefore(span.firstChild, span);
+      }
+      parent.removeChild(span);
+    });
+
+    container
+      .querySelectorAll("meta, style, link, script, title, xml")
+      .forEach(function (el) {
+        el.remove();
+      });
+
+    container.querySelectorAll("[id]").forEach(function (el) {
+      el.removeAttribute("id");
+    });
+
+    return container.innerHTML;
+  }
+
+  // =========================================================================
+  // Markdown textarea helpers
+  // =========================================================================
+
+  function markdownFormat(textarea, before, after, pushFn) {
+    var start = textarea.selectionStart;
+    var end = textarea.selectionEnd;
+    var text = textarea.value;
+    var selected = text.substring(start, end);
+
+    textarea.value =
+      text.substring(0, start) + before + selected + after + text.substring(end);
+    textarea.selectionStart = start + before.length;
+    textarea.selectionEnd = end + before.length;
+    textarea.focus();
+    if (pushFn) pushFn(textarea.value);
+  }
+
+  function markdownLinePrefix(textarea, prefix, pushFn) {
+    var start = textarea.selectionStart;
+    var text = textarea.value;
+
+    // Find start of current line
+    var lineStart = text.lastIndexOf("\n", start - 1) + 1;
+    var lineEnd = text.indexOf("\n", start);
+    if (lineEnd === -1) lineEnd = text.length;
+
+    var line = text.substring(lineStart, lineEnd);
+
+    // Toggle: if line already starts with prefix, remove it
+    if (line.startsWith(prefix)) {
+      textarea.value =
+        text.substring(0, lineStart) +
+        line.substring(prefix.length) +
+        text.substring(lineEnd);
+      textarea.selectionStart = start - prefix.length;
+      textarea.selectionEnd = start - prefix.length;
+    } else {
+      // Remove existing heading prefixes before adding new one
+      var cleaned = line.replace(/^#{1,6}\s|^[-*+]\s|^\d+\.\s|^>\s/, "");
+      textarea.value =
+        text.substring(0, lineStart) + prefix + cleaned + text.substring(lineEnd);
+      var offset = prefix.length + cleaned.length - line.length;
+      textarea.selectionStart = start + offset;
+      textarea.selectionEnd = start + offset;
+    }
+
+    textarea.focus();
+    if (pushFn) pushFn(textarea.value);
+  }
+
+  function markdownLink(textarea, pushFn) {
+    var start = textarea.selectionStart;
+    var end = textarea.selectionEnd;
+    var text = textarea.value;
+    var selected = text.substring(start, end);
+
+    var url = prompt("Enter URL:", "https://");
+    if (url === null) return;
+
+    var linkText = selected || "link text";
+    var md = "[" + linkText + "](" + url + ")";
+
+    textarea.value = text.substring(0, start) + md + text.substring(end);
+    textarea.selectionStart = start + 1;
+    textarea.selectionEnd = start + 1 + linkText.length;
+    textarea.focus();
+    if (pushFn) pushFn(textarea.value);
+  }
+
+  function markdownInsert(textarea, snippet, pushFn) {
+    var start = textarea.selectionStart;
+    var text = textarea.value;
+
+    textarea.value = text.substring(0, start) + snippet + text.substring(start);
+    textarea.selectionStart = start + snippet.length;
+    textarea.selectionEnd = start + snippet.length;
+    textarea.focus();
+    if (pushFn) pushFn(textarea.value);
+  }
+
+  // =========================================================================
+  // LiveView Hook
+  // =========================================================================
+
+  window.LeafHooks.Leaf = {
+    mounted() {
+      injectStyles();
+
+      this._editorId = this.el.dataset.editorId;
+      this._mode = this.el.dataset.mode || "visual";
+      this._debounceMs = parseInt(this.el.dataset.debounce || "400", 10);
+      this._readonly = this.el.dataset.readonly === "true";
+      this._debounceTimer = null;
+      this._markdownDebounceTimer = null;
+
+      this._visualEl = this.el.querySelector("[data-editor-visual]");
+      this._visualWrapper = this.el.querySelector("[data-visual-wrapper]");
+      this._markdownWrapper = this.el.querySelector(
+        "[data-markdown-wrapper]"
+      );
+
+      if (this._visualEl) {
+        document.execCommand("defaultParagraphSeparator", false, "p");
+
+        this._visualEl.addEventListener(
+          "input",
+          this._onVisualInput.bind(this)
+        );
+
+        this._visualEl.addEventListener(
+          "keydown",
+          this._onVisualKeydown.bind(this)
+        );
+
+        this._visualEl.addEventListener("paste", this._onPaste.bind(this));
+
+        if (
+          this._visualEl.innerHTML.trim() === "" ||
+          this._visualEl.innerHTML === "<br>"
+        ) {
+          this._visualEl.innerHTML = "<p><br></p>";
+        }
+      }
+
+      this._setupToolbar();
+      this._setupModeSwitcher();
+      this._registerMarkdownHelpers();
+      this._setupMarkdownTextarea();
+
+      // Handle commands from LiveView
+      this.handleEvent(
+        "leaf-command:" + this._editorId,
+        this._handleCommand.bind(this)
+      );
+
+      // Handle HTML content pushed from server (markdown→visual sync)
+      this.handleEvent(
+        "leaf-set-html:" + this._editorId,
+        function (payload) {
+          if (this._visualEl && payload.html !== undefined) {
+            this._visualEl.innerHTML = payload.html || "<p><br></p>";
+          }
+        }.bind(this)
+      );
+    },
+
+    updated() {
+      if (!this._visualEl) return;
+      var newReadonly = this.el.dataset.readonly === "true";
+      if (newReadonly !== this._readonly) {
+        this._readonly = newReadonly;
+        this._visualEl.contentEditable = !newReadonly;
+      }
+    },
+
+    destroyed() {
+      if (this._debounceTimer) {
+        clearTimeout(this._debounceTimer);
+      }
+      if (this._markdownDebounceTimer) {
+        clearTimeout(this._markdownDebounceTimer);
+      }
+
+      // Clean up global markdown helper functions
+      var gid = this._editorId.replace(/-/g, "_") + "_markdown";
+      delete window["markdownFormat_" + gid];
+      delete window["markdownLinePrefix_" + gid];
+      delete window["markdownLink_" + gid];
+      delete window["markdownEditorInsert_" + gid];
+    },
+
+    // -- Markdown textarea setup --
+
+    _registerMarkdownHelpers: function () {
+      var self = this;
+      var gid = this._editorId.replace(/-/g, "_") + "_markdown";
+
+      var pushFn = function (value) {
+        self._debouncedPushMarkdownChange(value);
+      };
+
+      window["markdownFormat_" + gid] = function (before, after) {
+        var ta = self._getMarkdownTextarea();
+        if (ta) markdownFormat(ta, before, after, pushFn);
+      };
+
+      window["markdownLinePrefix_" + gid] = function (prefix) {
+        var ta = self._getMarkdownTextarea();
+        if (ta) markdownLinePrefix(ta, prefix, pushFn);
+      };
+
+      window["markdownLink_" + gid] = function () {
+        var ta = self._getMarkdownTextarea();
+        if (ta) markdownLink(ta, pushFn);
+      };
+
+      window["markdownEditorInsert_" + gid] = function (snippet) {
+        var ta = self._getMarkdownTextarea();
+        if (ta) markdownInsert(ta, snippet, pushFn);
+      };
+    },
+
+    _setupMarkdownTextarea: function () {
+      var self = this;
+      var textarea = this._getMarkdownTextarea();
+      if (!textarea) return;
+
+      this._markdownInputHandler = function () {
+        self._debouncedPushMarkdownChange(textarea.value);
+      };
+
+      textarea.addEventListener("input", this._markdownInputHandler);
+    },
+
+    _debouncedPushMarkdownChange: function (content) {
+      if (this._markdownDebounceTimer)
+        clearTimeout(this._markdownDebounceTimer);
+      var self = this;
+      this._markdownDebounceTimer = setTimeout(function () {
+        self.pushEventTo(self.el, "markdown_content_changed", {
+          editor_id: self._editorId,
+          content: content,
+        });
+      }, this._debounceMs);
+    },
+
+    // -- Event handlers --
+
+    _onVisualInput: function () {
+      if (this._mode !== "visual") return;
+      this._debouncedPushVisualChange();
+    },
+
+    _onVisualKeydown: function (e) {
+      if (this._readonly) return;
+
+      var mod = e.ctrlKey || e.metaKey;
+
+      if (mod && e.key === "b") {
+        e.preventDefault();
+        document.execCommand("bold", false, null);
+        this._updateToolbarState();
+        return;
+      }
+      if (mod && e.key === "i") {
+        e.preventDefault();
+        document.execCommand("italic", false, null);
+        this._updateToolbarState();
+        return;
+      }
+      if (mod && e.key === "u") {
+        e.preventDefault();
+        document.execCommand("underline", false, null);
+        return;
+      }
+      if (mod && e.key === "k") {
+        e.preventDefault();
+        this._insertLink();
+        return;
+      }
+      if (mod && e.shiftKey && e.key === "x") {
+        e.preventDefault();
+        document.execCommand("strikeThrough", false, null);
+        this._updateToolbarState();
+        return;
+      }
+
+      if (e.key === "Tab" && !mod) {
+        if (
+          document.queryCommandState("insertUnorderedList") ||
+          document.queryCommandState("insertOrderedList")
+        ) {
+          e.preventDefault();
+          if (e.shiftKey) {
+            document.execCommand("outdent", false, null);
+          } else {
+            document.execCommand("indent", false, null);
+          }
+          return;
+        }
+      }
+
+      if (e.key === "Enter" && !e.shiftKey) {
+        var block = this._getCurrentBlock();
+        if (
+          block &&
+          block.tagName &&
+          block.tagName.toLowerCase() === "blockquote"
+        ) {
+          var text = block.textContent.trim();
+          if (text === "") {
+            e.preventDefault();
+            document.execCommand("formatBlock", false, "p");
+            return;
+          }
+        }
+      }
+    },
+
+    _onPaste: function (e) {
+      var clipboardData = e.clipboardData || window.clipboardData;
+      if (!clipboardData) return;
+
+      var html = clipboardData.getData("text/html");
+      if (html) {
+        e.preventDefault();
+        var cleaned = cleanPastedHtml(html);
+        document.execCommand("insertHTML", false, cleaned);
+        return;
+      }
+    },
+
+    // -- Push content to LiveView --
+
+    _debouncedPushVisualChange: function () {
+      if (this._debounceTimer) clearTimeout(this._debounceTimer);
+      this._debounceTimer = setTimeout(
+        function () {
+          if (!this._visualEl) return;
+          var html = this._visualEl.innerHTML;
+          var markdown = htmlToMarkdown(html);
+          this.pushEventTo(this.el, "content_changed", {
+            editor_id: this._editorId,
+            html: html,
+            markdown: markdown,
+          });
+        }.bind(this),
+        this._debounceMs
+      );
+    },
+
+    // -- Mode switching --
+
+    _setupModeSwitcher: function () {
+      var self = this;
+      var tabs = this.el.querySelectorAll("[data-mode-tab]");
+
+      tabs.forEach(function (tab) {
+        tab.addEventListener("click", function (e) {
+          e.preventDefault();
+          var newMode = tab.dataset.modeTab;
+          if (newMode === self._mode) return;
+
+          if (newMode === "markdown") {
+            self._syncVisualToMarkdown();
+          } else {
+            self._syncMarkdownToVisual();
+          }
+
+          self._mode = newMode;
+          self._applyModeVisibility(newMode);
+
+          tabs.forEach(function (t) {
+            if (t.dataset.modeTab === newMode) {
+              t.classList.add("btn-active");
+              t.classList.remove("btn-ghost");
+            } else {
+              t.classList.remove("btn-active");
+              t.classList.add("btn-ghost");
+            }
+          });
+
+          var currentMarkdown = "";
+          var ta = self._getMarkdownTextarea();
+          if (ta) currentMarkdown = ta.value;
+          self.pushEventTo(self.el, "mode_changed", {
+            editor_id: self._editorId,
+            mode: newMode,
+            content: currentMarkdown,
+          });
+        });
+      });
+    },
+
+    _applyModeVisibility: function (mode) {
+      if (mode === "visual") {
+        if (this._visualWrapper)
+          this._visualWrapper.classList.remove("hidden");
+        if (this._markdownWrapper)
+          this._markdownWrapper.classList.add("hidden");
+      } else {
+        if (this._visualWrapper)
+          this._visualWrapper.classList.add("hidden");
+        if (this._markdownWrapper)
+          this._markdownWrapper.classList.remove("hidden");
+      }
+    },
+
+    _syncVisualToMarkdown: function () {
+      if (!this._visualEl) return;
+      var html = this._visualEl.innerHTML;
+      var markdown = htmlToMarkdown(html);
+
+      var textarea = this._getMarkdownTextarea();
+      if (textarea) {
+        textarea.value = markdown;
+      }
+    },
+
+    _syncMarkdownToVisual: function () {
+      var textarea = this._getMarkdownTextarea();
+      if (!textarea) return;
+
+      var markdown = textarea.value;
+
+      this.pushEventTo(this.el, "sync_markdown_to_visual", {
+        editor_id: this._editorId,
+        markdown: markdown,
+      });
+    },
+
+    _getMarkdownTextarea: function () {
+      return document.getElementById(
+        this._editorId + "-markdown-textarea"
+      );
+    },
+
+    // -- Toolbar --
+
+    _setupToolbar: function () {
+      var self = this;
+      var buttons = this.el.querySelectorAll("[data-toolbar-action]");
+
+      buttons.forEach(function (btn) {
+        btn.addEventListener("mousedown", function (e) {
+          e.preventDefault();
+        });
+
+        btn.addEventListener("click", function (e) {
+          e.preventDefault();
+          var action = btn.dataset.toolbarAction;
+          self._execToolbarAction(action);
+        });
+      });
+
+      document.addEventListener("selectionchange", function () {
+        if (self._mode === "visual" && self._visualEl) {
+          var sel = window.getSelection();
+          if (
+            sel.rangeCount > 0 &&
+            self._visualEl.contains(sel.anchorNode)
+          ) {
+            self._updateToolbarState();
+          }
+        }
+      });
+    },
+
+    _execToolbarAction: function (action) {
+      if (this._readonly) return;
+
+      if (this._mode === "markdown") {
+        this._execMarkdownToolbarAction(action);
+        return;
+      }
+
+      if (!this._visualEl) return;
+      this._visualEl.focus();
+
+      switch (action) {
+        case "bold":
+          document.execCommand("bold", false, null);
+          break;
+        case "italic":
+          document.execCommand("italic", false, null);
+          break;
+        case "strike":
+          document.execCommand("strikeThrough", false, null);
+          break;
+        case "code":
+          this._wrapSelectionWith("code");
+          break;
+        case "heading1":
+          this._toggleHeading("h1");
+          break;
+        case "heading2":
+          this._toggleHeading("h2");
+          break;
+        case "heading3":
+          this._toggleHeading("h3");
+          break;
+        case "heading4":
+          this._toggleHeading("h4");
+          break;
+        case "bulletList":
+          document.execCommand("insertUnorderedList", false, null);
+          break;
+        case "orderedList":
+          document.execCommand("insertOrderedList", false, null);
+          break;
+        case "blockquote":
+          this._toggleBlockquote();
+          break;
+        case "codeBlock":
+          document.execCommand("formatBlock", false, "pre");
+          break;
+        case "horizontalRule":
+          document.execCommand("insertHorizontalRule", false, null);
+          break;
+        case "link":
+          this._insertLink();
+          break;
+        case "insert-image":
+          this.pushEventTo(this.el, "insert_request", {
+            editor_id: this._editorId,
+            type: "image",
+          });
+          break;
+        case "insert-video":
+          this.pushEventTo(this.el, "insert_request", {
+            editor_id: this._editorId,
+            type: "video",
+          });
+          break;
+        case "undo":
+          document.execCommand("undo", false, null);
+          break;
+        case "redo":
+          document.execCommand("redo", false, null);
+          break;
+        case "removeFormat":
+          document.execCommand("removeFormat", false, null);
+          document.execCommand("formatBlock", false, "p");
+          break;
+      }
+
+      this._updateToolbarState();
+      this._debouncedPushVisualChange();
+    },
+
+    _execMarkdownToolbarAction: function (action) {
+      var gid = this._editorId.replace(/-/g, "_") + "_markdown";
+      var fmt = window["markdownFormat_" + gid];
+      var pfx = window["markdownLinePrefix_" + gid];
+      var lnk = window["markdownLink_" + gid];
+      var ins = window["markdownEditorInsert_" + gid];
+
+      switch (action) {
+        case "bold": if (fmt) fmt("**", "**"); break;
+        case "italic": if (fmt) fmt("*", "*"); break;
+        case "strike": if (fmt) fmt("~~", "~~"); break;
+        case "code": if (fmt) fmt("`", "`"); break;
+        case "heading1": if (pfx) pfx("# "); break;
+        case "heading2": if (pfx) pfx("## "); break;
+        case "heading3": if (pfx) pfx("### "); break;
+        case "heading4": if (pfx) pfx("#### "); break;
+        case "bulletList": if (pfx) pfx("- "); break;
+        case "orderedList": if (pfx) pfx("1. "); break;
+        case "blockquote": if (pfx) pfx("> "); break;
+        case "codeBlock": if (fmt) fmt("```\n", "\n```"); break;
+        case "horizontalRule": if (ins) ins("\n---\n"); break;
+        case "link": if (lnk) lnk(); break;
+        case "insert-image": this.pushEventTo(this.el, "insert_request", { editor_id: this._editorId, type: "image" }); break;
+        case "insert-video": this.pushEventTo(this.el, "insert_request", { editor_id: this._editorId, type: "video" }); break;
+        case "removeFormat": break;
+        case "undo": break;
+        case "redo": break;
+      }
+    },
+
+    _toggleHeading: function (tag) {
+      var block = this._getCurrentBlock();
+      if (block && block.tagName && block.tagName.toLowerCase() === tag) {
+        document.execCommand("formatBlock", false, "p");
+      } else {
+        document.execCommand("formatBlock", false, tag);
+      }
+    },
+
+    _toggleBlockquote: function () {
+      var block = this._getCurrentBlock();
+      if (
+        block &&
+        block.tagName &&
+        block.tagName.toLowerCase() === "blockquote"
+      ) {
+        document.execCommand("formatBlock", false, "p");
+      } else {
+        document.execCommand("formatBlock", false, "blockquote");
+      }
+    },
+
+    _getCurrentBlock: function () {
+      var sel = window.getSelection();
+      if (!sel.rangeCount) return null;
+      var node = sel.anchorNode;
+      while (node && node !== this._visualEl) {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          var display = window.getComputedStyle(node).display;
+          if (display === "block" || display === "list-item") {
+            return node;
+          }
+        }
+        node = node.parentNode;
+      }
+      return null;
+    },
+
+    _insertLink: function () {
+      var selection = window.getSelection();
+      var currentHref = "";
+
+      if (selection.rangeCount > 0) {
+        var node = selection.anchorNode;
+        while (node && node !== this._visualEl) {
+          if (node.tagName && node.tagName.toLowerCase() === "a") {
+            currentHref = node.getAttribute("href") || "";
+            break;
+          }
+          node = node.parentNode;
+        }
+      }
+
+      var url = prompt("Enter URL:", currentHref || "https://");
+      if (url === null) return;
+
+      if (url === "") {
+        document.execCommand("unlink", false, null);
+      } else {
+        document.execCommand("createLink", false, url);
+      }
+    },
+
+    _wrapSelectionWith: function (tagName) {
+      var selection = window.getSelection();
+      if (!selection.rangeCount) return;
+
+      var range = selection.getRangeAt(0);
+      var selectedText = range.toString();
+
+      if (selectedText.length === 0) return;
+
+      var parent = range.commonAncestorContainer;
+      if (parent.nodeType === Node.TEXT_NODE) parent = parent.parentElement;
+      if (
+        parent &&
+        parent.tagName &&
+        parent.tagName.toLowerCase() === tagName
+      ) {
+        var text = document.createTextNode(parent.textContent);
+        parent.parentNode.replaceChild(text, parent);
+        return;
+      }
+
+      try {
+        var el = document.createElement(tagName);
+        range.surroundContents(el);
+      } catch (_e) {
+        var escaped = selectedText
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+        document.execCommand(
+          "insertHTML",
+          false,
+          "<" + tagName + ">" + escaped + "</" + tagName + ">"
+        );
+      }
+    },
+
+    _updateToolbarState: function () {
+      var self = this;
+      var block = this._getCurrentBlock();
+      var blockTag =
+        block && block.tagName ? block.tagName.toLowerCase() : "";
+
+      var buttons = this.el.querySelectorAll("[data-toolbar-action]");
+      buttons.forEach(function (btn) {
+        var action = btn.dataset.toolbarAction;
+        var active = false;
+
+        switch (action) {
+          case "bold":
+            active = document.queryCommandState("bold");
+            break;
+          case "italic":
+            active = document.queryCommandState("italic");
+            break;
+          case "strike":
+            active = document.queryCommandState("strikeThrough");
+            break;
+          case "orderedList":
+            active = document.queryCommandState("insertOrderedList");
+            break;
+          case "bulletList":
+            active = document.queryCommandState("insertUnorderedList");
+            break;
+          case "heading1":
+            active = blockTag === "h1";
+            break;
+          case "heading2":
+            active = blockTag === "h2";
+            break;
+          case "heading3":
+            active = blockTag === "h3";
+            break;
+          case "heading4":
+            active = blockTag === "h4";
+            break;
+          case "blockquote":
+            active = blockTag === "blockquote";
+            break;
+          case "codeBlock":
+            active = blockTag === "pre";
+            break;
+          case "link":
+            active = self._isInsideTag("a");
+            break;
+          case "code":
+            active = self._isInsideTag("code");
+            break;
+        }
+
+        if (active) {
+          btn.classList.add("btn-active");
+        } else {
+          btn.classList.remove("btn-active");
+        }
+      });
+    },
+
+    _isInsideTag: function (tagName) {
+      var sel = window.getSelection();
+      if (!sel.rangeCount) return false;
+      var node = sel.anchorNode;
+      while (node && node !== this._visualEl) {
+        if (
+          node.tagName &&
+          node.tagName.toLowerCase() === tagName
+        ) {
+          return true;
+        }
+        node = node.parentNode;
+      }
+      return false;
+    },
+
+    // -- Commands from parent --
+
+    _handleCommand: function (payload) {
+      switch (payload.action) {
+        case "insert_image":
+          if (this._visualEl && payload.url) {
+            this._visualEl.focus();
+            var imgHtml =
+              '<img src="' +
+              payload.url +
+              '" alt="' +
+              (payload.alt || "").replace(/"/g, "&quot;") +
+              '" />';
+            document.execCommand("insertHTML", false, imgHtml);
+            this._debouncedPushVisualChange();
+          }
+          break;
+
+        case "set_content":
+          break;
+
+        case "set_mode":
+          if (payload.mode && payload.mode !== this._mode) {
+            var tab = this.el.querySelector(
+              '[data-mode-tab="' + payload.mode + '"]'
+            );
+            if (tab) tab.click();
+          }
+          break;
+      }
+    },
+  };
+})();
