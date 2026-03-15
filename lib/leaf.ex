@@ -459,7 +459,7 @@ defmodule Leaf do
        }}
     )
 
-    {:noreply, assign(socket, :content, markdown)}
+    {:noreply, socket |> assign(:content, markdown) |> assign(:visual_html, html)}
   end
 
   def handle_event("markdown_content_changed", %{"content" => content}, socket) do

@@ -85,8 +85,24 @@
     // Images
     ".content-editor-visual img {",
     "  max-width: 100%; height: auto; border-radius: 0.5rem; margin: 0.75em 0;",
-    "  cursor: default;",
+    "  cursor: pointer;",
     "}",
+    ".content-editor-visual img.leaf-img-selected {",
+    "  outline: 2px solid var(--color-primary, #3b82f6);",
+    "  outline-offset: 2px;",
+    "}",
+
+    // Image resize handles
+    ".leaf-resize-handle {",
+    "  position: absolute; width: 10px; height: 10px;",
+    "  background: var(--color-base-100, #fff);",
+    "  border: 2px solid var(--color-primary, #3b82f6);",
+    "  border-radius: 2px; z-index: 51;",
+    "}",
+    ".leaf-resize-handle--nw { cursor: nw-resize; }",
+    ".leaf-resize-handle--ne { cursor: ne-resize; }",
+    ".leaf-resize-handle--sw { cursor: sw-resize; }",
+    ".leaf-resize-handle--se { cursor: se-resize; }",
 
     // Horizontal rule
     ".content-editor-visual hr {",
@@ -228,6 +244,15 @@
       case "img":
         var src = node.getAttribute("src") || "";
         var alt = node.getAttribute("alt") || "";
+        var w = node.getAttribute("width");
+        var h = node.getAttribute("height");
+        if (w || h) {
+          var tag = '<img src="' + src + '" alt="' + alt + '"';
+          if (w) tag += ' width="' + w + '"';
+          if (h) tag += ' height="' + h + '"';
+          tag += ' />';
+          return tag;
+        }
         return "![" + alt + "](" + src + ")";
 
       case "blockquote":
@@ -1312,7 +1337,7 @@
       parent.removeChild(anchorEl);
     },
 
-    // -- Image popover --
+    // -- Image selection + resize + popover --
 
     _showImagePopover: function (imgEl) {
       this._dismissImagePopover();
@@ -1322,6 +1347,28 @@
       var alt = imgEl.getAttribute("alt") || "";
       var self = this;
 
+      // Mark image as selected (outline via CSS)
+      imgEl.classList.add("leaf-img-selected");
+
+      // Create resize handles
+      this._resizeHandles = [];
+      var corners = ["nw", "ne", "sw", "se"];
+      corners.forEach(function (corner) {
+        var handle = document.createElement("div");
+        handle.className = "leaf-resize-handle leaf-resize-handle--" + corner;
+        handle.setAttribute("data-corner", corner);
+        handle.addEventListener("mousedown", function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          self._startResize(e, imgEl, corner);
+        });
+        self.el.appendChild(handle);
+        self._resizeHandles.push(handle);
+      });
+
+      this._positionResizeHandles(imgEl);
+
+      // Build popover
       var pop = document.createElement("div");
       pop.className = "leaf-link-popover";
 
@@ -1407,10 +1454,98 @@
       setTimeout(function () { altInput.focus(); altInput.select(); }, 50);
     },
 
+    _positionResizeHandles: function (imgEl) {
+      if (!this._resizeHandles || !imgEl) return;
+      var editorRect = this.el.getBoundingClientRect();
+      var imgRect = imgEl.getBoundingClientRect();
+      var ox = imgRect.left - editorRect.left;
+      var oy = imgRect.top - editorRect.top;
+      var w = imgRect.width;
+      var h = imgRect.height;
+      var hs = 5; // half handle size
+
+      var positions = {
+        nw: { left: ox - hs, top: oy - hs },
+        ne: { left: ox + w - hs, top: oy - hs },
+        sw: { left: ox - hs, top: oy + h - hs },
+        se: { left: ox + w - hs, top: oy + h - hs },
+      };
+
+      this._resizeHandles.forEach(function (handle) {
+        var corner = handle.getAttribute("data-corner");
+        var pos = positions[corner];
+        handle.style.left = pos.left + "px";
+        handle.style.top = pos.top + "px";
+      });
+    },
+
+    _startResize: function (e, imgEl, corner) {
+      var self = this;
+      var startX = e.clientX;
+      var startY = e.clientY;
+      var startW = imgEl.offsetWidth;
+      var startH = imgEl.offsetHeight;
+      var aspect = startW / startH;
+
+      function onMove(ev) {
+        ev.preventDefault();
+        var dx = ev.clientX - startX;
+        var dy = ev.clientY - startY;
+        var newW;
+
+        // Use the axis with more movement, maintain aspect ratio
+        if (corner === "se") {
+          newW = Math.max(50, startW + dx);
+        } else if (corner === "sw") {
+          newW = Math.max(50, startW - dx);
+        } else if (corner === "ne") {
+          newW = Math.max(50, startW + dx);
+        } else { // nw
+          newW = Math.max(50, startW - dx);
+        }
+
+        var newH = newW / aspect;
+        imgEl.style.width = newW + "px";
+        imgEl.style.height = newH + "px";
+        imgEl.setAttribute("width", Math.round(newW));
+        imgEl.setAttribute("height", Math.round(newH));
+
+        self._positionResizeHandles(imgEl);
+
+        // Reposition popover below the image
+        if (self._imagePopoverEl) {
+          var editorRect = self.el.getBoundingClientRect();
+          var imgRect = imgEl.getBoundingClientRect();
+          self._imagePopoverEl.style.left = (imgRect.left - editorRect.left) + "px";
+          self._imagePopoverEl.style.top = (imgRect.bottom - editorRect.top + 8) + "px";
+        }
+      }
+
+      function onUp() {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+      }
+
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    },
+
     _dismissImagePopover: function () {
+      // Remove selection class
+      if (this._imagePopoverTarget) {
+        this._imagePopoverTarget.classList.remove("leaf-img-selected");
+      }
+      // Remove resize handles
+      if (this._resizeHandles) {
+        this._resizeHandles.forEach(function (h) { h.remove(); });
+        this._resizeHandles = null;
+      }
+      // Remove popover
       if (this._imagePopoverEl) {
         this._imagePopoverEl.remove();
         this._imagePopoverEl = null;
+      }
+      if (this._imagePopoverTarget) {
         this._imagePopoverTarget = null;
         this._debouncedPushVisualChange();
       }
