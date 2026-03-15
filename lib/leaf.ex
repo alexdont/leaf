@@ -394,7 +394,15 @@ defmodule Leaf do
       </div>
 
       <%!-- Visual Editor (contenteditable) --%>
-      <div data-visual-wrapper class={[@mode != :visual && "hidden"]}>
+      <div data-visual-wrapper class={["relative", @mode != :visual && "hidden"]}>
+        <%!-- Block drag handle (positioned by JS) --%>
+        <div data-drag-handle class="leaf-drag-handle" style="display:none">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor">
+            <circle cx="5.5" cy="3.5" r="1.5" /><circle cx="10.5" cy="3.5" r="1.5" />
+            <circle cx="5.5" cy="8" r="1.5" /><circle cx="10.5" cy="8" r="1.5" />
+            <circle cx="5.5" cy="12.5" r="1.5" /><circle cx="10.5" cy="12.5" r="1.5" />
+          </svg>
+        </div>
         <div
           id={"#{@id}-visual"}
           data-editor-visual

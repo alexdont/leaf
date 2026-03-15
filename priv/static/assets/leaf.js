@@ -111,11 +111,29 @@
     "  border-radius: 2px; pointer-events: none; z-index: 50;",
     "  transition: top 0.05s ease-out;",
     "}",
-    ".content-editor-visual img.leaf-dragging {",
-    "  opacity: 0.35;",
-    "  outline: 2px dashed var(--color-primary, #3b82f6);",
+    ".leaf-dragging {",
+    "  opacity: 0.35 !important;",
+    "  outline: 2px dashed var(--color-primary, #3b82f6) !important;",
     "  outline-offset: 2px;",
     "}",
+
+    // Block drag handle
+    ".leaf-drag-handle {",
+    "  position: absolute; z-index: 52;",
+    "  display: flex; align-items: center; justify-content: center;",
+    "  width: 20px; height: 20px;",
+    "  cursor: grab; border-radius: 4px;",
+    "  color: color-mix(in oklab, var(--color-base-content, #1f2937) 30%, transparent);",
+    "  background: transparent;",
+    "  transition: color 0.1s, background 0.1s;",
+    "  user-select: none; -webkit-user-select: none;",
+    "}",
+    ".leaf-drag-handle:hover {",
+    "  color: color-mix(in oklab, var(--color-base-content, #1f2937) 60%, transparent);",
+    "  background: color-mix(in oklab, var(--color-base-content, #1f2937) 8%, transparent);",
+    "}",
+    ".leaf-drag-handle:active { cursor: grabbing; }",
+    ".leaf-drag-handle svg { width: 14px; height: 14px; pointer-events: none; }",
 
     // Horizontal rule
     ".content-editor-visual hr {",
@@ -500,6 +518,8 @@
         function (payload) {
           if (this._visualEl && payload.html !== undefined) {
             this._visualEl.innerHTML = payload.html || "<p><br></p>";
+            // DOM was replaced — old block references are stale
+            this._dragHandleBlock = null;
           }
         }.bind(this)
       );
@@ -522,6 +542,15 @@
       if (newReadonly !== this._readonly) {
         this._readonly = newReadonly;
         this._visualEl.contentEditable = !newReadonly;
+      }
+
+      // Re-find drag handle after morphdom patch (element may have been replaced)
+      if (this._visualWrapper) {
+        var newHandle = this._visualWrapper.querySelector("[data-drag-handle]");
+        if (newHandle && newHandle !== this._dragHandle) {
+          this._dragHandle = newHandle;
+          this._dragHandleBlock = null;
+        }
       }
     },
 
@@ -1550,15 +1579,17 @@
       document.addEventListener("mouseup", onUp);
     },
 
-    // -- Image drag-and-drop reordering --
+    // -- Block & image drag-and-drop reordering --
 
     _setupImageDragAndDrop: function () {
       if (!this._visualEl) return;
       var self = this;
 
       this._dragIndicator = null;
-      this._dragSourceImg = null;
+      this._dragSourceBlock = null;
       this._dragDropTarget = null;
+      this._dragHandle = null;
+      this._dragHandleBlock = null;
 
       // Ensure existing images are draggable
       var imgs = this._visualEl.querySelectorAll("img");
@@ -1585,7 +1616,106 @@
       });
       this._imgObserver.observe(this._visualEl, { childList: true, subtree: true });
 
-      // dragstart
+      // -- Drag handle (grip icon) for block elements --
+
+      var handle = this._visualWrapper.querySelector("[data-drag-handle]");
+      this._dragHandle = handle;
+
+      // Show handle on mousemove over blocks
+      this._visualEl.addEventListener("mousemove", function (e) {
+        if (self._readonly || self._dragSourceBlock) return;
+        var block = self._getHoveredBlock(e.target);
+        if (!block) return;
+        // Always update if stale (e.g. after innerHTML replacement) or different block
+        if (block !== self._dragHandleBlock || !self._dragHandleBlock.parentNode) {
+          self._dragHandleBlock = block;
+          self._positionDragHandle(block);
+        }
+      });
+
+      // Hide handle when mouse leaves the wrapper, unless a block is selected
+      this._visualWrapper.addEventListener("mouseleave", function () {
+        if (!self._dragSourceBlock && !self._imagePopoverTarget) {
+          self._dragHandleBlock = null;
+          self._dragHandle.style.display = "none";
+        }
+      });
+
+      // -- Handle mousedown (block drag via mouse, delegated so it survives morphdom) --
+      this._visualWrapper.addEventListener("mousedown", function (e) {
+        if (!e.target.closest("[data-drag-handle]")) return;
+        var block = self._dragHandleBlock;
+        if (!block || self._readonly) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        self._dismissImagePopover();
+        self._dismissLinkPopover();
+
+        self._dragSourceBlock = block;
+        block.classList.add("leaf-dragging");
+        self._dragHandle.style.cursor = "grabbing";
+
+        self._createDropIndicator();
+
+        function onMouseMove(ev) {
+          ev.preventDefault();
+          var target = self._findDropTarget(ev.clientY);
+          if (target) {
+            self._dragDropTarget = target;
+            self._positionDropIndicator(target);
+          }
+        }
+
+        function onMouseUp(ev) {
+          document.removeEventListener("mousemove", onMouseMove);
+          document.removeEventListener("mouseup", onMouseUp);
+          self._dragHandle.style.cursor = "";
+
+          if (self._dragSourceBlock && self._dragDropTarget) {
+            var sourceEl = self._dragSourceBlock;
+            var targetEl = self._dragDropTarget.element;
+            var position = self._dragDropTarget.position;
+
+            var refNext = targetEl.nextSibling;
+            var refParent = targetEl.parentNode;
+            var targetIsSource = (sourceEl === targetEl);
+
+            sourceEl.remove();
+
+            if (targetIsSource) {
+              if (refNext && refNext.parentNode) {
+                refParent.insertBefore(sourceEl, refNext);
+              } else if (refParent) {
+                refParent.appendChild(sourceEl);
+              }
+            } else if (!targetEl.parentNode) {
+              if (refNext && refNext.parentNode) {
+                refParent.insertBefore(sourceEl, refNext);
+              } else if (refParent) {
+                refParent.appendChild(sourceEl);
+              }
+            } else if (position === "before") {
+              targetEl.parentNode.insertBefore(sourceEl, targetEl);
+            } else {
+              if (targetEl.nextSibling) {
+                targetEl.parentNode.insertBefore(sourceEl, targetEl.nextSibling);
+              } else {
+                targetEl.parentNode.appendChild(sourceEl);
+              }
+            }
+
+            self._debouncedPushVisualChange();
+          }
+
+          self._cleanupDrag();
+        }
+
+        document.addEventListener("mousemove", onMouseMove);
+        document.addEventListener("mouseup", onMouseUp);
+      });
+
+      // -- Image native dragstart --
       this._visualEl.addEventListener("dragstart", function (e) {
         var img = e.target;
         if (!img || img.tagName.toLowerCase() !== "img") return;
@@ -1600,23 +1730,20 @@
         self._dismissImagePopover();
         self._dismissLinkPopover();
 
-        self._dragSourceImg = img;
-        img.classList.add("leaf-dragging");
+        // For images, the drag source is the image itself (or its parent block)
+        var block = self._getContainingBlock(img);
+        self._dragSourceBlock = block || img;
+        (block || img).classList.add("leaf-dragging");
 
         e.dataTransfer.effectAllowed = "move";
         e.dataTransfer.setData("text/plain", "leaf-image-drag");
 
-        var indicator = document.createElement("div");
-        indicator.className = "leaf-drop-indicator";
-        indicator.style.display = "none";
-        self._visualWrapper.style.position = "relative";
-        self._visualWrapper.appendChild(indicator);
-        self._dragIndicator = indicator;
+        self._createDropIndicator();
       });
 
-      // dragover
+      // -- Image native drag: dragover/drop/dragleave/dragend --
       this._visualEl.addEventListener("dragover", function (e) {
-        if (!self._dragSourceImg) return;
+        if (!self._dragSourceBlock) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
 
@@ -1627,7 +1754,6 @@
         }
       });
 
-      // dragleave
       this._visualEl.addEventListener("dragleave", function (e) {
         if (!self._visualEl.contains(e.relatedTarget)) {
           if (self._dragIndicator) self._dragIndicator.style.display = "none";
@@ -1635,69 +1761,42 @@
         }
       });
 
-      // drop
       this._visualEl.addEventListener("drop", function (e) {
         e.preventDefault();
-        if (!self._dragSourceImg || !self._dragDropTarget) {
+        if (!self._dragSourceBlock || !self._dragDropTarget) {
           self._cleanupDrag();
           return;
         }
 
-        var img = self._dragSourceImg;
+        var sourceEl = self._dragSourceBlock;
         var targetEl = self._dragDropTarget.element;
         var position = self._dragDropTarget.position;
 
-        // Capture references before any DOM mutation
         var refNext = targetEl.nextSibling;
         var refParent = targetEl.parentNode;
+        var targetIsSource = (sourceEl === targetEl);
 
-        // Check if the target will be invalidated by removing the image
-        // (e.g., image is inside a <p> that IS the target)
-        var imgBlock = img.parentNode;
-        var removingBlock = (imgBlock && imgBlock !== self._visualEl &&
-            imgBlock.tagName.toLowerCase() === "p" &&
-            imgBlock.childNodes.length === 1);
-        var targetIsImgBlock = removingBlock && imgBlock === targetEl;
+        sourceEl.remove();
 
-        // Remove image from current location
-        if (removingBlock) {
-          imgBlock.remove();
-        } else {
-          img.remove();
-        }
-
-        // If target was the block we just removed, skip insertion
-        // (image was dropped back near itself)
-        if (targetIsImgBlock) {
-          // Re-insert at roughly the same spot using saved refs
+        if (targetIsSource) {
           if (refNext && refNext.parentNode) {
-            refParent.insertBefore(img, refNext);
+            refParent.insertBefore(sourceEl, refNext);
           } else if (refParent) {
-            refParent.appendChild(img);
+            refParent.appendChild(sourceEl);
           }
         } else if (!targetEl.parentNode) {
-          // Target was somehow removed — use saved references
           if (refNext && refNext.parentNode) {
-            refParent.insertBefore(img, refNext);
+            refParent.insertBefore(sourceEl, refNext);
           } else if (refParent) {
-            refParent.appendChild(img);
+            refParent.appendChild(sourceEl);
           }
         } else if (position === "before") {
-          targetEl.parentNode.insertBefore(img, targetEl);
+          targetEl.parentNode.insertBefore(sourceEl, targetEl);
         } else {
           if (targetEl.nextSibling) {
-            targetEl.parentNode.insertBefore(img, targetEl.nextSibling);
+            targetEl.parentNode.insertBefore(sourceEl, targetEl.nextSibling);
           } else {
-            targetEl.parentNode.appendChild(img);
-          }
-        }
-
-        // Ensure image is a direct child of visual editor, not nested in a block
-        if (img.parentNode && img.parentNode !== self._visualEl) {
-          var wrapper = img.parentNode;
-          self._visualEl.insertBefore(img, wrapper.nextSibling);
-          if (wrapper.innerHTML.trim() === "" || wrapper.innerHTML === "<br>") {
-            wrapper.remove();
+            targetEl.parentNode.appendChild(sourceEl);
           }
         }
 
@@ -1705,27 +1804,70 @@
         self._debouncedPushVisualChange();
       });
 
-      // dragend (cleanup on cancel/escape)
       this._visualEl.addEventListener("dragend", function () {
         self._cleanupDrag();
       });
     },
 
-    _findDropTarget: function (clientY) {
+    _getHoveredBlock: function (target) {
+      // Walk up from target to find the direct child of _visualEl
+      var node = target;
+      while (node && node.parentNode !== this._visualEl) {
+        node = node.parentNode;
+      }
+      if (!node || node.nodeType !== Node.ELEMENT_NODE) return null;
+      if (!this._isBlockTag(node)) return null;
+      return node;
+    },
+
+    _getContainingBlock: function (node) {
+      // Walk up from node to find the direct child of _visualEl
+      var current = node;
+      while (current && current.parentNode !== this._visualEl) {
+        current = current.parentNode;
+      }
+      return current;
+    },
+
+    _isBlockTag: function (el) {
       var BLOCK_TAGS = {
         p: true, h1: true, h2: true, h3: true, h4: true, h5: true, h6: true,
         blockquote: true, pre: true, ul: true, ol: true, hr: true, img: true,
         div: true, figure: true, table: true
       };
+      return el && el.tagName && BLOCK_TAGS[el.tagName.toLowerCase()];
+    },
 
+    _positionDragHandle: function (block) {
+      if (!this._dragHandle) return;
+      var wrapperRect = this._visualWrapper.getBoundingClientRect();
+      var blockRect = block.getBoundingClientRect();
+
+      var top = blockRect.top - wrapperRect.top;
+      var left = blockRect.left - wrapperRect.left - 24;
+
+      this._dragHandle.style.top = top + "px";
+      this._dragHandle.style.left = Math.max(0, left) + "px";
+      this._dragHandle.style.display = "flex";
+    },
+
+    _createDropIndicator: function () {
+      if (this._dragIndicator) this._dragIndicator.remove();
+      var indicator = document.createElement("div");
+      indicator.className = "leaf-drop-indicator";
+      indicator.style.display = "none";
+      this._visualWrapper.appendChild(indicator);
+      this._dragIndicator = indicator;
+    },
+
+    _findDropTarget: function (clientY) {
       var children = this._visualEl.childNodes;
       var blocks = [];
 
       for (var i = 0; i < children.length; i++) {
         var child = children[i];
         if (child.nodeType !== Node.ELEMENT_NODE) continue;
-        var tag = child.tagName.toLowerCase();
-        if (BLOCK_TAGS[tag]) {
+        if (this._isBlockTag(child)) {
           blocks.push(child);
         }
       }
@@ -1737,8 +1879,8 @@
 
       for (var j = 0; j < blocks.length; j++) {
         var block = blocks[j];
-        if (block === this._dragSourceImg) continue;
-        if (block.contains && block.contains(this._dragSourceImg)) continue;
+        // Skip the block being dragged
+        if (block === this._dragSourceBlock) continue;
 
         var rect = block.getBoundingClientRect();
 
@@ -1755,21 +1897,25 @@
         }
       }
 
-      // Edge: above first block
-      var firstBlock = blocks[0];
-      if (firstBlock !== this._dragSourceImg) {
-        var firstRect = firstBlock.getBoundingClientRect();
-        if (clientY < firstRect.top) {
-          return { element: firstBlock, position: "before" };
+      // Edge: above first non-source block
+      for (var k = 0; k < blocks.length; k++) {
+        if (blocks[k] !== this._dragSourceBlock) {
+          var firstRect = blocks[k].getBoundingClientRect();
+          if (clientY < firstRect.top) {
+            return { element: blocks[k], position: "before" };
+          }
+          break;
         }
       }
 
-      // Edge: below last block
-      var lastBlock = blocks[blocks.length - 1];
-      if (lastBlock !== this._dragSourceImg) {
-        var lastRect = lastBlock.getBoundingClientRect();
-        if (clientY > lastRect.bottom) {
-          return { element: lastBlock, position: "after" };
+      // Edge: below last non-source block
+      for (var l = blocks.length - 1; l >= 0; l--) {
+        if (blocks[l] !== this._dragSourceBlock) {
+          var lastRect = blocks[l].getBoundingClientRect();
+          if (clientY > lastRect.bottom) {
+            return { element: blocks[l], position: "after" };
+          }
+          break;
         }
       }
 
@@ -1796,15 +1942,27 @@
     },
 
     _cleanupDrag: function () {
-      if (this._dragSourceImg) {
-        this._dragSourceImg.classList.remove("leaf-dragging");
-        this._dragSourceImg = null;
+      var movedBlock = this._dragSourceBlock;
+      if (movedBlock) {
+        movedBlock.classList.remove("leaf-dragging");
+        this._dragSourceBlock = null;
       }
       if (this._dragIndicator) {
         this._dragIndicator.remove();
         this._dragIndicator = null;
       }
       this._dragDropTarget = null;
+
+      // Re-show handle on the block that was just moved
+      if (movedBlock && movedBlock.parentNode === this._visualEl) {
+        this._dragHandleBlock = movedBlock;
+        this._positionDragHandle(movedBlock);
+      } else {
+        this._dragHandleBlock = null;
+        if (this._dragHandle) {
+          this._dragHandle.style.display = "none";
+        }
+      }
     },
 
     _dismissImagePopover: function () {
