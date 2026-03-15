@@ -30,7 +30,7 @@ defmodule Leaf.MixProject do
       {:phoenix_live_view, "~> 1.0"},
       {:phoenix_html, "~> 4.0"},
       {:earmark, "~> 1.4"},
-      {:gettext, "~> 0.26", optional: true},
+      {:gettext, "~> 0.26 or ~> 1.0", optional: true},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
   end
