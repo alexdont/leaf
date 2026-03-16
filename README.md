@@ -24,7 +24,7 @@ end
 
 ### JavaScript Setup
 
-In your `app.js`:
+In your `app.js`, import the JS and register the hook:
 
 ```javascript
 import "../../../deps/leaf/priv/static/assets/leaf.js"
@@ -35,6 +35,20 @@ let liveSocket = new LiveSocket("/live", Socket, {
     // ... your other hooks
   }
 })
+```
+
+#### CDN Alternative
+
+If you prefer not to use the `deps/` import path (e.g., non-standard project structure), you can load the JS from CDN instead:
+
+```javascript
+// Load Leaf from CDN
+const script = document.createElement("script");
+script.src = "https://cdn.jsdelivr.net/gh/alexdont/leaf@v0.1.0/priv/static/assets/leaf.js";
+script.onload = () => {
+  // Leaf is now available at window.LeafHooks
+};
+document.head.appendChild(script);
 ```
 
 ### Peer Requirements
