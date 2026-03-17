@@ -444,6 +444,97 @@ defmodule Leaf do
               >
                 &mdash;
               </button>
+              <button
+                type="button"
+                data-toolbar-action="table"
+                class="btn btn-xs btn-ghost px-2"
+                title={t("Insert Table")}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  class="w-3.5 h-3.5"
+                >
+                  <path
+                    fill-rule="evenodd"
+                    d="M.99 5.24A2.25 2.25 0 013.25 3h13.5A2.25 2.25 0 0119 5.25v9.5A2.25 2.25 0 0116.75 17H3.25A2.25 2.25 0 011 14.75v-9.5zm1.5 0v2.5h7v-3H3.25a.75.75 0 00-.75.75zm8.5-.75v3h7v-2.5a.75.75 0 00-.75-.75h-6.25zM2.5 9.25v2.5h7v-2.5h-7zm8.5 0v2.5h7v-2.5h-7zM2.5 13.25v1.5c0 .414.336.75.75.75h6.25v-2.25h-7zm8.5 0v2.25h6.25a.75.75 0 00.75-.75v-1.5h-7z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
+              </button>
+              <button
+                type="button"
+                data-toolbar-action="tableAddRow"
+                class="btn btn-xs btn-ghost px-1.5"
+                title={t("Add Row Below")}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  class="w-3.5 h-3.5"
+                >
+                  <path d="M10.75 6.75a.75.75 0 00-1.5 0v2.5h-2.5a.75.75 0 000 1.5h2.5v2.5a.75.75 0 001.5 0v-2.5h2.5a.75.75 0 000-1.5h-2.5v-2.5z" />
+                  <path
+                    fill-rule="evenodd"
+                    d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.5-8a3.5 3.5 0 11-7 0 3.5 3.5 0 017 0z"
+                    clip-rule="evenodd"
+                    fill-opacity="0"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                  />
+                  <rect x="1" y="14" width="18" height="2" rx="1" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                data-toolbar-action="tableRemoveRow"
+                class="btn btn-xs btn-ghost px-1.5"
+                title={t("Remove Row")}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  class="w-3.5 h-3.5"
+                >
+                  <path d="M7 9.25a.75.75 0 000 1.5h6a.75.75 0 000-1.5H7z" />
+                  <rect x="1" y="14" width="18" height="2" rx="1" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                data-toolbar-action="tableAddCol"
+                class="btn btn-xs btn-ghost px-1.5"
+                title={t("Add Column Right")}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  class="w-3.5 h-3.5"
+                >
+                  <path d="M10.75 6.75a.75.75 0 00-1.5 0v2.5h-2.5a.75.75 0 000 1.5h2.5v2.5a.75.75 0 001.5 0v-2.5h2.5a.75.75 0 000-1.5h-2.5v-2.5z" />
+                  <rect x="15" y="1" width="2" height="18" rx="1" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                data-toolbar-action="tableRemoveCol"
+                class="btn btn-xs btn-ghost px-1.5"
+                title={t("Remove Column")}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  class="w-3.5 h-3.5"
+                >
+                  <path d="M7 9.25a.75.75 0 000 1.5h6a.75.75 0 000-1.5H7z" />
+                  <rect x="15" y="1" width="2" height="18" rx="1" />
+                </svg>
+              </button>
             </div>
 
             <div class="divider divider-horizontal mx-0.5 h-6"></div>

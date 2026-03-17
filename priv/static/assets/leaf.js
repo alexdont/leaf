@@ -78,6 +78,17 @@
     ".content-editor-visual li { margin: 0.2em 0; }",
     ".content-editor-visual li > p { margin: 0; }",
 
+    // Tables
+    ".content-editor-visual table { border-collapse: collapse; width: 100%; margin: 0.75em 0; }",
+    ".content-editor-visual th, .content-editor-visual td {",
+    "  border: 1px solid color-mix(in oklab, var(--color-base-content, #1f2937) 20%, transparent);",
+    "  padding: 0.4rem 0.75rem; text-align: left;",
+    "}",
+    ".content-editor-visual th {",
+    "  font-weight: 600;",
+    "  background: color-mix(in oklab, var(--color-base-content, #1f2937) 5%, transparent);",
+    "}",
+
     // Links
     ".content-editor-visual a { color: var(--color-primary, #3b82f6); text-decoration: underline; cursor: text; }",
     ".content-editor-visual a:hover { opacity: 0.8; }",
@@ -330,6 +341,16 @@
       case "hr":
         return "\n---\n\n";
 
+      case "table":
+        return "\n" + convertTable(node) + "\n";
+
+      case "thead":
+      case "tbody":
+      case "tr":
+      case "th":
+      case "td":
+        return inner;
+
       case "div":
         return inner + "\n";
 
@@ -351,6 +372,27 @@
       }
     }
     return items.join("\n");
+  }
+
+  function convertTable(tableNode) {
+    var rows = tableNode.querySelectorAll("tr");
+    if (!rows.length) return "";
+    var lines = [];
+    for (var i = 0; i < rows.length; i++) {
+      var cells = rows[i].querySelectorAll("th, td");
+      var parts = [];
+      for (var j = 0; j < cells.length; j++) {
+        parts.push(nodeToMarkdown(cells[j]).trim().replace(/\|/g, "\\|"));
+      }
+      lines.push("| " + parts.join(" | ") + " |");
+      // Add separator after header row
+      if (i === 0) {
+        var sep = [];
+        for (var k = 0; k < parts.length; k++) sep.push("---");
+        lines.push("| " + sep.join(" | ") + " |");
+      }
+    }
+    return lines.join("\n") + "\n";
   }
 
   // =========================================================================
@@ -1177,6 +1219,21 @@
         case "horizontalRule":
           document.execCommand("insertHorizontalRule", false, null);
           break;
+        case "table":
+          this._insertTable();
+          break;
+        case "tableAddRow":
+          this._tableAddRow();
+          break;
+        case "tableRemoveRow":
+          this._tableRemoveRow();
+          break;
+        case "tableAddCol":
+          this._tableAddCol();
+          break;
+        case "tableRemoveCol":
+          this._tableRemoveCol();
+          break;
         case "link":
           this._insertLink();
           break;
@@ -1236,6 +1293,7 @@
         case "blockquote": if (pfx) pfx("> "); break;
         case "codeBlock": if (fmt) fmt("```\n", "\n```"); break;
         case "horizontalRule": if (ins) ins("\n---\n"); break;
+        case "table": if (ins) ins("\n| Header 1 | Header 2 |\n| --- | --- |\n| Cell 1 | Cell 2 |\n| Cell 3 | Cell 4 |\n"); break;
         case "link": if (lnk) lnk(); break;
         case "emoji": this._openEmojiPicker(); break;
         case "insert-image": this.pushEventTo(this.el, "insert_request", { editor_id: this._editorId, type: "image" }); break;
@@ -1529,6 +1587,99 @@
           false,
           "<" + tagName + ">" + escaped + "</" + tagName + ">"
         );
+      }
+    },
+
+    _insertTable: function () {
+      var html =
+        "<table><thead><tr><th>Header 1</th><th>Header 2</th></tr></thead>" +
+        "<tbody><tr><td>Cell 1</td><td>Cell 2</td></tr>" +
+        "<tr><td>Cell 3</td><td>Cell 4</td></tr></tbody></table><p><br></p>";
+      document.execCommand("insertHTML", false, html);
+    },
+
+    _getTableContext: function () {
+      var sel = window.getSelection();
+      if (!sel.rangeCount) return null;
+      var node = sel.anchorNode;
+      if (node && node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+      var cell = node ? node.closest("td, th") : null;
+      if (!cell) return null;
+      var row = cell.parentElement;
+      var table = cell.closest("table");
+      if (!table || !this._visualEl.contains(table)) return null;
+      var colIndex = Array.prototype.indexOf.call(row.children, cell);
+      return { table: table, row: row, cell: cell, colIndex: colIndex };
+    },
+
+    _tableAddRow: function () {
+      var ctx = this._getTableContext();
+      if (!ctx) return;
+      var cols = ctx.row.children.length;
+      var newRow = document.createElement("tr");
+      for (var i = 0; i < cols; i++) {
+        var td = document.createElement("td");
+        td.innerHTML = "<br>";
+        newRow.appendChild(td);
+      }
+      // Insert after current row; if in thead, append to tbody instead
+      if (ctx.row.parentElement.tagName.toLowerCase() === "thead") {
+        var tbody = ctx.table.querySelector("tbody");
+        if (!tbody) {
+          tbody = document.createElement("tbody");
+          ctx.table.appendChild(tbody);
+        }
+        tbody.insertBefore(newRow, tbody.firstChild);
+      } else {
+        ctx.row.parentNode.insertBefore(newRow, ctx.row.nextSibling);
+      }
+    },
+
+    _tableRemoveRow: function () {
+      var ctx = this._getTableContext();
+      if (!ctx) return;
+      var allRows = ctx.table.querySelectorAll("tr");
+      if (allRows.length <= 1) {
+        // Last row — remove the entire table
+        ctx.table.parentNode.removeChild(ctx.table);
+        return;
+      }
+      // Don't allow removing the header row if it's the only one in thead
+      if (ctx.row.parentElement.tagName.toLowerCase() === "thead") return;
+      ctx.row.parentNode.removeChild(ctx.row);
+    },
+
+    _tableAddCol: function () {
+      var ctx = this._getTableContext();
+      if (!ctx) return;
+      var rows = ctx.table.querySelectorAll("tr");
+      var insertAt = ctx.colIndex + 1;
+      for (var i = 0; i < rows.length; i++) {
+        var isHeader = rows[i].parentElement.tagName.toLowerCase() === "thead";
+        var newCell = document.createElement(isHeader ? "th" : "td");
+        newCell.innerHTML = "<br>";
+        var cells = rows[i].children;
+        if (insertAt < cells.length) {
+          rows[i].insertBefore(newCell, cells[insertAt]);
+        } else {
+          rows[i].appendChild(newCell);
+        }
+      }
+    },
+
+    _tableRemoveCol: function () {
+      var ctx = this._getTableContext();
+      if (!ctx) return;
+      var rows = ctx.table.querySelectorAll("tr");
+      var colCount = rows[0] ? rows[0].children.length : 0;
+      if (colCount <= 1) {
+        // Last column — remove the entire table
+        ctx.table.parentNode.removeChild(ctx.table);
+        return;
+      }
+      for (var i = 0; i < rows.length; i++) {
+        var cell = rows[i].children[ctx.colIndex];
+        if (cell) rows[i].removeChild(cell);
       }
     },
 
