@@ -138,39 +138,45 @@ defmodule Leaf do
       >
         <%= unless @readonly do %>
           <div data-visual-toolbar-buttons class="contents">
-            <%!-- Headings --%>
+            <%!-- Undo/Redo --%>
             <div class="flex items-center gap-0.5 mr-2">
               <button
                 type="button"
-                data-toolbar-action="heading1"
-                class="btn btn-xs btn-ghost font-bold px-1.5"
-                title={t("Heading 1")}
+                data-toolbar-action="undo"
+                class="btn btn-xs btn-ghost px-2"
+                title={t("Undo")}
               >
-                H1
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  class="w-3.5 h-3.5"
+                >
+                  <path
+                    fill-rule="evenodd"
+                    d="M7.793 2.232a.75.75 0 01-.025 1.06L3.622 7.25h10.003a5.375 5.375 0 010 10.75H10.75a.75.75 0 010-1.5h2.875a3.875 3.875 0 000-7.75H3.622l4.146 3.957a.75.75 0 01-1.036 1.085l-5.5-5.25a.75.75 0 010-1.085l5.5-5.25a.75.75 0 011.06.025z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
               </button>
               <button
                 type="button"
-                data-toolbar-action="heading2"
-                class="btn btn-xs btn-ghost font-bold px-1.5"
-                title={t("Heading 2")}
+                data-toolbar-action="redo"
+                class="btn btn-xs btn-ghost px-2"
+                title={t("Redo")}
               >
-                H2
-              </button>
-              <button
-                type="button"
-                data-toolbar-action="heading3"
-                class="btn btn-xs btn-ghost font-bold px-1.5"
-                title={t("Heading 3")}
-              >
-                H3
-              </button>
-              <button
-                type="button"
-                data-toolbar-action="heading4"
-                class="btn btn-xs btn-ghost font-bold px-1.5"
-                title={t("Heading 4")}
-              >
-                H4
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  class="w-3.5 h-3.5"
+                >
+                  <path
+                    fill-rule="evenodd"
+                    d="M12.207 2.232a.75.75 0 00.025 1.06l4.146 3.958H6.375a5.375 5.375 0 000 10.75H9.25a.75.75 0 000-1.5H6.375a3.875 3.875 0 010-7.75h10.003l-4.146 3.957a.75.75 0 001.036 1.085l5.5-5.25a.75.75 0 000-1.085l-5.5-5.25a.75.75 0 00-1.06.025z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
               </button>
             </div>
 
@@ -178,6 +184,58 @@ defmodule Leaf do
 
             <%!-- Inline Formatting --%>
             <div class="flex items-center gap-0.5 mr-2">
+              <%!-- Headings dropdown --%>
+              <div class="relative" data-heading-dropdown>
+                <button
+                  type="button"
+                  class="btn btn-xs btn-ghost font-bold px-2"
+                  title={t("Headings")}
+                  data-heading-trigger
+                >
+                  H
+                </button>
+                <ul
+                  class="hidden absolute top-full left-0 menu bg-base-200 rounded-box z-50 w-28 p-1 shadow-sm"
+                  data-heading-menu
+                >
+                  <li>
+                    <button
+                      type="button"
+                      data-toolbar-action="heading1"
+                      class="font-bold text-lg"
+                    >
+                      H1
+                    </button>
+                  </li>
+                  <li>
+                    <button
+                      type="button"
+                      data-toolbar-action="heading2"
+                      class="font-bold text-base"
+                    >
+                      H2
+                    </button>
+                  </li>
+                  <li>
+                    <button
+                      type="button"
+                      data-toolbar-action="heading3"
+                      class="font-bold text-sm"
+                    >
+                      H3
+                    </button>
+                  </li>
+                  <li>
+                    <button
+                      type="button"
+                      data-toolbar-action="heading4"
+                      class="font-bold text-xs"
+                    >
+                      H4
+                    </button>
+                  </li>
+                </ul>
+              </div>
               <button
                 type="button"
                 data-toolbar-action="bold"
@@ -202,27 +260,71 @@ defmodule Leaf do
               >
                 S
               </button>
+              <%!-- More inline formatting --%>
+              <div class="relative" data-inline-more-dropdown>
+                <button
+                  type="button"
+                  class="btn btn-xs btn-ghost px-1.5"
+                  title={t("More formatting")}
+                  data-inline-more-trigger
+                >
+                  <span class="text-base font-bold leading-none">&#8942;</span>
+                </button>
+                <ul
+                  class="hidden absolute top-full left-0 menu bg-base-200 rounded-box z-50 w-36 p-1 shadow-sm"
+                  data-inline-more-menu
+                >
+                  <li>
+                    <button
+                      type="button"
+                      data-toolbar-action="superscript"
+                    >
+                      <span class="text-xs">X<sup class="text-[0.5rem]">2</sup></span>
+                      <span>{t("Superscript")}</span>
+                    </button>
+                  </li>
+                  <li>
+                    <button
+                      type="button"
+                      data-toolbar-action="subscript"
+                    >
+                      <span class="text-xs">X<sub class="text-[0.5rem]">2</sub></span>
+                      <span>{t("Subscript")}</span>
+                    </button>
+                  </li>
+                  <li>
+                    <button
+                      type="button"
+                      data-toolbar-action="code"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        class="w-3.5 h-3.5"
+                      >
+                        <path
+                          fill-rule="evenodd"
+                          d="M6.28 5.22a.75.75 0 010 1.06L2.56 10l3.72 3.72a.75.75 0 01-1.06 1.06L.97 10.53a.75.75 0 010-1.06l4.25-4.25a.75.75 0 011.06 0zm7.44 0a.75.75 0 011.06 0l4.25 4.25a.75.75 0 010 1.06l-4.25 4.25a.75.75 0 01-1.06-1.06L17.44 10l-3.72-3.72a.75.75 0 010-1.06z"
+                          clip-rule="evenodd"
+                        />
+                      </svg>
+                      <span>{t("Inline Code")}</span>
+                    </button>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="divider divider-horizontal mx-0.5 h-6"></div>
+
+            <%!-- Lists --%>
+            <div class="flex items-center gap-0.5 mr-2">
               <button
                 type="button"
-                data-toolbar-action="superscript"
-                class="btn btn-xs btn-ghost px-1.5"
-                title={t("Superscript")}
-              >
-                <span class="text-xs">X<sup class="text-[0.5rem]">2</sup></span>
-              </button>
-              <button
-                type="button"
-                data-toolbar-action="subscript"
-                class="btn btn-xs btn-ghost px-1.5"
-                title={t("Subscript")}
-              >
-                <span class="text-xs">X<sub class="text-[0.5rem]">2</sub></span>
-              </button>
-              <button
-                type="button"
-                data-toolbar-action="code"
-                class="btn btn-xs btn-ghost font-mono px-2"
-                title={t("Inline Code")}
+                data-toolbar-action="bulletList"
+                class="btn btn-xs btn-ghost px-2"
+                title={t("Bullet List")}
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -232,7 +334,65 @@ defmodule Leaf do
                 >
                   <path
                     fill-rule="evenodd"
-                    d="M6.28 5.22a.75.75 0 010 1.06L2.56 10l3.72 3.72a.75.75 0 01-1.06 1.06L.97 10.53a.75.75 0 010-1.06l4.25-4.25a.75.75 0 011.06 0zm7.44 0a.75.75 0 011.06 0l4.25 4.25a.75.75 0 010 1.06l-4.25 4.25a.75.75 0 01-1.06-1.06L17.44 10l-3.72-3.72a.75.75 0 010-1.06z"
+                    d="M6 4.75A.75.75 0 016.75 4h10.5a.75.75 0 010 1.5H6.75A.75.75 0 016 4.75zM6 10a.75.75 0 01.75-.75h10.5a.75.75 0 010 1.5H6.75A.75.75 0 016 10zm0 5.25a.75.75 0 01.75-.75h10.5a.75.75 0 010 1.5H6.75a.75.75 0 01-.75-.75zM1.99 4.75a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1v-.01zM1.99 15.25a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1v-.01zM1.99 10a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1V10z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
+              </button>
+              <button
+                type="button"
+                data-toolbar-action="orderedList"
+                class="btn btn-xs btn-ghost px-2"
+                title={t("Numbered List")}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  class="w-3.5 h-3.5"
+                >
+                  <path d="M3.0002 1.25C2.58599 1.25 2.2502 1.58579 2.2502 2C2.2502 2.41421 2.58599 2.75 3.0002 2.75H3.2502V5.25C3.2502 5.66421 3.58599 6 4.0002 6C4.41441 6 4.7502 5.66421 4.7502 5.25V2C4.7502 1.58579 4.41441 1.25 4.0002 1.25H3.0002Z" />
+                  <path d="M2.97049 8.65372C3.29513 8.55397 3.64067 8.5 4.0002 8.5C4.16835 8.5 4.33333 8.5118 4.49444 8.53453C4.49127 8.53922 4.48691 8.54312 4.48165 8.54575L2.41479 9.57918C2.1607 9.70622 2.0002 9.96592 2.0002 10.25V11.25C2.0002 11.6642 2.33599 12 2.7502 12H5.2502C5.66441 12 6.0002 11.6642 6.0002 11.25C6.0002 10.8358 5.66441 10.5 5.2502 10.5H3.92725L5.15247 9.88739C5.67202 9.62762 6.0002 9.09661 6.0002 8.51574C6.0002 7.86944 5.57097 7.18897 4.80714 7.06489C4.54401 7.02215 4.27442 7 4.0002 7C3.48967 7 2.99569 7.07676 2.52991 7.21988C2.13397 7.34154 1.91162 7.76115 2.03328 8.15709C2.15494 8.55303 2.57455 8.77538 2.97049 8.65372Z" />
+                  <path d="M7.75 3C7.33579 3 7 3.33579 7 3.75C7 4.16421 7.33579 4.5 7.75 4.5H17.25C17.6642 4.5 18 4.16421 18 3.75C18 3.33579 17.6642 3 17.25 3H7.75Z" />
+                  <path d="M7.75 9.25C7.33579 9.25 7 9.58579 7 10C7 10.4142 7.33579 10.75 7.75 10.75H17.25C17.6642 10.75 18 10.4142 18 10C18 9.58579 17.6642 9.25 17.25 9.25H7.75Z" />
+                  <path d="M7.75 15.5C7.33579 15.5 7 15.8358 7 16.25C7 16.6642 7.33579 17 7.75 17H17.25C17.6642 17 18 16.6642 18 16.25C18 15.8358 17.6642 15.5 17.25 15.5H7.75Z" />
+                  <path d="M2.625 13.875C2.21079 13.875 1.875 14.2108 1.875 14.625C1.875 15.0392 2.21079 15.375 2.625 15.375H4.125C4.19404 15.375 4.25 15.431 4.25 15.5C4.25 15.569 4.19404 15.625 4.125 15.625H3.5C3.08579 15.625 2.75 15.9608 2.75 16.375C2.75 16.7892 3.08579 17.125 3.5 17.125H4.125C4.19404 17.125 4.25 17.181 4.25 17.25C4.25 17.319 4.19404 17.375 4.125 17.375H2.625C2.21079 17.375 1.875 17.7108 1.875 18.125C1.875 18.5392 2.21079 18.875 2.625 18.875H4.125C5.02246 18.875 5.75 18.1475 5.75 17.25C5.75 16.9278 5.65625 16.6276 5.49454 16.375C5.65625 16.1224 5.75 15.8222 5.75 15.5C5.75 14.6025 5.02246 13.875 4.125 13.875H2.625Z" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                data-toolbar-action="indent"
+                class="btn btn-xs btn-ghost px-2"
+                title={t("Increase Indent")}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  class="w-3.5 h-3.5"
+                >
+                  <path
+                    fill-rule="evenodd"
+                    d="M2 3.75A.75.75 0 012.75 3h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 3.75zm0 12.5A.75.75 0 012.75 15.5h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75zM8.75 7.5a.75.75 0 000 1.5h8.5a.75.75 0 000-1.5h-8.5zM8 11.75a.75.75 0 01.75-.75h8.5a.75.75 0 010 1.5h-8.5a.75.75 0 01-.75-.75zM2.22 7.97a.75.75 0 011.06 0L5.03 9.72a.75.75 0 010 1.06l-1.75 1.75a.75.75 0 01-1.06-1.06l1.22-1.22-1.22-1.22a.75.75 0 010-1.06z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
+              </button>
+              <button
+                type="button"
+                data-toolbar-action="outdent"
+                class="btn btn-xs btn-ghost px-2"
+                title={t("Decrease Indent")}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  class="w-3.5 h-3.5"
+                >
+                  <path
+                    fill-rule="evenodd"
+                    d="M2 3.75A.75.75 0 012.75 3h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 3.75zm0 12.5A.75.75 0 012.75 15.5h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75zM8.75 7.5a.75.75 0 000 1.5h8.5a.75.75 0 000-1.5h-8.5zM8 11.75a.75.75 0 01.75-.75h8.5a.75.75 0 010 1.5h-8.5a.75.75 0 01-.75-.75zM5.78 7.97a.75.75 0 010 1.06L4.56 10.25l1.22 1.22a.75.75 0 11-1.06 1.06L2.97 10.78a.75.75 0 010-1.06l1.75-1.75a.75.75 0 011.06 0z"
                     clip-rule="evenodd"
                   />
                 </svg>
@@ -241,7 +401,7 @@ defmodule Leaf do
 
             <div class="divider divider-horizontal mx-0.5 h-6"></div>
 
-            <%!-- Links & Media --%>
+            <%!-- Insert --%>
             <div class="flex items-center gap-0.5 mr-2">
               <button
                 type="button"
@@ -257,6 +417,25 @@ defmodule Leaf do
                 >
                   <path d="M12.232 4.232a2.5 2.5 0 013.536 3.536l-1.225 1.224a.75.75 0 001.061 1.06l1.224-1.224a4 4 0 00-5.656-5.656l-3 3a4 4 0 00.225 5.865.75.75 0 00.977-1.138 2.5 2.5 0 01-.142-3.667l3-3z" />
                   <path d="M11.603 7.963a.75.75 0 00-.977 1.138 2.5 2.5 0 01.142 3.667l-3 3a2.5 2.5 0 01-3.536-3.536l1.225-1.224a.75.75 0 00-1.061-1.06l-1.224 1.224a4 4 0 105.656 5.656l3-3a4 4 0 00-.225-5.865z" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                data-toolbar-action="emoji"
+                class="btn btn-xs btn-ghost px-2"
+                title={t("Insert Emoji")}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  class="w-3.5 h-3.5"
+                >
+                  <path
+                    fill-rule="evenodd"
+                    d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.536-4.464a.75.75 0 10-1.06-1.06 3.5 3.5 0 01-4.95 0 .75.75 0 00-1.06 1.06 5 5 0 007.07 0zM9 8.5c0 .828-.448 1.5-1 1.5s-1-.672-1-1.5S7.448 7 8 7s1 .672 1 1.5zm3 1.5c.552 0 1-.672 1-1.5S12.552 7 12 7s-1 .672-1 1.5.448 1.5 1 1.5z"
+                    clip-rule="evenodd"
+                  />
                 </svg>
               </button>
               <%= if :image in @toolbar do %>
@@ -297,107 +476,6 @@ defmodule Leaf do
                   </svg>
                 </button>
               <% end %>
-            </div>
-
-            <%!-- Emoji --%>
-            <div class="flex items-center gap-0.5 mr-2">
-              <button
-                type="button"
-                data-toolbar-action="emoji"
-                class="btn btn-xs btn-ghost px-2"
-                title={t("Insert Emoji")}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  class="w-3.5 h-3.5"
-                >
-                  <path
-                    fill-rule="evenodd"
-                    d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.536-4.464a.75.75 0 10-1.06-1.06 3.5 3.5 0 01-4.95 0 .75.75 0 00-1.06 1.06 5 5 0 007.07 0zM9 8.5c0 .828-.448 1.5-1 1.5s-1-.672-1-1.5S7.448 7 8 7s1 .672 1 1.5zm3 1.5c.552 0 1-.672 1-1.5S12.552 7 12 7s-1 .672-1 1.5.448 1.5 1 1.5z"
-                    clip-rule="evenodd"
-                  />
-                </svg>
-              </button>
-            </div>
-
-            <div class="divider divider-horizontal mx-0.5 h-6"></div>
-
-            <%!-- Lists & Blocks --%>
-            <div class="flex items-center gap-0.5 mr-2">
-              <button
-                type="button"
-                data-toolbar-action="bulletList"
-                class="btn btn-xs btn-ghost px-2"
-                title={t("Bullet List")}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  class="w-3.5 h-3.5"
-                >
-                  <path
-                    fill-rule="evenodd"
-                    d="M6 4.75A.75.75 0 016.75 4h10.5a.75.75 0 010 1.5H6.75A.75.75 0 016 4.75zM6 10a.75.75 0 01.75-.75h10.5a.75.75 0 010 1.5H6.75A.75.75 0 016 10zm0 5.25a.75.75 0 01.75-.75h10.5a.75.75 0 010 1.5H6.75a.75.75 0 01-.75-.75zM1.99 4.75a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1v-.01zM1.99 15.25a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1v-.01zM1.99 10a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1V10z"
-                    clip-rule="evenodd"
-                  />
-                </svg>
-              </button>
-              <button
-                type="button"
-                data-toolbar-action="orderedList"
-                class="btn btn-xs btn-ghost px-2"
-                title={t("Numbered List")}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  class="w-3.5 h-3.5"
-                >
-                  <path d="M3 4.5a.5.5 0 01.5-.5h1a.5.5 0 01.5.5v2a.5.5 0 01-.5.5h-1a.5.5 0 01-.5-.5v-2zM7 5h10a1 1 0 110 2H7a1 1 0 110-2zM3 9.5a.5.5 0 01.5-.5h1a.5.5 0 01.5.5v2a.5.5 0 01-.5.5h-1a.5.5 0 01-.5-.5v-2zM7 10h10a1 1 0 110 2H7a1 1 0 110-2zM3 14.5a.5.5 0 01.5-.5h1a.5.5 0 01.5.5v2a.5.5 0 01-.5.5h-1a.5.5 0 01-.5-.5v-2zM7 15h10a1 1 0 110 2H7a1 1 0 110-2z" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                data-toolbar-action="indent"
-                class="btn btn-xs btn-ghost px-2"
-                title={t("Increase Indent")}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  class="w-3.5 h-3.5"
-                >
-                  <path
-                    fill-rule="evenodd"
-                    d="M2 3.75A.75.75 0 012.75 3h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 3.75zm0 12.5A.75.75 0 012.75 15.5h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75zM8.75 7.5a.75.75 0 000 1.5h8.5a.75.75 0 000-1.5h-8.5zM8 11.75a.75.75 0 01.75-.75h8.5a.75.75 0 010 1.5h-8.5a.75.75 0 01-.75-.75zM2.22 9.47a.75.75 0 011.06 0L5.03 11.22a.75.75 0 010 1.06l-1.75 1.75a.75.75 0 01-1.06-1.06l1.22-1.22-1.22-1.22a.75.75 0 010-1.06z"
-                    clip-rule="evenodd"
-                  />
-                </svg>
-              </button>
-              <button
-                type="button"
-                data-toolbar-action="outdent"
-                class="btn btn-xs btn-ghost px-2"
-                title={t("Decrease Indent")}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  class="w-3.5 h-3.5"
-                >
-                  <path
-                    fill-rule="evenodd"
-                    d="M2 3.75A.75.75 0 012.75 3h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 3.75zm0 12.5A.75.75 0 012.75 15.5h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75zM8.75 7.5a.75.75 0 000 1.5h8.5a.75.75 0 000-1.5h-8.5zM8 11.75a.75.75 0 01.75-.75h8.5a.75.75 0 010 1.5h-8.5a.75.75 0 01-.75-.75zM5.78 9.47a.75.75 0 010 1.06L4.56 11.75l1.22 1.22a.75.75 0 11-1.06 1.06L2.97 12.28a.75.75 0 010-1.06l1.75-1.75a.75.75 0 011.06 0z"
-                    clip-rule="evenodd"
-                  />
-                </svg>
-              </button>
               <button
                 type="button"
                 data-toolbar-action="blockquote"
@@ -444,102 +522,80 @@ defmodule Leaf do
               >
                 &mdash;
               </button>
-              <button
-                type="button"
-                data-toolbar-action="table"
-                class="btn btn-xs btn-ghost px-2"
-                title={t("Insert Table")}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  class="w-3.5 h-3.5"
+              <%!-- Table dropdown --%>
+              <div class="relative" data-table-dropdown>
+                <button
+                  type="button"
+                  class="btn btn-xs btn-ghost px-2"
+                  title={t("Table")}
+                  data-table-trigger
                 >
-                  <path
-                    fill-rule="evenodd"
-                    d="M.99 5.24A2.25 2.25 0 013.25 3h13.5A2.25 2.25 0 0119 5.25v9.5A2.25 2.25 0 0116.75 17H3.25A2.25 2.25 0 011 14.75v-9.5zm1.5 0v2.5h7v-3H3.25a.75.75 0 00-.75.75zm8.5-.75v3h7v-2.5a.75.75 0 00-.75-.75h-6.25zM2.5 9.25v2.5h7v-2.5h-7zm8.5 0v2.5h7v-2.5h-7zM2.5 13.25v1.5c0 .414.336.75.75.75h6.25v-2.25h-7zm8.5 0v2.25h6.25a.75.75 0 00.75-.75v-1.5h-7z"
-                    clip-rule="evenodd"
-                  />
-                </svg>
-              </button>
-              <button
-                type="button"
-                data-toolbar-action="tableAddRow"
-                class="btn btn-xs btn-ghost px-1.5"
-                title={t("Add Row Below")}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  class="w-3.5 h-3.5"
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    class="w-3.5 h-3.5"
+                  >
+                    <path
+                      fill-rule="evenodd"
+                      d="M.99 5.24A2.25 2.25 0 0 1 3.25 3h13.5A2.25 2.25 0 0 1 19 5.25l.01 9.5A2.25 2.25 0 0 1 16.76 17H3.26A2.267 2.267 0 0 1 1 14.74l-.01-9.5Zm8.26 9.52v-.625a.75.75 0 0 0-.75-.75H3.25a.75.75 0 0 0-.75.75v.615c0 .414.336.75.75.75h5.373a.75.75 0 0 0 .627-.74Zm1.5 0a.75.75 0 0 0 .627.74h5.373a.75.75 0 0 0 .75-.75v-.615a.75.75 0 0 0-.75-.75H11.5a.75.75 0 0 0-.75.75v.625Zm6.75-3.63v-.625a.75.75 0 0 0-.75-.75H11.5a.75.75 0 0 0-.75.75v.625c0 .414.336.75.75.75h5.25a.75.75 0 0 0 .75-.75Zm-8.25 0v-.625a.75.75 0 0 0-.75-.75H3.25a.75.75 0 0 0-.75.75v.625c0 .414.336.75.75.75H8.5a.75.75 0 0 0 .75-.75ZM17.5 7.5v-.625a.75.75 0 0 0-.75-.75H11.5a.75.75 0 0 0-.75.75V7.5c0 .414.336.75.75.75h5.25a.75.75 0 0 0 .75-.75Zm-8.25 0v-.625a.75.75 0 0 0-.75-.75H3.25a.75.75 0 0 0-.75.75V7.5c0 .414.336.75.75.75H8.5a.75.75 0 0 0 .75-.75Z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                </button>
+                <ul
+                  class="hidden absolute top-full left-0 menu bg-base-200 rounded-box z-50 w-44 p-1 shadow-sm"
+                  data-table-menu
                 >
-                  <path d="M10.75 6.75a.75.75 0 00-1.5 0v2.5h-2.5a.75.75 0 000 1.5h2.5v2.5a.75.75 0 001.5 0v-2.5h2.5a.75.75 0 000-1.5h-2.5v-2.5z" />
-                  <path
-                    fill-rule="evenodd"
-                    d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.5-8a3.5 3.5 0 11-7 0 3.5 3.5 0 017 0z"
-                    clip-rule="evenodd"
-                    fill-opacity="0"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                  />
-                  <rect x="1" y="14" width="18" height="2" rx="1" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                data-toolbar-action="tableRemoveRow"
-                class="btn btn-xs btn-ghost px-1.5"
-                title={t("Remove Row")}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  class="w-3.5 h-3.5"
-                >
-                  <path d="M7 9.25a.75.75 0 000 1.5h6a.75.75 0 000-1.5H7z" />
-                  <rect x="1" y="14" width="18" height="2" rx="1" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                data-toolbar-action="tableAddCol"
-                class="btn btn-xs btn-ghost px-1.5"
-                title={t("Add Column Right")}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  class="w-3.5 h-3.5"
-                >
-                  <path d="M10.75 6.75a.75.75 0 00-1.5 0v2.5h-2.5a.75.75 0 000 1.5h2.5v2.5a.75.75 0 001.5 0v-2.5h2.5a.75.75 0 000-1.5h-2.5v-2.5z" />
-                  <rect x="15" y="1" width="2" height="18" rx="1" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                data-toolbar-action="tableRemoveCol"
-                class="btn btn-xs btn-ghost px-1.5"
-                title={t("Remove Column")}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  class="w-3.5 h-3.5"
-                >
-                  <path d="M7 9.25a.75.75 0 000 1.5h6a.75.75 0 000-1.5H7z" />
-                  <rect x="15" y="1" width="2" height="18" rx="1" />
-                </svg>
-              </button>
+                  <li>
+                    <button type="button" data-toolbar-action="table">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
+                        <path fill-rule="evenodd" d="M.99 5.24A2.25 2.25 0 013.25 3h13.5A2.25 2.25 0 0119 5.25v9.5A2.25 2.25 0 0116.75 17H3.25A2.25 2.25 0 011 14.75v-9.5zm1.5 0v2.5h7v-3H3.25a.75.75 0 00-.75.75zm8.5-.75v3h7v-2.5a.75.75 0 00-.75-.75h-6.25zM2.5 9.25v2.5h7v-2.5h-7zm8.5 0v2.5h7v-2.5h-7zM2.5 13.25v1.5c0 .414.336.75.75.75h6.25v-2.25h-7zm8.5 0v2.25h6.25a.75.75 0 00.75-.75v-1.5h-7z" clip-rule="evenodd" />
+                      </svg>
+                      <span>{t("Insert Table")}</span>
+                    </button>
+                  </li>
+                  <li class="menu-title text-xs px-2 pt-1">{t("Rows")}</li>
+                  <li>
+                    <button type="button" data-toolbar-action="tableAddRow">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
+                        <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+                      </svg>
+                      <span>{t("Add Row Below")}</span>
+                    </button>
+                  </li>
+                  <li>
+                    <button type="button" data-toolbar-action="tableRemoveRow">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
+                        <path fill-rule="evenodd" d="M4 10a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H4.75A.75.75 0 0 1 4 10Z" clip-rule="evenodd" />
+                      </svg>
+                      <span>{t("Remove Row")}</span>
+                    </button>
+                  </li>
+                  <li class="menu-title text-xs px-2 pt-1">{t("Columns")}</li>
+                  <li>
+                    <button type="button" data-toolbar-action="tableAddCol">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
+                        <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+                      </svg>
+                      <span>{t("Add Column Right")}</span>
+                    </button>
+                  </li>
+                  <li>
+                    <button type="button" data-toolbar-action="tableRemoveCol">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
+                        <path fill-rule="evenodd" d="M4 10a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H4.75A.75.75 0 0 1 4 10Z" clip-rule="evenodd" />
+                      </svg>
+                      <span>{t("Remove Column")}</span>
+                    </button>
+                  </li>
+                </ul>
+              </div>
             </div>
 
             <div class="divider divider-horizontal mx-0.5 h-6"></div>
 
-            <%!-- Undo/Redo + Clear Format --%>
+            <%!-- Clear Formatting --%>
             <div class="flex items-center gap-0.5">
               <button
                 type="button"
@@ -554,44 +610,6 @@ defmodule Leaf do
                   class="w-3.5 h-3.5"
                 >
                   <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                data-toolbar-action="undo"
-                class="btn btn-xs btn-ghost px-2"
-                title={t("Undo")}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  class="w-3.5 h-3.5"
-                >
-                  <path
-                    fill-rule="evenodd"
-                    d="M7.793 2.232a.75.75 0 01-.025 1.06L3.622 7.25h10.003a5.375 5.375 0 010 10.75H10.75a.75.75 0 010-1.5h2.875a3.875 3.875 0 000-7.75H3.622l4.146 3.957a.75.75 0 01-1.036 1.085l-5.5-5.25a.75.75 0 010-1.085l5.5-5.25a.75.75 0 011.06.025z"
-                    clip-rule="evenodd"
-                  />
-                </svg>
-              </button>
-              <button
-                type="button"
-                data-toolbar-action="redo"
-                class="btn btn-xs btn-ghost px-2"
-                title={t("Redo")}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  class="w-3.5 h-3.5"
-                >
-                  <path
-                    fill-rule="evenodd"
-                    d="M12.207 2.232a.75.75 0 00.025 1.06l4.146 3.958H6.375a5.375 5.375 0 000 10.75H9.25a.75.75 0 000-1.5H6.375a3.875 3.875 0 010-7.75h10.003l-4.146 3.957a.75.75 0 001.036 1.085l5.5-5.25a.75.75 0 000-1.085l-5.5-5.25a.75.75 0 00-1.06.025z"
-                    clip-rule="evenodd"
-                  />
                 </svg>
               </button>
             </div>
