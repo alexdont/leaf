@@ -2212,8 +2212,33 @@
         }
       });
 
-      // Hide handle when mouse leaves the wrapper, unless a block is selected
-      this._visualWrapper.addEventListener("mouseleave", function () {
+      // Show handle when hovering in the left margin area (outside content but inside wrapper)
+      this._visualWrapper.addEventListener("mousemove", function (e) {
+        if (self._readonly || self._dragSourceBlock) return;
+
+        // Skip if mouse is over a content block - let the visualEl handler deal with it
+        var hoveredBlock = self._getHoveredBlock(e.target);
+        if (hoveredBlock) return;
+
+        // Skip if mouse is over the drag handle itself
+        if (e.target.closest("[data-drag-handle]")) return;
+
+        // Find the block nearest to the mouse cursor vertically
+        var wrapperRect = self._visualWrapper.getBoundingClientRect();
+        var mouseY = e.clientY - wrapperRect.top;
+        var nearestBlock = self._findBlockAtY(mouseY);
+
+        if (nearestBlock && nearestBlock !== self._dragHandleBlock) {
+          self._dragHandleBlock = nearestBlock;
+          self._positionDragHandle(nearestBlock);
+        }
+      });
+
+      // Hide handle when mouse leaves the wrapper, unless going to the handle or a block is selected
+      this._visualWrapper.addEventListener("mouseleave", function (e) {
+        // Don't hide if mouse is moving to the drag handle
+        if (e.relatedTarget && e.relatedTarget.matches("[data-drag-handle]")) return;
+
         if (!self._dragSourceBlock && !self._imagePopoverTarget) {
           self._dragHandleBlock = null;
           self._dragHandle.style.display = "none";
@@ -2415,6 +2440,32 @@
         div: true, figure: true, table: true
       };
       return el && el.tagName && BLOCK_TAGS[el.tagName.toLowerCase()];
+    },
+
+    _findBlockAtY: function (y) {
+      var children = this._visualEl.childNodes;
+      var best = null;
+      var bestDist = Infinity;
+
+      for (var i = 0; i < children.length; i++) {
+        var child = children[i];
+        if (child.nodeType !== Node.ELEMENT_NODE) continue;
+        if (!this._isBlockTag(child)) continue;
+
+        var rect = child.getBoundingClientRect();
+        var wrapperRect = this._visualWrapper.getBoundingClientRect();
+        var blockTop = rect.top - wrapperRect.top;
+        var blockBottom = rect.bottom - wrapperRect.top;
+        var blockMiddle = (blockTop + blockBottom) / 2;
+
+        var dist = Math.abs(y - blockMiddle);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = child;
+        }
+      }
+
+      return best;
     },
 
     _positionDragHandle: function (block) {
