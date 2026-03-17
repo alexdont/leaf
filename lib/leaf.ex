@@ -204,6 +204,22 @@ defmodule Leaf do
               </button>
               <button
                 type="button"
+                data-toolbar-action="superscript"
+                class="btn btn-xs btn-ghost px-1.5"
+                title={t("Superscript")}
+              >
+                <span class="text-xs">X<sup class="text-[0.5rem]">2</sup></span>
+              </button>
+              <button
+                type="button"
+                data-toolbar-action="subscript"
+                class="btn btn-xs btn-ghost px-1.5"
+                title={t("Subscript")}
+              >
+                <span class="text-xs">X<sub class="text-[0.5rem]">2</sub></span>
+              </button>
+              <button
+                type="button"
                 data-toolbar-action="code"
                 class="btn btn-xs btn-ghost font-mono px-2"
                 title={t("Inline Code")}

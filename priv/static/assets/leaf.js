@@ -1124,6 +1124,12 @@
         case "strike":
           document.execCommand("strikeThrough", false, null);
           break;
+        case "superscript":
+          document.execCommand("superscript", false, null);
+          break;
+        case "subscript":
+          document.execCommand("subscript", false, null);
+          break;
         case "code":
           this._wrapSelectionWith("code");
           break;
@@ -1205,6 +1211,8 @@
         case "bold": if (fmt) fmt("**", "**"); break;
         case "italic": if (fmt) fmt("*", "*"); break;
         case "strike": if (fmt) fmt("~~", "~~"); break;
+        case "superscript": if (fmt) fmt("<sup>", "</sup>"); break;
+        case "subscript": if (fmt) fmt("<sub>", "</sub>"); break;
         case "code": if (fmt) fmt("`", "`"); break;
         case "heading1": if (pfx) pfx("# "); break;
         case "heading2": if (pfx) pfx("## "); break;
@@ -1533,6 +1541,12 @@
             break;
           case "strike":
             active = document.queryCommandState("strikeThrough");
+            break;
+          case "superscript":
+            active = document.queryCommandState("superscript");
+            break;
+          case "subscript":
+            active = document.queryCommandState("subscript");
             break;
           case "orderedList":
             active = document.queryCommandState("insertOrderedList");
