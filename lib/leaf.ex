@@ -131,6 +131,8 @@ defmodule Leaf do
     >
       <%!-- Toolbar --%>
       <div
+        id={"#{@id}-toolbar"}
+        phx-update="ignore"
         class="flex flex-wrap items-center gap-1 mb-2 p-2 bg-base-200 rounded-lg"
         data-visual-toolbar
       >

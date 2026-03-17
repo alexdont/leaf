@@ -183,6 +183,14 @@
     "  width: 1px; height: 0.875rem;",
     "  background: color-mix(in oklab, var(--color-base-content, #1f2937) 15%, transparent);",
     "}",
+
+    // Sticky toolbar
+    "[data-visual-toolbar].leaf-toolbar-sticky {",
+    "  position: fixed;",
+    "  z-index: 100;",
+    "  box-sizing: border-box;",
+    "}",
+    ".leaf-toolbar-placeholder { visibility: hidden; }",
   ].join("\n");
 
   function injectStyles() {
@@ -541,6 +549,7 @@
       }
 
       this._setupToolbar();
+      this._setupStickyToolbar();
       this._setupModeSwitcher();
       this._setupLinkPopover();
       this._setupImageDragAndDrop();
@@ -594,6 +603,18 @@
           this._dragHandleBlock = null;
         }
       }
+
+      // Re-insert sticky placeholder if morphdom removed it
+      if (
+        this._stickyPlaceholder &&
+        !this._stickyPlaceholder.parentNode &&
+        this._stickyToolbarEl
+      ) {
+        this._stickyToolbarEl.parentNode.insertBefore(
+          this._stickyPlaceholder,
+          this._stickyToolbarEl
+        );
+      }
     },
 
     destroyed() {
@@ -613,6 +634,7 @@
         this._imgObserver = null;
       }
 
+      this._cleanupStickyToolbar();
       this._closeEmojiPicker();
       this._dismissLinkPopover();
       if (this._onDocClickForPopover) {
@@ -981,6 +1003,106 @@
       });
     },
 
+    // -- Sticky toolbar --
+
+    _getStickyTopOffset: function () {
+      var maxBottom = 0;
+      var candidates = document.querySelectorAll(
+        "header, nav, [data-navbar], .navbar"
+      );
+      for (var i = 0; i < candidates.length; i++) {
+        var el = candidates[i];
+        var style = window.getComputedStyle(el);
+        var pos = style.position;
+        if (
+          (pos === "fixed" || pos === "sticky") &&
+          parseInt(style.top, 10) <= 0
+        ) {
+          var bottom = el.getBoundingClientRect().bottom;
+          if (bottom > maxBottom) maxBottom = bottom;
+        }
+      }
+      return maxBottom;
+    },
+
+    _setupStickyToolbar: function () {
+      var self = this;
+      this._stickyToolbarEl = this.el.querySelector("[data-visual-toolbar]");
+      if (!this._stickyToolbarEl) return;
+
+      // Create placeholder to prevent layout shift when toolbar becomes fixed
+      this._stickyPlaceholder = document.createElement("div");
+      this._stickyPlaceholder.className = "leaf-toolbar-placeholder";
+      this._stickyPlaceholder.style.display = "none";
+      this._stickyToolbarEl.parentNode.insertBefore(
+        this._stickyPlaceholder,
+        this._stickyToolbarEl
+      );
+
+      this._stickyScrollHandler = function () {
+        var toolbar = self._stickyToolbarEl;
+        var placeholder = self._stickyPlaceholder;
+        var editorRect = self.el.getBoundingClientRect();
+        var toolbarHeight = toolbar.offsetHeight;
+        var topOffset = self._getStickyTopOffset();
+
+        // Use placeholder position as the toolbar's natural position when sticky
+        var isSticky = toolbar.classList.contains("leaf-toolbar-sticky");
+        var refRect = isSticky
+          ? placeholder.getBoundingClientRect()
+          : toolbar.getBoundingClientRect();
+
+        if (
+          refRect.top < topOffset &&
+          editorRect.bottom > toolbarHeight + topOffset
+        ) {
+          if (!isSticky) {
+            placeholder.style.height = toolbarHeight + "px";
+            placeholder.style.display = "block";
+            toolbar.style.width = self.el.offsetWidth + "px";
+            toolbar.style.top = topOffset + "px";
+            toolbar.classList.add("leaf-toolbar-sticky");
+          } else {
+            // Update width and top offset on resize
+            toolbar.style.width = self.el.offsetWidth + "px";
+            toolbar.style.top = topOffset + "px";
+          }
+        } else {
+          if (isSticky) {
+            toolbar.classList.remove("leaf-toolbar-sticky");
+            toolbar.style.width = "";
+            toolbar.style.top = "";
+            placeholder.style.display = "none";
+          }
+        }
+      };
+
+      window.addEventListener("scroll", this._stickyScrollHandler, {
+        passive: true,
+      });
+      window.addEventListener("resize", this._stickyScrollHandler, {
+        passive: true,
+      });
+    },
+
+    _cleanupStickyToolbar: function () {
+      if (this._stickyScrollHandler) {
+        window.removeEventListener("scroll", this._stickyScrollHandler);
+        window.removeEventListener("resize", this._stickyScrollHandler);
+        this._stickyScrollHandler = null;
+      }
+      if (this._stickyPlaceholder && this._stickyPlaceholder.parentNode) {
+        this._stickyPlaceholder.parentNode.removeChild(this._stickyPlaceholder);
+        this._stickyPlaceholder = null;
+      }
+      if (this._stickyToolbarEl) {
+        this._stickyToolbarEl.classList.remove("leaf-toolbar-sticky");
+        this._stickyToolbarEl.style.width = "";
+        this._stickyToolbarEl.style.top = "";
+        this._stickyToolbarEl = null;
+      }
+    },
+
     _execToolbarAction: function (action) {
       if (this._readonly) return;
 
@@ -990,7 +1112,7 @@
       }
 
       if (!this._visualEl) return;
-      this._visualEl.focus();
+      this._visualEl.focus({ preventScroll: true });
 
       switch (action) {
         case "bold":
