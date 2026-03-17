@@ -219,6 +219,17 @@
     return result;
   }
 
+  // Move leading/trailing whitespace outside markers so markdown stays valid
+  // e.g. <i>works </i> → "*works* " instead of "*works *"
+  function wrapInline(text, marker) {
+    if (!text) return marker + marker;
+    var leading = text.match(/^(\s*)/)[0];
+    var trailing = text.match(/(\s*)$/)[0];
+    var trimmed = text.substring(leading.length, text.length - trailing.length);
+    if (!trimmed) return leading + trailing;
+    return leading + marker + trimmed + marker + trailing;
+  }
+
   function convertNode(node) {
     if (node.nodeType === Node.TEXT_NODE) {
       return node.textContent;
@@ -253,16 +264,16 @@
 
       case "strong":
       case "b":
-        return "**" + inner + "**";
+        return wrapInline(inner, "**");
 
       case "em":
       case "i":
-        return "*" + inner + "*";
+        return wrapInline(inner, "*");
 
       case "s":
       case "del":
       case "strike":
-        return "~~" + inner + "~~";
+        return wrapInline(inner, "~~");
 
       case "code":
         if (
