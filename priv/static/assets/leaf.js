@@ -571,6 +571,7 @@
         this._imgObserver = null;
       }
 
+      this._closeEmojiPicker();
       this._dismissLinkPopover();
       if (this._onDocClickForPopover) {
         document.removeEventListener("mousedown", this._onDocClickForPopover);
@@ -986,6 +987,9 @@
         case "link":
           this._insertLink();
           break;
+        case "emoji":
+          this._openEmojiPicker();
+          return; // skip updateToolbarState/push — picker handles it
         case "insert-image":
           this.pushEventTo(this.el, "insert_request", {
             editor_id: this._editorId,
@@ -1036,6 +1040,7 @@
         case "codeBlock": if (fmt) fmt("```\n", "\n```"); break;
         case "horizontalRule": if (ins) ins("\n---\n"); break;
         case "link": if (lnk) lnk(); break;
+        case "emoji": this._openEmojiPicker(); break;
         case "insert-image": this.pushEventTo(this.el, "insert_request", { editor_id: this._editorId, type: "image" }); break;
         case "insert-video": this.pushEventTo(this.el, "insert_request", { editor_id: this._editorId, type: "video" }); break;
         case "removeFormat": break;
@@ -1063,6 +1068,193 @@
         document.execCommand("formatBlock", false, "p");
       } else {
         document.execCommand("formatBlock", false, "blockquote");
+      }
+    },
+
+    // -- Emoji Picker --
+
+    _emojiCategories: [
+      { name: "Smileys", emojis: ["😀","😃","😄","😁","😆","😅","🤣","😂","🙂","🙃","😉","😊","😇","🥰","😍","🤩","😘","😗","😚","😙","🥲","😋","😛","😜","🤪","😝","🤑","🤗","🤭","🤫","🤔","🫡","🤐","🤨","😐","😑","😶","🫥","😏","😒","🙄","😬","🤥","😌","😔","😪","🤤","😴","😷","🤒","🤕","🤢","🤮","🥴","😵","🤯","🥳","🥸","😎","🤓","🧐"] },
+      { name: "Gestures", emojis: ["👋","🤚","🖐","✋","🖖","🫱","🫲","🫳","🫴","👌","🤌","🤏","✌️","🤞","🫰","🤟","🤘","🤙","👈","👉","👆","🖕","👇","☝️","🫵","👍","👎","✊","👊","🤛","🤜","👏","🙌","🫶","👐","🤲","🤝","🙏"] },
+      { name: "Hearts", emojis: ["❤️","🧡","💛","💚","💙","💜","🖤","🤍","🤎","💔","❤️‍🔥","❤️‍🩹","❣️","💕","💞","💓","💗","💖","💘","💝","💟"] },
+      { name: "Animals", emojis: ["🐶","🐱","🐭","🐹","🐰","🦊","🐻","🐼","🐻‍❄️","🐨","🐯","🦁","🐮","🐷","🐸","🐵","🐔","🐧","🐦","🐤","🦆","🦅","🦉","🦇","🐺","🐗","🐴","🦄","🐝","🐛","🦋","🐌","🐞"] },
+      { name: "Food", emojis: ["🍎","🍐","🍊","🍋","🍌","🍉","🍇","🍓","🫐","🍈","🍒","🍑","🥭","🍍","🥥","🥝","🍅","🥑","🍕","🍔","🍟","🌭","🍿","🧁","🍰","🎂","🍩","🍪","🍫","🍬","☕","🍵","🥤","🍺","🍷"] },
+      { name: "Travel", emojis: ["🚗","🚕","🚌","🏎","🚑","🚒","✈️","🚀","🛸","🚁","⛵","🚢","🏠","🏢","🏥","🏫","⛪","🕌","🗼","🗽","⛲","🌋","🏔","🏖","🏕"] },
+      { name: "Objects", emojis: ["⌚","📱","💻","⌨️","🖥","🖨","🖱","💾","💿","📷","📹","🎥","📺","📻","🎙","⏰","🔋","🔌","💡","🔦","🕯","💰","💳","💎","🔧","🔨","🔩","⚙️","📎","📌","✂️","🔑","🗝","🔒","🔓"] },
+      { name: "Symbols", emojis: ["✅","❌","❓","❗","💯","🔥","⭐","🌟","✨","💫","💥","💢","💤","🎵","🎶","🔔","🔕","📣","💬","💭","🏁","🚩","🎯","♻️","⚠️","🚫","❎","✳️","❇️","🔴","🟠","🟡","🟢","🔵","🟣","⚫","⚪"] }
+    ],
+
+    _openEmojiPicker: function () {
+      var self = this;
+
+      // Close if already open
+      if (this._emojiPicker) {
+        this._closeEmojiPicker();
+        return;
+      }
+
+      // Save selection so we can restore it after picking
+      var sel = window.getSelection();
+      if (sel.rangeCount > 0) {
+        this._savedRange = sel.getRangeAt(0).cloneRange();
+      }
+
+      var btn = this.el.querySelector('[data-toolbar-action="emoji"]');
+      if (!btn) return;
+
+      var picker = document.createElement("div");
+      picker.className = "leaf-emoji-picker";
+      picker.style.cssText = "position:absolute;z-index:50;background:var(--color-base-200, #e5e7eb);color:var(--color-base-content, #1f2937);border:1px solid var(--color-base-300, #d1d5db);border-radius:0.5rem;box-shadow:0 4px 16px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.08);padding:0.5rem;width:320px;max-height:360px;display:flex;flex-direction:column;";
+
+      // Search input
+      var searchWrap = document.createElement("div");
+      searchWrap.style.cssText = "margin-bottom:0.375rem;";
+      var searchInput = document.createElement("input");
+      searchInput.type = "text";
+      searchInput.placeholder = "Search emoji...";
+      searchInput.className = "input input-xs input-bordered w-full";
+      searchInput.style.cssText = "font-size:0.8rem;";
+      searchWrap.appendChild(searchInput);
+      picker.appendChild(searchWrap);
+
+      // Category tabs
+      var tabsWrap = document.createElement("div");
+      tabsWrap.style.cssText = "display:flex;gap:2px;margin-bottom:0.375rem;overflow-x:auto;flex-shrink:0;padding:0.25rem 0.125rem;border-bottom:1px solid var(--color-base-300, #d1d5db);";
+      picker.appendChild(tabsWrap);
+
+      // Grid container
+      var gridWrap = document.createElement("div");
+      gridWrap.style.cssText = "overflow-y:auto;flex:1;";
+      picker.appendChild(gridWrap);
+
+      var categories = this._emojiCategories;
+      var activeCategory = 0;
+
+      function renderGrid(emojis) {
+        gridWrap.innerHTML = "";
+        var grid = document.createElement("div");
+        grid.style.cssText = "display:grid;grid-template-columns:repeat(8,1fr);gap:2px;";
+        emojis.forEach(function (emoji) {
+          var span = document.createElement("span");
+          span.textContent = emoji;
+          span.style.cssText = "cursor:pointer;font-size:1.25rem;text-align:center;padding:3px;border-radius:4px;line-height:1;";
+          span.addEventListener("mouseover", function () { span.style.background = "color-mix(in oklab, var(--color-base-content, #1f2937) 8%, transparent)"; });
+          span.addEventListener("mouseout", function () { span.style.background = ""; });
+          span.addEventListener("click", function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            self._insertEmoji(emoji);
+            self._closeEmojiPicker();
+          });
+          grid.appendChild(span);
+        });
+        gridWrap.appendChild(grid);
+      }
+
+      function renderTabs() {
+        tabsWrap.innerHTML = "";
+        categories.forEach(function (cat, i) {
+          var tab = document.createElement("button");
+          tab.type = "button";
+          tab.textContent = cat.emojis[0];
+          tab.title = cat.name;
+          tab.style.cssText = "cursor:pointer;font-size:1.125rem;padding:4px 6px;border-radius:6px;border:none;background:" + (i === activeCategory ? "color-mix(in oklab, var(--color-base-content, #1f2937) 12%, transparent)" : "none") + ";line-height:1;transition:background 0.1s;";
+          tab.addEventListener("click", function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            activeCategory = i;
+            searchInput.value = "";
+            renderTabs();
+            renderGrid(categories[i].emojis);
+          });
+          tabsWrap.appendChild(tab);
+        });
+      }
+
+      // Search filtering
+      searchInput.addEventListener("input", function () {
+        var q = searchInput.value.toLowerCase().trim();
+        if (!q) {
+          renderTabs();
+          renderGrid(categories[activeCategory].emojis);
+          return;
+        }
+        // Flatten all emojis for search (simple: show all since emoji chars aren't searchable by name easily)
+        var all = [];
+        categories.forEach(function (cat) {
+          if (cat.name.toLowerCase().indexOf(q) !== -1) {
+            all = all.concat(cat.emojis);
+          }
+        });
+        if (all.length === 0) {
+          categories.forEach(function (cat) { all = all.concat(cat.emojis); });
+        }
+        renderGrid(all);
+      });
+
+      // Prevent picker clicks from stealing editor focus
+      picker.addEventListener("mousedown", function (e) {
+        e.preventDefault();
+      });
+
+      renderTabs();
+      renderGrid(categories[0].emojis);
+
+      // Position below the emoji button
+      var rect = btn.getBoundingClientRect();
+      var toolbarRect = btn.closest("[data-visual-toolbar]").getBoundingClientRect();
+      picker.style.left = Math.max(0, rect.left - toolbarRect.left) + "px";
+      picker.style.top = (rect.bottom - toolbarRect.top + 4) + "px";
+
+      btn.closest("[data-visual-toolbar]").style.position = "relative";
+      btn.closest("[data-visual-toolbar]").appendChild(picker);
+      this._emojiPicker = picker;
+
+      // Close on outside click
+      var closeHandler = function (e) {
+        if (!picker.contains(e.target) && e.target !== btn) {
+          self._closeEmojiPicker();
+        }
+      };
+      setTimeout(function () {
+        document.addEventListener("click", closeHandler);
+      }, 0);
+      this._emojiCloseHandler = closeHandler;
+
+      searchInput.focus();
+    },
+
+    _closeEmojiPicker: function () {
+      if (this._emojiPicker) {
+        this._emojiPicker.remove();
+        this._emojiPicker = null;
+      }
+      if (this._emojiCloseHandler) {
+        document.removeEventListener("click", this._emojiCloseHandler);
+        this._emojiCloseHandler = null;
+      }
+    },
+
+    _insertEmoji: function (emoji) {
+      if (this._mode === "markdown") {
+        // Insert into markdown textarea
+        var gid = this._editorId.replace(/-/g, "_") + "_markdown";
+        var ins = window["markdownEditorInsert_" + gid];
+        if (ins) ins(emoji);
+        return;
+      }
+
+      // Visual mode: restore saved selection and insert
+      if (this._visualEl) {
+        this._visualEl.focus();
+        if (this._savedRange) {
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(this._savedRange);
+          this._savedRange = null;
+        }
+        document.execCommand("insertText", false, emoji);
+        this._debouncedPushVisualChange();
       }
     },
 
