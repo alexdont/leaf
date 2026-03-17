@@ -422,6 +422,48 @@
     if (pushFn) pushFn(textarea.value);
   }
 
+  function markdownIndent(textarea, direction, pushFn) {
+    var start = textarea.selectionStart;
+    var end = textarea.selectionEnd;
+    var text = textarea.value;
+
+    // Find all lines in selection (or current line if no selection)
+    var lineStart = text.lastIndexOf("\n", start - 1) + 1;
+    var lineEnd = text.indexOf("\n", end);
+    if (lineEnd === -1) lineEnd = text.length;
+
+    var block = text.substring(lineStart, lineEnd);
+    var lines = block.split("\n");
+    var indent = "  ";
+    var delta = 0;
+    var firstDelta = 0;
+
+    var result = lines.map(function (line, i) {
+      if (direction === "indent") {
+        if (i === 0) firstDelta = indent.length;
+        delta += indent.length;
+        return indent + line;
+      } else {
+        if (line.startsWith(indent)) {
+          if (i === 0) firstDelta = -indent.length;
+          delta -= indent.length;
+          return line.substring(indent.length);
+        } else if (line.startsWith(" ")) {
+          if (i === 0) firstDelta = -1;
+          delta -= 1;
+          return line.substring(1);
+        }
+        return line;
+      }
+    });
+
+    textarea.value = text.substring(0, lineStart) + result.join("\n") + text.substring(lineEnd);
+    textarea.selectionStart = Math.max(lineStart, start + firstDelta);
+    textarea.selectionEnd = end + delta;
+    textarea.focus();
+    if (pushFn) pushFn(textarea.value);
+  }
+
   function markdownLink(textarea, pushFn) {
     var start = textarea.selectionStart;
     var end = textarea.selectionEnd;
@@ -583,6 +625,7 @@
       delete window["markdownLinePrefix_" + gid];
       delete window["markdownLink_" + gid];
       delete window["markdownEditorInsert_" + gid];
+      delete window["markdownIndent_" + gid];
     },
 
     // -- Markdown textarea setup --
@@ -613,6 +656,11 @@
       window["markdownEditorInsert_" + gid] = function (snippet) {
         var ta = self._getMarkdownTextarea();
         if (ta) markdownInsert(ta, snippet, pushFn);
+      };
+
+      window["markdownIndent_" + gid] = function (direction) {
+        var ta = self._getMarkdownTextarea();
+        if (ta) markdownIndent(ta, direction, pushFn);
       };
     },
 
@@ -975,6 +1023,12 @@
         case "orderedList":
           document.execCommand("insertOrderedList", false, null);
           break;
+        case "indent":
+          document.execCommand("indent", false, null);
+          break;
+        case "outdent":
+          document.execCommand("outdent", false, null);
+          break;
         case "blockquote":
           this._toggleBlockquote();
           break;
@@ -1036,6 +1090,8 @@
         case "heading4": if (pfx) pfx("#### "); break;
         case "bulletList": if (pfx) pfx("- "); break;
         case "orderedList": if (pfx) pfx("1. "); break;
+        case "indent": { var ind = window["markdownIndent_" + gid]; if (ind) ind("indent"); break; }
+        case "outdent": { var ind = window["markdownIndent_" + gid]; if (ind) ind("outdent"); break; }
         case "blockquote": if (pfx) pfx("> "); break;
         case "codeBlock": if (fmt) fmt("```\n", "\n```"); break;
         case "horizontalRule": if (ins) ins("\n---\n"); break;

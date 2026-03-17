@@ -296,6 +296,44 @@ defmodule Leaf do
               </button>
               <button
                 type="button"
+                data-toolbar-action="indent"
+                class="btn btn-xs btn-ghost px-2"
+                title={t("Increase Indent")}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  class="w-3.5 h-3.5"
+                >
+                  <path
+                    fill-rule="evenodd"
+                    d="M2 3.75A.75.75 0 012.75 3h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 3.75zm0 12.5A.75.75 0 012.75 15.5h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75zM8.75 7.5a.75.75 0 000 1.5h8.5a.75.75 0 000-1.5h-8.5zM8 11.75a.75.75 0 01.75-.75h8.5a.75.75 0 010 1.5h-8.5a.75.75 0 01-.75-.75zM2.22 9.47a.75.75 0 011.06 0L5.03 11.22a.75.75 0 010 1.06l-1.75 1.75a.75.75 0 01-1.06-1.06l1.22-1.22-1.22-1.22a.75.75 0 010-1.06z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
+              </button>
+              <button
+                type="button"
+                data-toolbar-action="outdent"
+                class="btn btn-xs btn-ghost px-2"
+                title={t("Decrease Indent")}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  class="w-3.5 h-3.5"
+                >
+                  <path
+                    fill-rule="evenodd"
+                    d="M2 3.75A.75.75 0 012.75 3h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 3.75zm0 12.5A.75.75 0 012.75 15.5h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75zM8.75 7.5a.75.75 0 000 1.5h8.5a.75.75 0 000-1.5h-8.5zM8 11.75a.75.75 0 01.75-.75h8.5a.75.75 0 010 1.5h-8.5a.75.75 0 01-.75-.75zM5.78 9.47a.75.75 0 010 1.06L4.56 11.75l1.22 1.22a.75.75 0 11-1.06 1.06L2.97 12.28a.75.75 0 010-1.06l1.75-1.75a.75.75 0 011.06 0z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
+              </button>
+              <button
+                type="button"
                 data-toolbar-action="blockquote"
                 class="btn btn-xs btn-ghost px-2"
                 title={t("Blockquote")}
