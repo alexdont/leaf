@@ -1144,7 +1144,6 @@
             e.preventDefault();
             e.stopPropagation();
             self._insertEmoji(emoji);
-            self._closeEmojiPicker();
           });
           grid.appendChild(span);
         });
