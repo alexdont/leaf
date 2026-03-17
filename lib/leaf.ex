@@ -476,52 +476,6 @@ defmodule Leaf do
                   </svg>
                 </button>
               <% end %>
-              <button
-                type="button"
-                data-toolbar-action="blockquote"
-                class="btn btn-xs btn-ghost px-2"
-                title={t("Blockquote")}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  class="w-3.5 h-3.5"
-                >
-                  <path
-                    fill-rule="evenodd"
-                    d="M2 3.75A.75.75 0 012.75 3h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 3.75zm3 4A.75.75 0 015.75 7h8.5a.75.75 0 010 1.5h-8.5A.75.75 0 015 7.75zm0 4A.75.75 0 015.75 11h8.5a.75.75 0 010 1.5h-8.5a.75.75 0 01-.75-.75zm-3 4A.75.75 0 012.75 15h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75z"
-                    clip-rule="evenodd"
-                  />
-                </svg>
-              </button>
-              <button
-                type="button"
-                data-toolbar-action="codeBlock"
-                class="btn btn-xs btn-ghost px-2"
-                title={t("Code Block")}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  class="w-3.5 h-3.5"
-                >
-                  <path
-                    fill-rule="evenodd"
-                    d="M6.28 5.22a.75.75 0 010 1.06L2.56 10l3.72 3.72a.75.75 0 01-1.06 1.06L.97 10.53a.75.75 0 010-1.06l4.25-4.25a.75.75 0 011.06 0zm7.44 0a.75.75 0 011.06 0l4.25 4.25a.75.75 0 010 1.06l-4.25 4.25a.75.75 0 01-1.06-1.06L17.44 10l-3.72-3.72a.75.75 0 010-1.06zM11.377 2.011a.75.75 0 01.612.867l-2.5 14.5a.75.75 0 01-1.478-.255l2.5-14.5a.75.75 0 01.866-.612z"
-                    clip-rule="evenodd"
-                  />
-                </svg>
-              </button>
-              <button
-                type="button"
-                data-toolbar-action="horizontalRule"
-                class="btn btn-xs btn-ghost px-2"
-                title={t("Horizontal Rule")}
-              >
-                &mdash;
-              </button>
               <%!-- Table dropdown --%>
               <div class="relative" data-table-dropdown>
                 <button
@@ -587,6 +541,71 @@ defmodule Leaf do
                         <path fill-rule="evenodd" d="M4 10a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H4.75A.75.75 0 0 1 4 10Z" clip-rule="evenodd" />
                       </svg>
                       <span>{t("Remove Column")}</span>
+                    </button>
+                  </li>
+                </ul>
+              </div>
+              <%!-- More inserts --%>
+              <div class="relative" data-insert-more-dropdown>
+                <button
+                  type="button"
+                  class="btn btn-xs btn-ghost px-1.5"
+                  title={t("More inserts")}
+                  data-insert-more-trigger
+                >
+                  <span class="text-base font-bold leading-none">&#8942;</span>
+                </button>
+                <ul
+                  class="hidden absolute top-full left-0 menu bg-base-200 rounded-box z-50 w-40 p-1 shadow-sm"
+                  data-insert-more-menu
+                >
+                  <li>
+                    <button
+                      type="button"
+                      data-toolbar-action="blockquote"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        class="w-3.5 h-3.5"
+                      >
+                        <path
+                          fill-rule="evenodd"
+                          d="M2 3.75A.75.75 0 012.75 3h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 3.75zm3 4A.75.75 0 015.75 7h8.5a.75.75 0 010 1.5h-8.5A.75.75 0 015 7.75zm0 4A.75.75 0 015.75 11h8.5a.75.75 0 010 1.5h-8.5a.75.75 0 01-.75-.75zm-3 4A.75.75 0 012.75 15h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75z"
+                          clip-rule="evenodd"
+                        />
+                      </svg>
+                      <span>{t("Blockquote")}</span>
+                    </button>
+                  </li>
+                  <li>
+                    <button
+                      type="button"
+                      data-toolbar-action="codeBlock"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        class="w-3.5 h-3.5"
+                      >
+                        <path
+                          fill-rule="evenodd"
+                          d="M6.28 5.22a.75.75 0 010 1.06L2.56 10l3.72 3.72a.75.75 0 01-1.06 1.06L.97 10.53a.75.75 0 010-1.06l4.25-4.25a.75.75 0 011.06 0zm7.44 0a.75.75 0 011.06 0l4.25 4.25a.75.75 0 010 1.06l-4.25 4.25a.75.75 0 01-1.06-1.06L17.44 10l-3.72-3.72a.75.75 0 010-1.06zM11.377 2.011a.75.75 0 01.612.867l-2.5 14.5a.75.75 0 01-1.478-.255l2.5-14.5a.75.75 0 01.866-.612z"
+                          clip-rule="evenodd"
+                        />
+                      </svg>
+                      <span>{t("Code Block")}</span>
+                    </button>
+                  </li>
+                  <li>
+                    <button
+                      type="button"
+                      data-toolbar-action="horizontalRule"
+                    >
+                      <span class="text-lg font-bold">&mdash;</span>
+                      <span>{t("Horizontal Rule")}</span>
                     </button>
                   </li>
                 </ul>

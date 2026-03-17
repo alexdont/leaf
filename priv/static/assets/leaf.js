@@ -1043,6 +1043,40 @@
         });
       });
 
+      // Toolbar dropdowns: toggle menus without stealing editor focus
+      var dropdowns = [
+        { trigger: "[data-heading-trigger]", menu: "[data-heading-menu]" },
+        { trigger: "[data-inline-more-trigger]", menu: "[data-inline-more-menu]" },
+        { trigger: "[data-table-trigger]", menu: "[data-table-menu]" },
+        { trigger: "[data-insert-more-trigger]", menu: "[data-insert-more-menu]" }
+      ];
+      dropdowns.forEach(function (cfg) {
+        var trigger = self.el.querySelector(cfg.trigger);
+        var menu = self.el.querySelector(cfg.menu);
+        if (!trigger || !menu) return;
+        trigger.addEventListener("mousedown", function (e) { e.preventDefault(); });
+        menu.addEventListener("mousedown", function (e) { e.preventDefault(); });
+        trigger.addEventListener("click", function (e) {
+          e.preventDefault();
+          // Close other dropdown menus first
+          dropdowns.forEach(function (other) {
+            if (other.menu !== cfg.menu) {
+              var otherMenu = self.el.querySelector(other.menu);
+              if (otherMenu) otherMenu.classList.add("hidden");
+            }
+          });
+          menu.classList.toggle("hidden");
+        });
+        menu.querySelectorAll("[data-toolbar-action]").forEach(function (btn) {
+          btn.addEventListener("click", function () { menu.classList.add("hidden"); });
+        });
+        document.addEventListener("mousedown", function (e) {
+          if (!trigger.contains(e.target) && !menu.contains(e.target)) {
+            menu.classList.add("hidden");
+          }
+        });
+      });
+
       document.addEventListener("selectionchange", function () {
         if (self._mode === "visual" && self._visualEl) {
           var sel = window.getSelection();
