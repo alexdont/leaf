@@ -208,7 +208,18 @@ defmodule Leaf do
                 class="btn btn-xs btn-ghost font-mono px-2"
                 title={t("Inline Code")}
               >
-                <.icon name="hero-code-bracket" class="w-3.5 h-3.5" />
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  class="w-3.5 h-3.5"
+                >
+                  <path
+                    fill-rule="evenodd"
+                    d="M6.28 5.22a.75.75 0 010 1.06L2.56 10l3.72 3.72a.75.75 0 01-1.06 1.06L.97 10.53a.75.75 0 010-1.06l4.25-4.25a.75.75 0 011.06 0zm7.44 0a.75.75 0 011.06 0l4.25 4.25a.75.75 0 010 1.06l-4.25 4.25a.75.75 0 01-1.06-1.06L17.44 10l-3.72-3.72a.75.75 0 010-1.06z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
               </button>
             </div>
 
@@ -222,7 +233,15 @@ defmodule Leaf do
                 class="btn btn-xs btn-ghost px-2"
                 title={t("Insert Link")}
               >
-                <.icon name="hero-link" class="w-3.5 h-3.5" />
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  class="w-3.5 h-3.5"
+                >
+                  <path d="M12.232 4.232a2.5 2.5 0 013.536 3.536l-1.225 1.224a.75.75 0 001.061 1.06l1.224-1.224a4 4 0 00-5.656-5.656l-3 3a4 4 0 00.225 5.865.75.75 0 00.977-1.138 2.5 2.5 0 01-.142-3.667l3-3z" />
+                  <path d="M11.603 7.963a.75.75 0 00-.977 1.138 2.5 2.5 0 01.142 3.667l-3 3a2.5 2.5 0 01-3.536-3.536l1.225-1.224a.75.75 0 00-1.061-1.06l-1.224 1.224a4 4 0 105.656 5.656l3-3a4 4 0 00-.225-5.865z" />
+                </svg>
               </button>
               <%= if :image in @toolbar do %>
                 <button
@@ -231,7 +250,18 @@ defmodule Leaf do
                   class="btn btn-xs btn-ghost px-2"
                   title={t("Insert Image")}
                 >
-                  <.icon name="hero-photo" class="w-3.5 h-3.5" />
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    class="w-3.5 h-3.5"
+                  >
+                    <path
+                      fill-rule="evenodd"
+                      d="M1 5.25A2.25 2.25 0 013.25 3h13.5A2.25 2.25 0 0119 5.25v9.5A2.25 2.25 0 0116.75 17H3.25A2.25 2.25 0 011 14.75v-9.5zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 00.75-.75v-2.69l-2.22-2.219a.75.75 0 00-1.06 0l-1.91 1.909-4.97-4.969a.75.75 0 00-1.06 0L2.5 11.06zm10-3.56a1.5 1.5 0 113 0 1.5 1.5 0 01-3 0z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
                 </button>
               <% end %>
               <%= if :video in @toolbar do %>
@@ -241,7 +271,14 @@ defmodule Leaf do
                   class="btn btn-xs btn-ghost px-2"
                   title={t("Insert Video")}
                 >
-                  <.icon name="hero-video-camera" class="w-3.5 h-3.5" />
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    class="w-3.5 h-3.5"
+                  >
+                    <path d="M3.25 4A2.25 2.25 0 001 6.25v7.5A2.25 2.25 0 003.25 16h7.5A2.25 2.25 0 0013 13.75v-7.5A2.25 2.25 0 0010.75 4h-7.5zM19 4.75a.75.75 0 00-1.28-.53l-3 3a.75.75 0 00-.22.53v4.5c0 .199.079.39.22.53l3 3A.75.75 0 0019 15.25v-10.5z" />
+                  </svg>
                 </button>
               <% end %>
             </div>
@@ -279,7 +316,18 @@ defmodule Leaf do
                 class="btn btn-xs btn-ghost px-2"
                 title={t("Bullet List")}
               >
-                <.icon name="hero-list-bullet" class="w-3.5 h-3.5" />
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  class="w-3.5 h-3.5"
+                >
+                  <path
+                    fill-rule="evenodd"
+                    d="M6 4.75A.75.75 0 016.75 4h10.5a.75.75 0 010 1.5H6.75A.75.75 0 016 4.75zM6 10a.75.75 0 01.75-.75h10.5a.75.75 0 010 1.5H6.75A.75.75 0 016 10zm0 5.25a.75.75 0 01.75-.75h10.5a.75.75 0 010 1.5H6.75a.75.75 0 01-.75-.75zM1.99 4.75a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1v-.01zM1.99 15.25a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1v-.01zM1.99 10a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1V10z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
               </button>
               <button
                 type="button"
@@ -407,7 +455,18 @@ defmodule Leaf do
                 class="btn btn-xs btn-ghost px-2"
                 title={t("Undo")}
               >
-                <.icon name="hero-arrow-uturn-left" class="w-3.5 h-3.5" />
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  class="w-3.5 h-3.5"
+                >
+                  <path
+                    fill-rule="evenodd"
+                    d="M7.793 2.232a.75.75 0 01-.025 1.06L3.622 7.25h10.003a5.375 5.375 0 010 10.75H10.75a.75.75 0 010-1.5h2.875a3.875 3.875 0 000-7.75H3.622l4.146 3.957a.75.75 0 01-1.036 1.085l-5.5-5.25a.75.75 0 010-1.085l5.5-5.25a.75.75 0 011.06.025z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
               </button>
               <button
                 type="button"
@@ -415,7 +474,18 @@ defmodule Leaf do
                 class="btn btn-xs btn-ghost px-2"
                 title={t("Redo")}
               >
-                <.icon name="hero-arrow-uturn-right" class="w-3.5 h-3.5" />
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  class="w-3.5 h-3.5"
+                >
+                  <path
+                    fill-rule="evenodd"
+                    d="M12.207 2.232a.75.75 0 00.025 1.06l4.146 3.958H6.375a5.375 5.375 0 000 10.75H9.25a.75.75 0 000-1.5H6.375a3.875 3.875 0 010-7.75h10.003l-4.146 3.957a.75.75 0 001.036 1.085l5.5-5.25a.75.75 0 000-1.085l-5.5-5.25a.75.75 0 00-1.06.025z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
               </button>
             </div>
           </div>
@@ -433,7 +503,19 @@ defmodule Leaf do
             class={["btn btn-xs px-2", (@mode == :visual && "btn-active") || "btn-ghost"]}
             title={t("Visual mode")}
           >
-            <.icon name="hero-eye" class="w-3.5 h-3.5" />
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              class="w-3.5 h-3.5"
+            >
+              <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
+              <path
+                fill-rule="evenodd"
+                d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
+                clip-rule="evenodd"
+              />
+            </svg>
           </button>
           <button
             type="button"
