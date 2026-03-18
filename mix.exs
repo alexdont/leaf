@@ -1,7 +1,7 @@
 defmodule Leaf.MixProject do
   use Mix.Project
 
-  @version "0.2.0"
+  @version "0.2.1"
   @source_url "https://github.com/alexdont/leaf"
 
   def project do
@@ -15,7 +15,8 @@ defmodule Leaf.MixProject do
       description: "Dual-mode visual WYSIWYG + markdown editor for Phoenix LiveView",
       package: package(),
       docs: docs(),
-      source_url: @source_url
+      source_url: @source_url,
+      dialyzer: [plt_add_apps: [:mix]]
     ]
   end
 
@@ -31,7 +32,9 @@ defmodule Leaf.MixProject do
       {:phoenix_html, "~> 4.0"},
       {:earmark, "~> 1.4"},
       {:gettext, "~> 0.26 or ~> 1.0", optional: true},
-      {:ex_doc, "~> 0.34", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.34", only: :dev, runtime: false},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
     ]
   end
 

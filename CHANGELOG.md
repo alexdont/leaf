@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Add editor footer with live word and character count
+
 ## 0.2.0
 
 - Add drag-and-drop block reordering for images and any block element
