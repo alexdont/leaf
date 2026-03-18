@@ -58,7 +58,6 @@ defmodule Leaf do
   use Phoenix.LiveComponent
 
   import Phoenix.HTML, only: [raw: 1]
-  import Leaf.Icon, only: [icon: 1]
 
   @impl true
   def mount(socket) do
