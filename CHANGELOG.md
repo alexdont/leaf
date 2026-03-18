@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0
+
+- Add drag-and-drop block reordering for images and any block element
+- Add drag handles for easier block manipulation with margin hover activation
+- Add image resize handles with persistent dimensions through save
+- Add table support with insert, add/remove row and column operations
+- Add More Inserts dropdown to toolbar for organized insert options
+- Add superscript and subscript toolbar buttons
+- Add indent/outdent toolbar buttons
+- Add emoji picker toolbar button (keeps open for multiple inserts)
+- Update toolbar icons to Heroicons
+- Fix italic/bold/strikethrough lost on save due to whitespace in markers
+- Add sticky toolbar navbar offset detection and morphdom resilience
+
 ## 0.1.0
 
 - Initial release
