@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2
+
+- Add `leaf_editor/1` function component wrapper for cleaner `<.leaf_editor />` syntax
+
 ## 0.2.1
 
 - Add editor footer with live word and character count
