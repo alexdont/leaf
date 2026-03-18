@@ -57,6 +57,30 @@ Leaf's toolbar uses [Tailwind CSS](https://tailwindcss.com/) + [daisyUI](https:/
 
 ## Usage
 
+First, import the component in your view helpers (e.g., in `my_app_web.ex`):
+
+```elixir
+import Leaf, only: [leaf_editor: 1]
+```
+
+Then use it in your templates:
+
+```heex
+<.leaf_editor
+  id="my-editor"
+  content={@content}
+  mode={:visual}
+  toolbar={[:image, :video]}
+  placeholder="Write something..."
+  readonly={false}
+  height="480px"
+  debounce={400}
+/>
+```
+
+<details>
+<summary>Alternative: direct LiveComponent syntax</summary>
+
 ```heex
 <.live_component
   module={Leaf}
@@ -70,6 +94,7 @@ Leaf's toolbar uses [Tailwind CSS](https://tailwindcss.com/) + [daisyUI](https:/
   debounce={400}
 />
 ```
+</details>
 
 ### Assigns
 

@@ -9,8 +9,9 @@ defmodule Leaf do
 
   ## Usage
 
-      <.live_component
-        module={Leaf}
+      import Leaf, only: [leaf_editor: 1]
+
+      <.leaf_editor
         id="my-editor"
         content={@content}
         mode={:visual}
@@ -58,6 +59,39 @@ defmodule Leaf do
   use Phoenix.LiveComponent
 
   import Phoenix.HTML, only: [raw: 1]
+
+  @doc """
+  Renders a Leaf editor as a function component.
+
+  This is a convenience wrapper around the `Leaf` LiveComponent.
+  Import it in your view helpers:
+
+      import Leaf, only: [leaf_editor: 1]
+
+  Then use it in your templates:
+
+      <.leaf_editor id="my-editor" content={@content} />
+
+  All attributes are passed through to the underlying LiveComponent.
+  """
+  attr(:id, :string, required: true)
+  attr(:content, :string, default: "")
+  attr(:mode, :atom, default: :visual, values: [:visual, :markdown, :html])
+  attr(:toolbar, :list, default: [])
+  attr(:placeholder, :string, default: "Write something...")
+  attr(:readonly, :boolean, default: false)
+  attr(:height, :string, default: "480px")
+  attr(:debounce, :integer, default: 400)
+  attr(:upload_handler, :any, default: nil)
+  attr(:class, :string, default: nil)
+  attr(:script_nonce, :string, default: "")
+  attr(:rest, :global)
+
+  def leaf_editor(assigns) do
+    ~H"""
+    <.live_component module={Leaf} {assigns} />
+    """
+  end
 
   @impl true
   def mount(socket) do
