@@ -681,61 +681,68 @@ defmodule Leaf do
         </div>
       </div>
 
-      <%!-- Visual Editor (contenteditable) --%>
-      <div data-visual-wrapper class={["relative", @mode != :visual && "hidden"]}>
-        <%!-- Block drag handle (positioned by JS) --%>
-        <div data-drag-handle class="leaf-drag-handle" style="display:none">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor">
-            <circle cx="5.5" cy="3.5" r="1.5" /><circle cx="10.5" cy="3.5" r="1.5" />
-            <circle cx="5.5" cy="8" r="1.5" /><circle cx="10.5" cy="8" r="1.5" />
-            <circle cx="5.5" cy="12.5" r="1.5" /><circle cx="10.5" cy="12.5" r="1.5" />
-          </svg>
+      <div class="border border-base-300 overflow-hidden" style="border-radius: 0.5rem">
+        <%!-- Visual Editor (contenteditable) --%>
+        <div data-visual-wrapper class={["relative", @mode != :visual && "hidden"]}>
+          <%!-- Block drag handle (positioned by JS) --%>
+          <div data-drag-handle class="leaf-drag-handle" style="display:none">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor">
+              <circle cx="5.5" cy="3.5" r="1.5" /><circle cx="10.5" cy="3.5" r="1.5" />
+              <circle cx="5.5" cy="8" r="1.5" /><circle cx="10.5" cy="8" r="1.5" />
+              <circle cx="5.5" cy="12.5" r="1.5" /><circle cx="10.5" cy="12.5" r="1.5" />
+            </svg>
+          </div>
+          <div
+            id={"#{@id}-visual"}
+            data-editor-visual
+            phx-update="ignore"
+            contenteditable={if @readonly, do: "false", else: "true"}
+            class={[
+              "content-editor-visual",
+              "overflow-y-auto p-4 pl-10",
+              "focus:outline-2 focus:outline-primary/50 focus:-outline-offset-1",
+              @readonly && "opacity-70 cursor-not-allowed"
+            ]}
+            style={"min-height: #{@height}"}
+          >
+            {raw(@visual_html)}
+          </div>
         </div>
-        <div
-          id={"#{@id}-visual"}
-          data-editor-visual
-          phx-update="ignore"
-          contenteditable={if @readonly, do: "false", else: "true"}
-          class={[
-            "content-editor-visual",
-            "border border-base-300 rounded-lg overflow-y-auto p-4 pl-10",
-            "focus:outline-2 focus:outline-primary/50 focus:-outline-offset-1",
-            @readonly && "opacity-70 cursor-not-allowed"
-          ]}
-          style={"min-height: #{@height}"}
-        >
-          {raw(@visual_html)}
+
+        <%!-- Markdown Mode: Plain textarea --%>
+        <div data-markdown-wrapper class={[@mode != :markdown && "hidden"]}>
+          <textarea
+            id={"#{@id}-markdown-textarea"}
+            class={[
+              "textarea w-full font-mono text-sm leading-relaxed border-0 rounded-none focus:outline-none focus:ring-0",
+              @readonly && "opacity-70 cursor-not-allowed"
+            ]}
+            style={"min-height: #{@height}; resize: vertical;"}
+            placeholder={@placeholder}
+            readonly={@readonly}
+            phx-debounce={@debounce}
+          ><%= @content %></textarea>
         </div>
-      </div>
 
-      <%!-- Markdown Mode: Plain textarea --%>
-      <div data-markdown-wrapper class={[@mode != :markdown && "hidden"]}>
-        <textarea
-          id={"#{@id}-markdown-textarea"}
-          class={[
-            "textarea textarea-bordered w-full font-mono text-sm leading-relaxed",
-            @readonly && "opacity-70 cursor-not-allowed"
-          ]}
-          style={"min-height: #{@height}; resize: vertical;"}
-          placeholder={@placeholder}
-          readonly={@readonly}
-          phx-debounce={@debounce}
-        ><%= @content %></textarea>
-      </div>
+        <%!-- HTML Mode: Plain textarea --%>
+        <div data-html-wrapper class={[@mode != :html && "hidden"]}>
+          <textarea
+            id={"#{@id}-html-textarea"}
+            class={[
+              "textarea w-full font-mono text-sm leading-relaxed border-0 rounded-none focus:outline-none focus:ring-0",
+              @readonly && "opacity-70 cursor-not-allowed"
+            ]}
+            style={"min-height: #{@height}; resize: vertical;"}
+            placeholder="<p>Write HTML here...</p>"
+            readonly={@readonly}
+            phx-debounce={@debounce}
+          ><%= @visual_html %></textarea>
+        </div>
 
-      <%!-- HTML Mode: Plain textarea --%>
-      <div data-html-wrapper class={[@mode != :html && "hidden"]}>
-        <textarea
-          id={"#{@id}-html-textarea"}
-          class={[
-            "textarea textarea-bordered w-full font-mono text-sm leading-relaxed",
-            @readonly && "opacity-70 cursor-not-allowed"
-          ]}
-          style={"min-height: #{@height}; resize: vertical;"}
-          placeholder="<p>Write HTML here...</p>"
-          readonly={@readonly}
-          phx-debounce={@debounce}
-        ><%= @visual_html %></textarea>
+        <div data-editor-footer class="flex justify-end gap-4 px-3 py-1 text-xs text-base-content/50 border-t border-base-300">
+          <span data-word-count>0 words</span>
+          <span data-char-count>0 chars</span>
+        </div>
       </div>
     </div>
     """

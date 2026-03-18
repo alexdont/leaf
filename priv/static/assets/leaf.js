@@ -610,6 +610,10 @@
       this._setupMarkdownTextarea();
       this._setupHtmlTextarea();
 
+      this._wordCountEl = this.el.querySelector("[data-word-count]");
+      this._charCountEl = this.el.querySelector("[data-char-count]");
+      this._updateCounts();
+
       // Handle commands from LiveView
       this.handleEvent(
         "leaf-command:" + this._editorId,
@@ -746,6 +750,7 @@
 
       this._markdownInputHandler = function () {
         self._debouncedPushMarkdownChange(textarea.value);
+        self._updateCounts();
       };
 
       textarea.addEventListener("input", this._markdownInputHandler);
@@ -772,6 +777,7 @@
 
       textarea.addEventListener("input", function () {
         self._debouncedPushHtmlChange(textarea.value);
+        self._updateCounts();
       });
     },
 
@@ -793,12 +799,37 @@
       }, this._debounceMs);
     },
 
+    // -- Footer counts --
+
+    _updateCounts: function () {
+      if (!this._wordCountEl || !this._charCountEl) return;
+
+      var text = "";
+      if (this._mode === "visual") {
+        text = this._visualEl ? this._visualEl.innerText : "";
+      } else if (this._mode === "markdown") {
+        var ta = this._getMarkdownTextarea();
+        text = ta ? ta.value : "";
+      } else if (this._mode === "html") {
+        var ta = this._getHtmlTextarea();
+        text = ta ? ta.value : "";
+      }
+
+      var trimmed = text.trim();
+      var words = trimmed === "" ? 0 : trimmed.split(/\s+/).length;
+      var chars = trimmed.length;
+
+      this._wordCountEl.textContent = words + (words === 1 ? " word" : " words");
+      this._charCountEl.textContent = chars + (chars === 1 ? " char" : " chars");
+    },
+
     // -- Event handlers --
 
     _onVisualInput: function () {
       if (this._mode !== "visual") return;
       this._dismissLinkPopover();
       this._debouncedPushVisualChange();
+      this._updateCounts();
     },
 
     _onVisualKeydown: function (e) {
@@ -937,6 +968,8 @@
             mode: newMode,
             content: currentMarkdown,
           });
+
+          self._updateCounts();
         });
       });
     },
