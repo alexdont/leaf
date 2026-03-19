@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.4
+
+- Remove blue focus outline from contenteditable editor area
+
 ## 0.2.3
 
 - Fix footer word/char counts resetting to zero on component re-render
