@@ -773,7 +773,7 @@ defmodule Leaf do
           ><%= @visual_html %></textarea>
         </div>
 
-        <div data-editor-footer class="flex justify-end gap-4 px-3 py-1 text-xs text-base-content/50 border-t border-base-300">
+        <div id={"#{@id}-footer"} phx-update="ignore" data-editor-footer class="flex justify-end gap-4 px-3 py-1 text-xs text-base-content/50 border-t border-base-300">
           <span data-word-count>0 words</span>
           <span data-char-count>0 chars</span>
         </div>
