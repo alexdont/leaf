@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.3
+
+- Fix footer word/char counts resetting to zero on component re-render
+
 ## 0.2.2
 
 - Add `leaf_editor/1` function component wrapper for cleaner `<.leaf_editor />` syntax
