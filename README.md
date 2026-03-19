@@ -2,7 +2,9 @@
 
 Dual-mode visual WYSIWYG + markdown editor for Phoenix LiveView.
 
-![Leaf Editor](priv/static/images/leaf-editor.png)
+**[Live Demo](https://sasha.don.ee/demo/leaf)**
+
+![Leaf Editor](https://sasha.don.ee/phoenix_kit/file/019d0675-4bb1-7e02-8e51-17f02a37fafe/original/f2bd)
 
 - **Visual mode**: contenteditable div with toolbar formatting (bold, italic, headings, lists, links, code blocks, etc.)
 - **Drag-and-drop reordering**: drag any block element (headings, paragraphs, lists, images, blockquotes, code blocks) to rearrange content
