@@ -734,7 +734,7 @@ defmodule Leaf do
             class={[
               "content-editor-visual",
               "overflow-y-auto p-4 pl-10",
-              "focus:outline-2 focus:outline-primary/50 focus:-outline-offset-1",
+              "focus:outline-none",
               @readonly && "opacity-70 cursor-not-allowed"
             ]}
             style={"min-height: #{@height}"}
