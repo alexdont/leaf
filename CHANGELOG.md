@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.5
+
+- Add image insert by URL with split button toolbar (upload + by URL options)
+- Add inline URL dialog with alt text support for both visual and markdown modes
+- Bump sticky toolbar z-index for better stacking with fixed navbars
+
 ## 0.2.4
 
 - Remove blue focus outline from contenteditable editor area
