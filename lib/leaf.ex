@@ -161,6 +161,7 @@ defmodule Leaf do
       data-debounce={@debounce}
       data-readonly={@readonly}
       data-height={@height}
+      data-has-upload={to_string(:image in @toolbar)}
     >
       <%!-- Toolbar --%>
       <div
@@ -472,25 +473,69 @@ defmodule Leaf do
                 </svg>
               </button>
               <%= if :image in @toolbar do %>
-                <button
-                  type="button"
-                  data-toolbar-action="insert-image"
-                  class="btn btn-xs btn-ghost px-2"
-                  title={t("Insert Image")}
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                    class="w-3.5 h-3.5"
+                <div class="relative inline-flex" data-image-split-btn>
+                  <button
+                    type="button"
+                    data-toolbar-action="insert-image"
+                    class="btn btn-xs btn-ghost px-2 rounded-r-none"
+                    title={t("Insert Image")}
                   >
-                    <path
-                      fill-rule="evenodd"
-                      d="M1 5.25A2.25 2.25 0 013.25 3h13.5A2.25 2.25 0 0119 5.25v9.5A2.25 2.25 0 0116.75 17H3.25A2.25 2.25 0 011 14.75v-9.5zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 00.75-.75v-2.69l-2.22-2.219a.75.75 0 00-1.06 0l-1.91 1.909-4.97-4.969a.75.75 0 00-1.06 0L2.5 11.06zm10-3.56a1.5 1.5 0 113 0 1.5 1.5 0 01-3 0z"
-                      clip-rule="evenodd"
-                    />
-                  </svg>
-                </button>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      class="w-3.5 h-3.5"
+                    >
+                      <path
+                        fill-rule="evenodd"
+                        d="M1 5.25A2.25 2.25 0 013.25 3h13.5A2.25 2.25 0 0119 5.25v9.5A2.25 2.25 0 0116.75 17H3.25A2.25 2.25 0 011 14.75v-9.5zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 00.75-.75v-2.69l-2.22-2.219a.75.75 0 00-1.06 0l-1.91 1.909-4.97-4.969a.75.75 0 00-1.06 0L2.5 11.06zm10-3.56a1.5 1.5 0 113 0 1.5 1.5 0 01-3 0z"
+                        clip-rule="evenodd"
+                      />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-xs btn-ghost px-0.5 rounded-l-none border-l border-base-300"
+                    title={t("Image options")}
+                    data-image-dropdown-trigger
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      class="w-3 h-3"
+                    >
+                      <path
+                        fill-rule="evenodd"
+                        d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z"
+                        clip-rule="evenodd"
+                      />
+                    </svg>
+                  </button>
+                  <ul
+                    class="hidden absolute top-full left-0 menu bg-base-200 rounded-box z-[10000] w-40 p-1 shadow-sm"
+                    data-image-dropdown-menu
+                  >
+                    <li>
+                      <button type="button" data-toolbar-action="insert-image-upload">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
+                          <path d="M9.25 13.25a.75.75 0 0 0 1.5 0V4.636l2.955 3.129a.75.75 0 0 0 1.09-1.03l-4.25-4.5a.75.75 0 0 0-1.09 0l-4.25 4.5a.75.75 0 1 0 1.09 1.03L9.25 4.636v8.614Z" />
+                          <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
+                        </svg>
+                        <span>{t("Upload")}</span>
+                      </button>
+                    </li>
+                    <li>
+                      <button type="button" data-toolbar-action="insert-image-url">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
+                          <path d="M12.232 4.232a2.5 2.5 0 013.536 3.536l-1.225 1.224a.75.75 0 001.061 1.06l1.224-1.224a4 4 0 00-5.656-5.656l-3 3a4 4 0 00.225 5.865.75.75 0 00.977-1.138 2.5 2.5 0 01-.142-3.667l3-3z" />
+                          <path d="M11.603 7.963a.75.75 0 00-.977 1.138 2.5 2.5 0 01.142 3.667l-3 3a2.5 2.5 0 01-3.536-3.536l1.225-1.224a.75.75 0 00-1.061-1.06l-1.224 1.224a4 4 0 105.656 5.656l3-3a4 4 0 00-.225-5.865z" />
+                        </svg>
+                        <span>{t("By URL")}</span>
+                      </button>
+                    </li>
+                  </ul>
+                </div>
               <% end %>
               <%= if :video in @toolbar do %>
                 <button
@@ -845,6 +890,7 @@ defmodule Leaf do
 
     {:noreply, socket}
   end
+
 
   def handle_event("html_content_changed", %{"content" => html}, socket) do
     send(

@@ -195,10 +195,60 @@
     "  background: color-mix(in oklab, var(--color-base-content, #1f2937) 15%, transparent);",
     "}",
 
+    // Image URL dialog
+    ".leaf-image-url-backdrop {",
+    "  position: fixed; inset: 0; z-index: 99999;",
+    "  background: rgba(0,0,0,0.15);",
+    "}",
+    ".leaf-image-url-dialog {",
+    "  position: fixed; z-index: 100000;",
+    "  background: var(--color-base-200, #e5e7eb); color: var(--color-base-content, #1f2937);",
+    "  border: 1px solid var(--color-base-300, #d1d5db);",
+    "  border-radius: 0.5rem; padding: 0.75rem;",
+    "  box-shadow: 0 4px 16px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.08);",
+    "  font-size: 0.8125rem; line-height: 1;",
+    "  animation: leaf-popover-in 0.15s ease-out;",
+    "  display: flex; flex-direction: column; gap: 0.5rem;",
+    "  width: 300px;",
+    "}",
+    ".leaf-image-url-dialog input {",
+    "  width: 100%; padding: 0.375rem 0.5rem; font-size: 0.8125rem;",
+    "  border: 1px solid var(--color-base-300, #d1d5db); border-radius: 0.375rem;",
+    "  background: var(--color-base-100, #fff); color: var(--color-base-content, #1f2937);",
+    "  outline: none;",
+    "}",
+    ".leaf-image-url-dialog input:focus {",
+    "  border-color: var(--color-primary, #3b82f6);",
+    "  box-shadow: 0 0 0 1px var(--color-primary, #3b82f6);",
+    "}",
+    ".leaf-image-url-dialog label {",
+    "  font-size: 0.75rem; font-weight: 500;",
+    "  color: color-mix(in oklab, var(--color-base-content, #1f2937) 70%, transparent);",
+    "}",
+    ".leaf-image-url-dialog .leaf-image-url-actions {",
+    "  display: flex; justify-content: flex-end; gap: 0.375rem; margin-top: 0.25rem;",
+    "}",
+    ".leaf-image-url-dialog .leaf-image-url-actions button {",
+    "  padding: 0.375rem 0.75rem; font-size: 0.75rem; font-weight: 500;",
+    "  border-radius: 0.375rem; border: none; cursor: pointer;",
+    "  transition: background 0.1s, color 0.1s;",
+    "}",
+    ".leaf-image-url-dialog .leaf-image-url-cancel {",
+    "  background: color-mix(in oklab, var(--color-base-content, #1f2937) 10%, transparent);",
+    "  color: var(--color-base-content, #1f2937);",
+    "}",
+    ".leaf-image-url-dialog .leaf-image-url-cancel:hover {",
+    "  background: color-mix(in oklab, var(--color-base-content, #1f2937) 18%, transparent);",
+    "}",
+    ".leaf-image-url-dialog .leaf-image-url-insert {",
+    "  background: var(--color-primary, #3b82f6); color: #fff;",
+    "}",
+    ".leaf-image-url-dialog .leaf-image-url-insert:hover { opacity: 0.9; }",
+
     // Sticky toolbar
     "[data-visual-toolbar].leaf-toolbar-sticky {",
     "  position: fixed;",
-    "  z-index: 100;",
+    "  z-index: 10000;",
     "  box-sizing: border-box;",
     "}",
     ".leaf-toolbar-placeholder { visibility: hidden; }",
@@ -567,6 +617,7 @@
       this._mode = this.el.dataset.mode || "visual";
       this._debounceMs = parseInt(this.el.dataset.debounce || "400", 10);
       this._readonly = this.el.dataset.readonly === "true";
+      this._hasUpload = this.el.dataset.hasUpload === "true";
       this._debounceTimer = null;
       this._markdownDebounceTimer = null;
       this._htmlDebounceTimer = null;
@@ -651,6 +702,10 @@
         this._readonly = newReadonly;
         this._visualEl.contentEditable = !newReadonly;
       }
+      var newHasUpload = this.el.dataset.hasUpload === "true";
+      if (newHasUpload !== this._hasUpload) {
+        this._hasUpload = newHasUpload;
+      }
 
       // Re-find drag handle after morphdom patch (element may have been replaced)
       if (this._visualWrapper) {
@@ -694,6 +749,15 @@
       this._cleanupStickyToolbar();
       this._closeEmojiPicker();
       this._dismissLinkPopover();
+      this._dismissImageUrlDialog();
+      if (this._imageDropdownMenu) {
+        this._imageDropdownMenu.remove();
+        this._imageDropdownMenu = null;
+      }
+      if (this._imageDropdownBackdrop) {
+        this._imageDropdownBackdrop.remove();
+        this._imageDropdownBackdrop = null;
+      }
       if (this._onDocClickForPopover) {
         document.removeEventListener("mousedown", this._onDocClickForPopover);
       }
@@ -1081,7 +1145,7 @@
         { trigger: "[data-heading-trigger]", menu: "[data-heading-menu]" },
         { trigger: "[data-inline-more-trigger]", menu: "[data-inline-more-menu]" },
         { trigger: "[data-table-trigger]", menu: "[data-table-menu]" },
-        { trigger: "[data-insert-more-trigger]", menu: "[data-insert-more-menu]" }
+        { trigger: "[data-insert-more-trigger]", menu: "[data-insert-more-menu]" },
       ];
       dropdowns.forEach(function (cfg) {
         var trigger = self.el.querySelector(cfg.trigger);
@@ -1109,6 +1173,62 @@
           }
         });
       });
+
+      // Image dropdown: rendered on body with a backdrop to sit above navbars
+      var imgTrigger = self.el.querySelector("[data-image-dropdown-trigger]");
+      var imgMenu = self.el.querySelector("[data-image-dropdown-menu]");
+      if (imgTrigger && imgMenu) {
+        imgMenu.remove();
+        imgMenu.style.position = "fixed";
+        imgMenu.style.zIndex = "100000";
+        document.body.appendChild(imgMenu);
+        this._imageDropdownMenu = imgMenu;
+
+        imgTrigger.addEventListener("mousedown", function (e) { e.preventDefault(); });
+        imgMenu.addEventListener("mousedown", function (e) { e.preventDefault(); });
+
+        imgTrigger.addEventListener("click", function (e) {
+          e.preventDefault();
+          dropdowns.forEach(function (cfg) {
+            var otherMenu = self.el.querySelector(cfg.menu);
+            if (otherMenu) otherMenu.classList.add("hidden");
+          });
+
+          if (imgMenu.classList.contains("hidden")) {
+            // Show backdrop + menu
+            var backdrop = document.createElement("div");
+            backdrop.className = "leaf-image-url-backdrop";
+            backdrop.addEventListener("click", function () {
+              imgMenu.classList.add("hidden");
+              backdrop.remove();
+              self._imageDropdownBackdrop = null;
+            });
+            document.body.appendChild(backdrop);
+            self._imageDropdownBackdrop = backdrop;
+
+            var rect = imgTrigger.getBoundingClientRect();
+            imgMenu.style.left = rect.left + "px";
+            imgMenu.style.top = (rect.bottom + 2) + "px";
+            imgMenu.classList.remove("hidden");
+          } else {
+            imgMenu.classList.add("hidden");
+            if (self._imageDropdownBackdrop) {
+              self._imageDropdownBackdrop.remove();
+              self._imageDropdownBackdrop = null;
+            }
+          }
+        });
+
+        imgMenu.querySelectorAll("[data-toolbar-action]").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            imgMenu.classList.add("hidden");
+            if (self._imageDropdownBackdrop) {
+              self._imageDropdownBackdrop.remove();
+              self._imageDropdownBackdrop = null;
+            }
+          });
+        });
+      }
 
       document.addEventListener("selectionchange", function () {
         if (self._mode === "visual" && self._visualEl) {
@@ -1308,11 +1428,25 @@
           this._openEmojiPicker();
           return; // skip updateToolbarState/push — picker handles it
         case "insert-image":
+          if (this._hasUpload) {
+            this.pushEventTo(this.el, "insert_request", {
+              editor_id: this._editorId,
+              type: "image",
+            });
+          } else {
+            this._openImageUrlDialog();
+            return;
+          }
+          break;
+        case "insert-image-upload":
           this.pushEventTo(this.el, "insert_request", {
             editor_id: this._editorId,
             type: "image",
           });
           break;
+        case "insert-image-url":
+          this._openImageUrlDialog();
+          return;
         case "insert-video":
           this.pushEventTo(this.el, "insert_request", {
             editor_id: this._editorId,
@@ -1363,7 +1497,17 @@
         case "table": if (ins) ins("\n| Header 1 | Header 2 |\n| --- | --- |\n| Cell 1 | Cell 2 |\n| Cell 3 | Cell 4 |\n"); break;
         case "link": if (lnk) lnk(); break;
         case "emoji": this._openEmojiPicker(); break;
-        case "insert-image": this.pushEventTo(this.el, "insert_request", { editor_id: this._editorId, type: "image" }); break;
+        case "insert-image":
+          if (this._hasUpload) {
+            this.pushEventTo(this.el, "insert_request", { editor_id: this._editorId, type: "image" });
+          } else {
+            this._openImageUrlDialog();
+          }
+          break;
+        case "insert-image-upload":
+          this.pushEventTo(this.el, "insert_request", { editor_id: this._editorId, type: "image" });
+          break;
+        case "insert-image-url": this._openImageUrlDialog(); break;
         case "insert-video": this.pushEventTo(this.el, "insert_request", { editor_id: this._editorId, type: "video" }); break;
         case "removeFormat": break;
         case "undo": break;
@@ -1996,6 +2140,142 @@
         parent.insertBefore(anchorEl.firstChild, anchorEl);
       }
       parent.removeChild(anchorEl);
+    },
+
+    // -- Image URL dialog --
+
+    _openImageUrlDialog: function () {
+      this._dismissImageUrlDialog();
+      var self = this;
+
+      // Save selection so we can restore it before inserting
+      var savedRange = null;
+      if (this._mode === "visual" && this._visualEl) {
+        var sel = window.getSelection();
+        if (sel.rangeCount > 0) {
+          savedRange = sel.getRangeAt(0).cloneRange();
+        }
+      }
+
+      var dialog = document.createElement("div");
+      dialog.className = "leaf-image-url-dialog";
+
+      var urlLabel = document.createElement("label");
+      urlLabel.textContent = "Image URL";
+      dialog.appendChild(urlLabel);
+
+      var urlInput = document.createElement("input");
+      urlInput.type = "text";
+      urlInput.placeholder = "https://example.com/image.jpg";
+      urlInput.addEventListener("mousedown", function (e) { e.stopPropagation(); });
+      dialog.appendChild(urlInput);
+
+      var altLabel = document.createElement("label");
+      altLabel.textContent = "Alt text (optional)";
+      dialog.appendChild(altLabel);
+
+      var altInput = document.createElement("input");
+      altInput.type = "text";
+      altInput.placeholder = "Describe the image";
+      altInput.addEventListener("mousedown", function (e) { e.stopPropagation(); });
+      dialog.appendChild(altInput);
+
+      var actions = document.createElement("div");
+      actions.className = "leaf-image-url-actions";
+
+      var cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "leaf-image-url-cancel";
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.addEventListener("click", function () {
+        self._dismissImageUrlDialog();
+      });
+      actions.appendChild(cancelBtn);
+
+      var insertBtn = document.createElement("button");
+      insertBtn.type = "button";
+      insertBtn.className = "leaf-image-url-insert";
+      insertBtn.textContent = "Insert";
+      insertBtn.addEventListener("click", function () {
+        var url = urlInput.value.trim();
+        if (!url) return;
+        var alt = altInput.value.trim();
+        self._dismissImageUrlDialog();
+        self._insertImageByUrl(url, alt, savedRange);
+      });
+      actions.appendChild(insertBtn);
+      dialog.appendChild(actions);
+
+      // Enter key in inputs triggers insert
+      var handleKey = function (e) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          insertBtn.click();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          self._dismissImageUrlDialog();
+        }
+      };
+      urlInput.addEventListener("keydown", handleKey);
+      altInput.addEventListener("keydown", handleKey);
+
+      // Position below the image button using fixed positioning on body
+      var splitBtn = this.el.querySelector("[data-image-split-btn]");
+      if (splitBtn) {
+        var btnRect = splitBtn.getBoundingClientRect();
+        dialog.style.left = btnRect.left + "px";
+        dialog.style.top = (btnRect.bottom + 4) + "px";
+      }
+
+      // Backdrop
+      var backdrop = document.createElement("div");
+      backdrop.className = "leaf-image-url-backdrop";
+      backdrop.addEventListener("click", function () {
+        self._dismissImageUrlDialog();
+      });
+      document.body.appendChild(backdrop);
+      this._imageUrlBackdrop = backdrop;
+      this.pushEventTo(this.el, "media_ui_opened", { editor_id: this._editorId });
+      document.body.appendChild(dialog);
+      this._imageUrlDialog = dialog;
+      urlInput.focus();
+    },
+
+    _dismissImageUrlDialog: function () {
+      if (this._imageUrlDialog) {
+        this._imageUrlDialog.remove();
+        this._imageUrlDialog = null;
+      }
+      if (this._imageUrlBackdrop) {
+        this._imageUrlBackdrop.remove();
+        this._imageUrlBackdrop = null;
+      }
+      this.pushEventTo(this.el, "media_ui_closed", { editor_id: this._editorId });
+    },
+
+
+    _insertImageByUrl: function (url, alt, savedRange) {
+      var escapedAlt = (alt || "").replace(/"/g, "&quot;");
+
+      if (this._mode === "visual" && this._visualEl) {
+        this._visualEl.focus();
+        // Restore saved selection
+        if (savedRange) {
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(savedRange);
+        }
+        var imgHtml = '<img src="' + url + '" alt="' + escapedAlt + '" draggable="true" />';
+        document.execCommand("insertHTML", false, imgHtml);
+        this._debouncedPushVisualChange();
+      } else if (this._mode === "markdown") {
+        var gid = this._editorId.replace(/-/g, "_") + "_markdown";
+        var ins = window["markdownEditorInsert_" + gid];
+        if (ins) {
+          var md = "![" + (alt || "") + "](" + url + ")";
+          ins(md);
+        }
+      }
     },
 
     // -- Image selection + resize + popover --
