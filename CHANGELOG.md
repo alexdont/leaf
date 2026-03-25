@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.6
+
+- Add edit image URL button (pencil icon) to image floating island
+- Add simple/advanced toolbar presets for lightweight vs full editing
+- Prevent bold toggling inside headings to keep visual-markdown sync
+- Fix drag handle jumping to wrong block on large/resized images
+- Fix image popover persistence through LiveView re-renders
+
 ## 0.2.5
 
 - Add image insert by URL with split button toolbar (upload + by URL options)
