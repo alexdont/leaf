@@ -911,6 +911,7 @@
 
       if (mod && e.key === "b") {
         e.preventDefault();
+        if (this._isInsideHeading()) return;
         document.execCommand("bold", false, null);
         this._updateToolbarState();
         return;
@@ -1364,7 +1365,7 @@
 
       switch (action) {
         case "bold":
-          document.execCommand("bold", false, null);
+          if (!this._isInsideHeading()) document.execCommand("bold", false, null);
           break;
         case "italic":
           document.execCommand("italic", false, null);
@@ -1731,6 +1732,12 @@
       }
     },
 
+    _isInsideHeading: function () {
+      var block = this._getCurrentBlock();
+      if (!block || !block.tagName) return false;
+      return /^h[1-6]$/i.test(block.tagName);
+    },
+
     _getCurrentBlock: function () {
       var sel = window.getSelection();
       if (!sel.rangeCount) return null;
@@ -1915,7 +1922,7 @@
 
         switch (action) {
           case "bold":
-            active = document.queryCommandState("bold");
+            active = document.queryCommandState("bold") || /^h[1-6]$/.test(blockTag);
             break;
           case "italic":
             active = document.queryCommandState("italic");
