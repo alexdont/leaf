@@ -716,6 +716,14 @@
         }
       }
 
+      // Re-show image popover if it was active but removed by morphdom
+      if (this._imagePopoverTarget && this._imagePopoverEl && !this._imagePopoverEl.parentNode) {
+        var imgTarget = this._imagePopoverTarget;
+        this._imagePopoverEl = null;
+        this._resizeHandles = null;
+        this._showImagePopover(imgTarget);
+      }
+
       // Re-insert sticky placeholder if morphdom removed it
       if (
         this._stickyPlaceholder &&
@@ -2281,7 +2289,7 @@
     // -- Image selection + resize + popover --
 
     _showImagePopover: function (imgEl) {
-      this._dismissImagePopover();
+      this._dismissImagePopover(true);
       this._imagePopoverTarget = imgEl;
 
       var src = imgEl.getAttribute("src") || "";
@@ -2357,6 +2365,29 @@
         if (src) window.open(src, "_blank");
       });
       actions.appendChild(openBtn);
+
+      // Edit src button
+      var editSrcBtn = document.createElement("button");
+      editSrcBtn.type = "button";
+      editSrcBtn.title = "Edit image URL";
+      editSrcBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="13" height="13"><path d="M13.488 2.513a1.75 1.75 0 0 0-2.475 0L3.05 10.476a.75.75 0 0 0-.188.335l-.95 3.507a.75.75 0 0 0 .92.92l3.507-.95a.75.75 0 0 0 .335-.188l7.963-7.963a1.75 1.75 0 0 0 0-2.475l-.149-.149ZM11.72 3.22a.25.25 0 0 1 .354 0l.149.149a.25.25 0 0 1 0 .354L5.106 10.84l-1.575.427.427-1.575 7.11-7.11.652-.362Z"/></svg>';
+      editSrcBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      editSrcBtn.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var newSrc = prompt("Edit image URL:", src);
+        if (newSrc === null) {
+          self._showImagePopover(imgEl);
+          return;
+        }
+        newSrc = newSrc.trim();
+        if (newSrc) {
+          imgEl.setAttribute("src", newSrc);
+          src = newSrc;
+        }
+        self._showImagePopover(imgEl);
+      });
+      actions.appendChild(editSrcBtn);
 
       // Divider
       var d1 = document.createElement("span");
@@ -2908,7 +2939,7 @@
       }
     },
 
-    _dismissImagePopover: function () {
+    _dismissImagePopover: function (skipPush) {
       // Remove selection class
       if (this._imagePopoverTarget) {
         this._imagePopoverTarget.classList.remove("leaf-img-selected");
@@ -2925,7 +2956,7 @@
       }
       if (this._imagePopoverTarget) {
         this._imagePopoverTarget = null;
-        this._debouncedPushVisualChange();
+        if (!skipPush) this._debouncedPushVisualChange();
       }
     },
 
