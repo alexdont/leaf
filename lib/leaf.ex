@@ -15,12 +15,19 @@ defmodule Leaf do
         id="my-editor"
         content={@content}
         mode={:visual}
+        preset={:advanced}
         toolbar={[:image, :video]}
         placeholder="Write something..."
         readonly={false}
         height="480px"
         debounce={400}
       />
+
+  ## Presets
+
+  - `:advanced` (default) — Full toolbar with all formatting options
+  - `:simple` — Compact toolbar for comments/lightweight editing:
+    undo/redo, bold, italic, strikethrough, inline code, lists, link, emoji, clear formatting
 
   ## Messages Sent to Parent
 
@@ -77,6 +84,7 @@ defmodule Leaf do
   attr(:id, :string, required: true)
   attr(:content, :string, default: "")
   attr(:mode, :atom, default: :visual, values: [:visual, :markdown, :html])
+  attr(:preset, :atom, default: :advanced, values: [:advanced, :simple])
   attr(:toolbar, :list, default: [])
   attr(:placeholder, :string, default: "Write something...")
   attr(:readonly, :boolean, default: false)
@@ -99,6 +107,7 @@ defmodule Leaf do
      socket
      |> assign_new(:content, fn -> "" end)
      |> assign_new(:mode, fn -> :visual end)
+     |> assign_new(:preset, fn -> :advanced end)
      |> assign_new(:toolbar, fn -> [] end)
      |> assign_new(:placeholder, fn -> "Write something..." end)
      |> assign_new(:height, fn -> "480px" end)
@@ -219,7 +228,7 @@ defmodule Leaf do
             <%!-- Inline Formatting --%>
             <div class="flex items-center gap-0.5 mr-2">
               <%!-- Headings dropdown --%>
-              <div class="relative" data-heading-dropdown>
+              <%= if @preset == :advanced do %><div class="relative" data-heading-dropdown>
                 <button
                   type="button"
                   class="btn btn-xs btn-ghost font-bold px-2"
@@ -269,7 +278,7 @@ defmodule Leaf do
                     </button>
                   </li>
                 </ul>
-              </div>
+              </div><% end %>
               <button
                 type="button"
                 data-toolbar-action="bold"
@@ -294,60 +303,82 @@ defmodule Leaf do
               >
                 S
               </button>
-              <%!-- More inline formatting --%>
-              <div class="relative" data-inline-more-dropdown>
+              <%= if @preset == :advanced do %>
+                <%!-- More inline formatting --%>
+                <div class="relative" data-inline-more-dropdown>
+                  <button
+                    type="button"
+                    class="btn btn-xs btn-ghost px-1.5"
+                    title={t("More formatting")}
+                    data-inline-more-trigger
+                  >
+                    <span class="text-base font-bold leading-none">&#8942;</span>
+                  </button>
+                  <ul
+                    class="hidden absolute top-full left-0 menu bg-base-200 rounded-box z-50 w-36 p-1 shadow-sm"
+                    data-inline-more-menu
+                  >
+                    <li>
+                      <button
+                        type="button"
+                        data-toolbar-action="superscript"
+                      >
+                        <span class="text-xs">X<sup class="text-[0.5rem]">2</sup></span>
+                        <span>{t("Superscript")}</span>
+                      </button>
+                    </li>
+                    <li>
+                      <button
+                        type="button"
+                        data-toolbar-action="subscript"
+                      >
+                        <span class="text-xs">X<sub class="text-[0.5rem]">2</sub></span>
+                        <span>{t("Subscript")}</span>
+                      </button>
+                    </li>
+                    <li>
+                      <button
+                        type="button"
+                        data-toolbar-action="code"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                          class="w-3.5 h-3.5"
+                        >
+                          <path
+                            fill-rule="evenodd"
+                            d="M6.28 5.22a.75.75 0 010 1.06L2.56 10l3.72 3.72a.75.75 0 01-1.06 1.06L.97 10.53a.75.75 0 010-1.06l4.25-4.25a.75.75 0 011.06 0zm7.44 0a.75.75 0 011.06 0l4.25 4.25a.75.75 0 010 1.06l-4.25 4.25a.75.75 0 01-1.06-1.06L17.44 10l-3.72-3.72a.75.75 0 010-1.06z"
+                            clip-rule="evenodd"
+                          />
+                        </svg>
+                        <span>{t("Inline Code")}</span>
+                      </button>
+                    </li>
+                  </ul>
+                </div>
+              <% else %>
                 <button
                   type="button"
-                  class="btn btn-xs btn-ghost px-1.5"
-                  title={t("More formatting")}
-                  data-inline-more-trigger
+                  data-toolbar-action="code"
+                  class="btn btn-xs btn-ghost px-2"
+                  title={t("Inline Code")}
                 >
-                  <span class="text-base font-bold leading-none">&#8942;</span>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    class="w-3.5 h-3.5"
+                  >
+                    <path
+                      fill-rule="evenodd"
+                      d="M6.28 5.22a.75.75 0 010 1.06L2.56 10l3.72 3.72a.75.75 0 01-1.06 1.06L.97 10.53a.75.75 0 010-1.06l4.25-4.25a.75.75 0 011.06 0zm7.44 0a.75.75 0 011.06 0l4.25 4.25a.75.75 0 010 1.06l-4.25 4.25a.75.75 0 01-1.06-1.06L17.44 10l-3.72-3.72a.75.75 0 010-1.06z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
                 </button>
-                <ul
-                  class="hidden absolute top-full left-0 menu bg-base-200 rounded-box z-50 w-36 p-1 shadow-sm"
-                  data-inline-more-menu
-                >
-                  <li>
-                    <button
-                      type="button"
-                      data-toolbar-action="superscript"
-                    >
-                      <span class="text-xs">X<sup class="text-[0.5rem]">2</sup></span>
-                      <span>{t("Superscript")}</span>
-                    </button>
-                  </li>
-                  <li>
-                    <button
-                      type="button"
-                      data-toolbar-action="subscript"
-                    >
-                      <span class="text-xs">X<sub class="text-[0.5rem]">2</sub></span>
-                      <span>{t("Subscript")}</span>
-                    </button>
-                  </li>
-                  <li>
-                    <button
-                      type="button"
-                      data-toolbar-action="code"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                        class="w-3.5 h-3.5"
-                      >
-                        <path
-                          fill-rule="evenodd"
-                          d="M6.28 5.22a.75.75 0 010 1.06L2.56 10l3.72 3.72a.75.75 0 01-1.06 1.06L.97 10.53a.75.75 0 010-1.06l4.25-4.25a.75.75 0 011.06 0zm7.44 0a.75.75 0 011.06 0l4.25 4.25a.75.75 0 010 1.06l-4.25 4.25a.75.75 0 01-1.06-1.06L17.44 10l-3.72-3.72a.75.75 0 010-1.06z"
-                          clip-rule="evenodd"
-                        />
-                      </svg>
-                      <span>{t("Inline Code")}</span>
-                    </button>
-                  </li>
-                </ul>
-              </div>
+              <% end %>
             </div>
 
             <div class="divider divider-horizontal mx-0.5 h-6"></div>
@@ -393,7 +424,7 @@ defmodule Leaf do
                   <path d="M2.625 13.875C2.21079 13.875 1.875 14.2108 1.875 14.625C1.875 15.0392 2.21079 15.375 2.625 15.375H4.125C4.19404 15.375 4.25 15.431 4.25 15.5C4.25 15.569 4.19404 15.625 4.125 15.625H3.5C3.08579 15.625 2.75 15.9608 2.75 16.375C2.75 16.7892 3.08579 17.125 3.5 17.125H4.125C4.19404 17.125 4.25 17.181 4.25 17.25C4.25 17.319 4.19404 17.375 4.125 17.375H2.625C2.21079 17.375 1.875 17.7108 1.875 18.125C1.875 18.5392 2.21079 18.875 2.625 18.875H4.125C5.02246 18.875 5.75 18.1475 5.75 17.25C5.75 16.9278 5.65625 16.6276 5.49454 16.375C5.65625 16.1224 5.75 15.8222 5.75 15.5C5.75 14.6025 5.02246 13.875 4.125 13.875H2.625Z" />
                 </svg>
               </button>
-              <button
+              <%= if @preset == :advanced do %><button
                 type="button"
                 data-toolbar-action="indent"
                 class="btn btn-xs btn-ghost px-2"
@@ -430,7 +461,7 @@ defmodule Leaf do
                     clip-rule="evenodd"
                   />
                 </svg>
-              </button>
+              </button><% end %>
             </div>
 
             <div class="divider divider-horizontal mx-0.5 h-6"></div>
@@ -472,7 +503,7 @@ defmodule Leaf do
                   />
                 </svg>
               </button>
-              <%= if :image in @toolbar do %>
+              <%= if @preset == :advanced and :image in @toolbar do %>
                 <div class="relative inline-flex" data-image-split-btn>
                   <button
                     type="button"
@@ -537,7 +568,7 @@ defmodule Leaf do
                   </ul>
                 </div>
               <% end %>
-              <%= if :video in @toolbar do %>
+              <%= if @preset == :advanced and :video in @toolbar do %>
                 <button
                   type="button"
                   data-toolbar-action="insert-video"
@@ -554,7 +585,7 @@ defmodule Leaf do
                   </svg>
                 </button>
               <% end %>
-              <%!-- Table dropdown --%>
+              <%= if @preset == :advanced do %><%!-- Table dropdown --%>
               <div class="relative" data-table-dropdown>
                 <button
                   type="button"
@@ -688,6 +719,7 @@ defmodule Leaf do
                   </li>
                 </ul>
               </div>
+              <% end %>
             </div>
 
             <div class="divider divider-horizontal mx-0.5 h-6"></div>
