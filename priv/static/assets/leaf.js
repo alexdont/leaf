@@ -2797,6 +2797,7 @@
       var children = this._visualEl.childNodes;
       var best = null;
       var bestDist = Infinity;
+      var wrapperRect = this._visualWrapper.getBoundingClientRect();
 
       for (var i = 0; i < children.length; i++) {
         var child = children[i];
@@ -2804,12 +2805,17 @@
         if (!this._isBlockTag(child)) continue;
 
         var rect = child.getBoundingClientRect();
-        var wrapperRect = this._visualWrapper.getBoundingClientRect();
-        var blockTop = rect.top - wrapperRect.top;
+        var marginTop = parseFloat(window.getComputedStyle(child).marginTop) || 0;
+        var blockTop = rect.top - wrapperRect.top - marginTop;
         var blockBottom = rect.bottom - wrapperRect.top;
-        var blockMiddle = (blockTop + blockBottom) / 2;
 
-        var dist = Math.abs(y - blockMiddle);
+        // If mouse is within the block's range (including margin), it's a direct hit
+        if (y >= blockTop && y <= blockBottom) {
+          return child;
+        }
+
+        // Otherwise find nearest by distance to closest edge
+        var dist = y < blockTop ? blockTop - y : y - blockBottom;
         if (dist < bestDist) {
           bestDist = dist;
           best = child;
