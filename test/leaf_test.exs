@@ -4,6 +4,22 @@ defmodule LeafTest do
 
   alias Phoenix.LiveView.Socket
 
+  test "module can be loaded" do
+    assert Code.ensure_loaded?(Leaf)
+  end
+
+  test "leaf_editor component renders basic markup" do
+    rendered =
+      render_component(&Leaf.leaf_editor/1,
+        id: "editor-1",
+        content: "",
+        mode: :visual
+      )
+
+    assert rendered =~ "phx-hook=\"Leaf\""
+    assert rendered =~ "data-editor-id=\"editor-1\""
+  end
+
   test "content_changed strips denied links and images" do
     socket = base_socket(deny: [:links, :images])
 
