@@ -73,11 +73,36 @@ defmodule LeafTest do
     refute rendered =~ ~s(data-toolbar-action="insert-video")
   end
 
-  defp base_socket(opts \\ []) do
+  test "deny flags hide markdown and html mode tabs" do
+    rendered =
+      render_component(&Leaf.leaf_editor/1,
+        id: "editor-1",
+        content: "",
+        mode: :visual,
+        deny: [:markdown_mode, :html_mode]
+      )
+
+    refute rendered =~ ~s(data-mode-tab="markdown")
+    refute rendered =~ ~s(data-mode-tab="html")
+    assert rendered =~ ~s(data-mode-tab="visual")
+  end
+
+  test "mode_changed falls back to visual when requested mode is denied" do
+    socket = base_socket(deny: [:html_mode], mode: :visual)
+
+    assert {:noreply, new_socket} =
+             Leaf.handle_event("mode_changed", %{"mode" => "html", "content" => "x"}, socket)
+
+    assert_received {:leaf_mode_changed, %{mode: :visual}}
+    assert new_socket.assigns.mode == :visual
+  end
+
+  defp base_socket(opts) do
     %Socket{
       assigns: %{
         __changed__: %{},
         id: "editor-1",
+        mode: Keyword.get(opts, :mode, :visual),
         content: Keyword.get(opts, :content, ""),
         visual_html: Keyword.get(opts, :visual_html, ""),
         deny: Keyword.get(opts, :deny, [])

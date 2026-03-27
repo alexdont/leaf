@@ -160,6 +160,9 @@ defmodule Leaf do
   end
 
   def update(%{action: :set_mode, mode: mode}, socket) when mode in [:visual, :markdown, :html] do
+    deny = Map.get(socket.assigns, :deny, [])
+    mode = normalize_mode(mode, deny)
+
     {:ok,
      socket
      |> assign(:mode, mode)
@@ -177,6 +180,9 @@ defmodule Leaf do
       |> assign(assigns)
       |> assign_new(:mode, fn -> parent_mode end)
     deny = Map.get(socket.assigns, :deny, [])
+    mode = normalize_mode(socket.assigns.mode, deny)
+
+    socket = assign(socket, :mode, mode)
 
     socket =
       assign_new(socket, :visual_html, fn ->
@@ -206,6 +212,8 @@ defmodule Leaf do
       data-deny-links={to_string(:links in @deny)}
       data-deny-images={to_string(:images in @deny)}
       data-deny-video={to_string(:video in @deny)}
+      data-deny-markdown-mode={to_string(:markdown_mode in @deny)}
+      data-deny-html-mode={to_string(:html_mode in @deny)}
     >
       {loading_state_style_tag(@height, @script_nonce)}
 
@@ -810,24 +818,28 @@ defmodule Leaf do
               />
             </svg>
           </button>
-          <button
-            type="button"
-            data-mode-tab="markdown"
-            class={["btn btn-xs px-2", (@mode == :markdown && "btn-active") || "btn-ghost"]}
-            title={t("Markdown mode")}
-          >
-            <svg viewBox="0 0 208 128" fill="currentColor" class="w-4 h-3">
-              <path d="M30 98V30h20l20 25 20-25h20v68H90V59L70 84 50 59v39zm125 0l-30-33h20V30h20v35h20z" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            data-mode-tab="html"
-            class={["btn btn-xs px-2", (@mode == :html && "btn-active") || "btn-ghost"]}
-            title={t("HTML mode")}
-          >
-            &lt;/&gt;
-          </button>
+          <%= unless :markdown_mode in @deny do %>
+            <button
+              type="button"
+              data-mode-tab="markdown"
+              class={["btn btn-xs px-2", (@mode == :markdown && "btn-active") || "btn-ghost"]}
+              title={t("Markdown mode")}
+            >
+              <svg viewBox="0 0 208 128" fill="currentColor" class="w-4 h-3">
+                <path d="M30 98V30h20l20 25 20-25h20v68H90V59L70 84 50 59v39zm125 0l-30-33h20V30h20v35h20z" />
+              </svg>
+            </button>
+          <% end %>
+          <%= unless :html_mode in @deny do %>
+            <button
+              type="button"
+              data-mode-tab="html"
+              class={["btn btn-xs px-2", (@mode == :html && "btn-active") || "btn-ghost"]}
+              title={t("HTML mode")}
+            >
+              &lt;/&gt;
+            </button>
+          <% end %>
         </div>
       </div>
 
@@ -946,6 +958,8 @@ defmodule Leaf do
 
   def handle_event("mode_changed", %{"mode" => mode} = params, socket) do
     mode_atom = String.to_existing_atom(mode)
+    deny = Map.get(socket.assigns, :deny, [])
+    mode_atom = normalize_mode(mode_atom, deny)
     content = Map.get(params, "content", socket.assigns.content)
 
     send(
@@ -1095,8 +1109,11 @@ defmodule Leaf do
 
   defp markdown_to_html(markdown) do
     case Earmark.as_html(markdown) do
-      {:ok, html, _} -> clean_html(html)
-      {:error, _, _} -> "<p>#{Phoenix.HTML.html_escape(markdown)}</p>"
+      {:ok, html, _} ->
+        clean_html(html)
+
+      {:error, _, _} ->
+        "<p>" <> Phoenix.HTML.safe_to_string(Phoenix.HTML.html_escape(markdown)) <> "</p>"
     end
   end
 
@@ -1152,4 +1169,12 @@ defmodule Leaf do
       markdown
     end
   end
+
+  defp normalize_mode(mode, deny) when mode in [:visual, :markdown, :html] and is_list(deny) do
+    if mode_denied?(mode, deny), do: :visual, else: mode
+  end
+
+  defp mode_denied?(:markdown, deny), do: :markdown_mode in deny
+  defp mode_denied?(:html, deny), do: :html_mode in deny
+  defp mode_denied?(:visual, _deny), do: false
 end

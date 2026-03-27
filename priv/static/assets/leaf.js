@@ -623,6 +623,8 @@
       this._denyLinks = this.el.dataset.denyLinks === "true";
       this._denyImages = this.el.dataset.denyImages === "true";
       this._denyVideo = this.el.dataset.denyVideo === "true";
+      this._denyMarkdownMode = this.el.dataset.denyMarkdownMode === "true";
+      this._denyHtmlMode = this.el.dataset.denyHtmlMode === "true";
       this._debounceTimer = null;
       this._markdownDebounceTimer = null;
       this._htmlDebounceTimer = null;
@@ -719,6 +721,13 @@
       this._denyLinks = this.el.dataset.denyLinks === "true";
       this._denyImages = this.el.dataset.denyImages === "true";
       this._denyVideo = this.el.dataset.denyVideo === "true";
+      this._denyMarkdownMode = this.el.dataset.denyMarkdownMode === "true";
+      this._denyHtmlMode = this.el.dataset.denyHtmlMode === "true";
+
+      if (!this._isModeAllowed(this._mode)) {
+        var visualTab = this.el.querySelector('[data-mode-tab="visual"]');
+        if (visualTab) visualTab.click();
+      }
 
       // Re-find drag handle after morphdom patch (element may have been replaced)
       if (this._visualWrapper) {
@@ -1045,6 +1054,7 @@
         tab.addEventListener("click", function (e) {
           e.preventDefault();
           var newMode = tab.dataset.modeTab;
+          if (!self._isModeAllowed(newMode)) return;
           if (newMode === self._mode) return;
 
           self._dismissLinkPopover();
@@ -1077,6 +1087,12 @@
           self._updateCounts();
         });
       });
+    },
+
+    _isModeAllowed: function (mode) {
+      if (mode === "markdown" && this._denyMarkdownMode) return false;
+      if (mode === "html" && this._denyHtmlMode) return false;
+      return true;
     },
 
     _applyModeVisibility: function (mode) {
@@ -3041,6 +3057,7 @@
 
         case "set_mode":
           if (payload.mode && payload.mode !== this._mode) {
+            if (!this._isModeAllowed(payload.mode)) break;
             var tab = this.el.querySelector(
               '[data-mode-tab="' + payload.mode + '"]'
             );
