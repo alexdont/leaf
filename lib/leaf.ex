@@ -95,8 +95,17 @@ defmodule Leaf do
   attr(:script_nonce, :string, default: "")
 
   attr(:loading_preset, :atom,
-    default: :default,
-    values: [:default, :unpuzzling, :brewing, :polishing, :composing, :crafting, :tidying]
+    default: :random,
+    values: [
+      :default,
+      :random,
+      :unpuzzling,
+      :brewing,
+      :polishing,
+      :composing,
+      :crafting,
+      :tidying
+    ]
   )
 
   attr(:loading_text, :string, default: nil)
@@ -187,7 +196,7 @@ defmodule Leaf do
       {loading_state_style_tag(@height, @script_nonce)}
 
       <div data-leaf-loading>
-        <span>{@loading_text || loading_preset_text(@loading_preset)}</span>
+        <span>{@loading_text || loading_preset_text(resolve_loading_preset(@loading_preset))}</span>
       </div>
 
       <div data-leaf-content>
@@ -987,6 +996,15 @@ defmodule Leaf do
     end
   end
 
+  @bundled_random_loading_presets [
+    :unpuzzling,
+    :brewing,
+    :polishing,
+    :composing,
+    :crafting,
+    :tidying
+  ]
+
   defp loading_preset_text(:default), do: "Loading…"
   defp loading_preset_text(:unpuzzling), do: "Unpuzzling…"
   defp loading_preset_text(:brewing), do: "Brewing…"
@@ -994,6 +1012,9 @@ defmodule Leaf do
   defp loading_preset_text(:composing), do: "Composing…"
   defp loading_preset_text(:crafting), do: "Crafting…"
   defp loading_preset_text(:tidying), do: "Tidying…"
+
+  defp resolve_loading_preset(:random), do: Enum.random(@bundled_random_loading_presets)
+  defp resolve_loading_preset(other), do: other
 
   # Inline <style> tag for the loading state. HEEx treats <style> bodies as
   # opaque text, so we build the tag as a safe HTML iolist outside the

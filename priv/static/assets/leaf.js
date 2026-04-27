@@ -698,6 +698,11 @@
     },
 
     updated() {
+      // Server always renders data-leaf-mount-state="loading"; once the hook
+      // is mounted we own the state, so keep it pinned to "ready" through
+      // any parent-triggered re-render.
+      this.el.dataset.leafMountState = "ready";
+
       if (!this._visualEl) return;
       var newReadonly = this.el.dataset.readonly === "true";
       if (newReadonly !== this._readonly) {
