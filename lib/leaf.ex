@@ -93,6 +93,13 @@ defmodule Leaf do
   attr(:upload_handler, :any, default: nil)
   attr(:class, :string, default: nil)
   attr(:script_nonce, :string, default: "")
+
+  attr(:loading_preset, :atom,
+    default: :default,
+    values: [:default, :unpuzzling, :brewing, :polishing, :composing, :crafting, :tidying]
+  )
+
+  attr(:loading_text, :string, default: nil)
   attr(:rest, :global)
 
   def leaf_editor(assigns) do
@@ -168,6 +175,7 @@ defmodule Leaf do
     <div
       id={@id}
       phx-hook="Leaf"
+      data-leaf-mount-state="loading"
       data-editor-id={@id}
       data-mode={to_string(@mode)}
       data-placeholder={@placeholder}
@@ -176,6 +184,13 @@ defmodule Leaf do
       data-height={@height}
       data-has-upload={to_string(:image in @toolbar)}
     >
+      {loading_state_style_tag(@height, @script_nonce)}
+
+      <div data-leaf-loading>
+        <span>{@loading_text || loading_preset_text(@loading_preset)}</span>
+      </div>
+
+      <div data-leaf-content>
       <%!-- Toolbar --%>
       <div
         id={"#{@id}-toolbar"}
@@ -861,6 +876,7 @@ defmodule Leaf do
           <span data-char-count>0 chars</span>
         </div>
       </div>
+      </div>
     </div>
     """
   end
@@ -969,6 +985,55 @@ defmodule Leaf do
       backend ->
         Gettext.gettext(backend, string)
     end
+  end
+
+  defp loading_preset_text(:default), do: "Loading…"
+  defp loading_preset_text(:unpuzzling), do: "Unpuzzling…"
+  defp loading_preset_text(:brewing), do: "Brewing…"
+  defp loading_preset_text(:polishing), do: "Polishing…"
+  defp loading_preset_text(:composing), do: "Composing…"
+  defp loading_preset_text(:crafting), do: "Crafting…"
+  defp loading_preset_text(:tidying), do: "Tidying…"
+
+  # Inline <style> tag for the loading state. HEEx treats <style> bodies as
+  # opaque text, so we build the tag as a safe HTML iolist outside the
+  # template and let the {...} interpolation dump it.
+  defp loading_state_style_tag(height, nonce) do
+    nonce_str = nonce |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
+
+    raw([
+      ~s(<style nonce="),
+      nonce_str,
+      ~s(">),
+      loading_state_css(height),
+      ~s(</style>)
+    ])
+  end
+
+  # Inline CSS for the loading state. Emitted once per editor at the top of
+  # render/1 so it applies on first paint, before the JS hook injects the
+  # full editor stylesheet in mounted().
+  defp loading_state_css(height) do
+    """
+    [data-leaf-mount-state="loading"] > [data-leaf-content] { display: none; }
+    [data-leaf-mount-state="ready"] > [data-leaf-loading] { display: none; }
+    [data-leaf-loading] {
+      display: flex; align-items: center; justify-content: center;
+      min-height: #{height};
+      font: 500 0.875rem/1 ui-sans-serif, system-ui, -apple-system, sans-serif;
+      color: #6b7280;
+    }
+    [data-leaf-loading] span {
+      background: linear-gradient(90deg, #9ca3af 0%, #d1d5db 50%, #9ca3af 100%);
+      background-size: 200% 100%;
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+      animation: leaf-loading-shimmer 1.6s ease-in-out infinite;
+    }
+    @keyframes leaf-loading-shimmer {
+      0% { background-position: 100% 50%; }
+      100% { background-position: -100% 50%; }
+    }
+    """
   end
 
   defp markdown_to_html(nil), do: ""

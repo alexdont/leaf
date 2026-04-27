@@ -613,6 +613,7 @@
   window.LeafHooks.Leaf = {
     mounted() {
       injectStyles();
+      this.el.dataset.leafMountState = "ready";
 
       this._editorId = this.el.dataset.editorId;
       this._mode = this.el.dataset.mode || "visual";
