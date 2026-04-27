@@ -106,7 +106,6 @@ defmodule Leaf do
     {:ok,
      socket
      |> assign_new(:content, fn -> "" end)
-     |> assign_new(:mode, fn -> :visual end)
      |> assign_new(:preset, fn -> :advanced end)
      |> assign_new(:toolbar, fn -> [] end)
      |> assign_new(:placeholder, fn -> "Write something..." end)
@@ -148,7 +147,12 @@ defmodule Leaf do
   end
 
   def update(assigns, socket) do
-    socket = assign(socket, assigns)
+    {parent_mode, assigns} = Map.pop(assigns, :mode, :visual)
+
+    socket =
+      socket
+      |> assign(assigns)
+      |> assign_new(:mode, fn -> parent_mode end)
 
     socket =
       assign_new(socket, :visual_html, fn ->
@@ -824,6 +828,7 @@ defmodule Leaf do
         <div data-markdown-wrapper class={[@mode != :markdown && "hidden"]}>
           <textarea
             id={"#{@id}-markdown-textarea"}
+            phx-update="ignore"
             class={[
               "textarea w-full font-mono text-sm leading-relaxed border-0 rounded-none focus:outline-none focus:ring-0",
               @readonly && "opacity-70 cursor-not-allowed"
@@ -839,6 +844,7 @@ defmodule Leaf do
         <div data-html-wrapper class={[@mode != :html && "hidden"]}>
           <textarea
             id={"#{@id}-html-textarea"}
+            phx-update="ignore"
             class={[
               "textarea w-full font-mono text-sm leading-relaxed border-0 rounded-none focus:outline-none focus:ring-0",
               @readonly && "opacity-70 cursor-not-allowed"
