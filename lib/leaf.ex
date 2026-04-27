@@ -929,7 +929,6 @@ defmodule Leaf do
     {:noreply, socket}
   end
 
-
   def handle_event("html_content_changed", %{"content" => html}, socket) do
     send(
       self(),
