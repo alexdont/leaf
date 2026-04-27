@@ -269,7 +269,7 @@
   function htmlToMarkdown(html) {
     var container = document.createElement("div");
     container.innerHTML = html;
-    return nodeToMarkdown(container).trim();
+    return nodeToMarkdown(container).replace(/\n{3,}/g, "\n\n").trim();
   }
 
   function nodeToMarkdown(node) {
