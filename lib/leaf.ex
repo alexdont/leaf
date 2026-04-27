@@ -195,11 +195,6 @@ defmodule Leaf do
     >
       {loading_state_style_tag(@height, @script_nonce)}
 
-      <div data-leaf-loading>
-        <span>{@loading_text || loading_preset_text(resolve_loading_preset(@loading_preset))}</span>
-      </div>
-
-      <div data-leaf-content>
       <%!-- Toolbar --%>
       <div
         id={"#{@id}-toolbar"}
@@ -821,6 +816,11 @@ defmodule Leaf do
       </div>
 
       <div class="border border-base-300 overflow-hidden" style="border-radius: 0.5rem">
+        <div data-leaf-loading>
+          <span>{@loading_text || loading_preset_text(resolve_loading_preset(@loading_preset))}</span>
+        </div>
+
+        <div data-leaf-content>
         <%!-- Visual Editor (contenteditable) --%>
         <div data-visual-wrapper class={["relative", @mode != :visual && "hidden"]}>
           <%!-- Block drag handle (positioned by JS) --%>
@@ -879,12 +879,12 @@ defmodule Leaf do
             phx-debounce={@debounce}
           ><%= @visual_html %></textarea>
         </div>
+        </div>
 
         <div id={"#{@id}-footer"} phx-update="ignore" data-editor-footer class="flex justify-end gap-4 px-3 py-1 text-xs text-base-content/50 border-t border-base-300">
           <span data-word-count>0 words</span>
           <span data-char-count>0 chars</span>
         </div>
-      </div>
       </div>
     </div>
     """
@@ -1036,8 +1036,8 @@ defmodule Leaf do
   # full editor stylesheet in mounted().
   defp loading_state_css(height) do
     """
-    [data-leaf-mount-state="loading"] > [data-leaf-content] { display: none; }
-    [data-leaf-mount-state="ready"] > [data-leaf-loading] { display: none; }
+    [data-leaf-mount-state="loading"] [data-leaf-content] { display: none; }
+    [data-leaf-mount-state="ready"] [data-leaf-loading] { display: none; }
     [data-leaf-loading] {
       display: flex; align-items: center; justify-content: center;
       min-height: #{height};
