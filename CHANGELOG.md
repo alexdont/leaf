@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.8
+
+- Add a styled loading placeholder shown until the editor JS mounts, replacing the brief flash of unstyled content on cold page loads. Configurable via two new `leaf_editor/1` attrs:
+  - `loading_preset` (`:default | :unpuzzling | :brewing | :polishing | :composing | :crafting | :tidying`) — pick a bundled label
+  - `loading_text` — fully custom string, wins over the preset
+
 ## 0.2.7
 
 - Fix excessive blank lines in markdown output when pressing Enter in visual mode
