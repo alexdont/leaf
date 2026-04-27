@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.10
+
+- Fix the editor expanding horizontally on mount and stealing space from sibling flex items. The outer wrapper and the toolbar now have `min-width: 0` so the editor's intrinsic min-content width can no longer push past its parent's allocated width. Pages with a `flex-[2] / flex-1` split (or similar) no longer redistribute when the editor finishes mounting.
+
 ## 0.2.9
 
 - Loading placeholder now picks a random label per page load by default (`loading_preset` defaults to `:random`, drawing from the bundled set of `:unpuzzling`, `:brewing`, `:polishing`, `:composing`, `:crafting`, `:tidying`). Use `loading_preset={:default}` for the plain "Loading…" label, or `loading_text="…"` to fully customize.
