@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.9
+
+- Loading placeholder now picks a random label per page load by default (`loading_preset` defaults to `:random`, drawing from the bundled set of `:unpuzzling`, `:brewing`, `:polishing`, `:composing`, `:crafting`, `:tidying`). Use `loading_preset={:default}` for the plain "Loading…" label, or `loading_text="…"` to fully customize.
+- Fix layout jump on loading→ready: the toolbar, mode tabs, border wrapper, and footer now render as a real skeleton during loading, so the page no longer shifts when the editor finishes mounting.
+- Pin `data-leaf-mount-state` to `"ready"` in the JS hook's `updated()` callback so a parent re-render can't briefly flicker the editor back through the loading state.
+
 ## 0.2.8
 
 - Add a styled loading placeholder shown until the editor JS mounts, replacing the brief flash of unstyled content on cold page loads. Configurable via two new `leaf_editor/1` attrs:
