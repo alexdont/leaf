@@ -79,10 +79,11 @@
     ".content-editor-visual li > p { margin: 0; }",
 
     // Tables
-    ".content-editor-visual table { border-collapse: collapse; width: 100%; margin: 0.75em 0; }",
+    ".content-editor-visual table { border-collapse: collapse; table-layout: fixed; width: 100%; margin: 0.75em 0; }",
     ".content-editor-visual th, .content-editor-visual td {",
     "  border: 1px solid color-mix(in oklab, var(--color-base-content, #1f2937) 20%, transparent);",
     "  padding: 0.4rem 0.75rem; text-align: left;",
+    "  overflow-wrap: anywhere;",
     "}",
     ".content-editor-visual th {",
     "  font-weight: 600;",
