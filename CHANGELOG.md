@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.7
+
+- Fix excessive blank lines in markdown output when pressing Enter in visual mode
+- Fix mode toggle reverting to visual and in-progress keystrokes being lost while typing in markdown or html mode
+- Fix table column widths shifting while typing into cells
+
 ## 0.2.6
 
 - Add edit image URL button (pencil icon) to image floating island
