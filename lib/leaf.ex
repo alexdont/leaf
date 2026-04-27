@@ -184,6 +184,7 @@ defmodule Leaf do
     <div
       id={@id}
       phx-hook="Leaf"
+      class="min-w-0"
       data-leaf-mount-state="loading"
       data-editor-id={@id}
       data-mode={to_string(@mode)}
@@ -199,7 +200,7 @@ defmodule Leaf do
       <div
         id={"#{@id}-toolbar"}
         phx-update="ignore"
-        class="flex flex-wrap items-center gap-1 mb-2 p-2 bg-base-200 rounded-lg"
+        class="flex flex-wrap items-center gap-1 mb-2 p-2 bg-base-200 rounded-lg min-w-0"
         data-visual-toolbar
       >
         <%= unless @readonly do %>
