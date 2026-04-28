@@ -86,6 +86,7 @@ defmodule Leaf do
   attr(:mode, :atom, default: :hybrid, values: [:visual, :hybrid, :markdown, :html])
   attr(:preset, :atom, default: :advanced, values: [:advanced, :simple])
   attr(:toolbar, :list, default: [])
+  attr(:deny, :list, default: [])
   attr(:placeholder, :string, default: "Write something...")
   attr(:readonly, :boolean, default: false)
   attr(:height, :string, default: "480px")
@@ -145,6 +146,7 @@ defmodule Leaf do
      |> assign_new(:content, fn -> "" end)
      |> assign_new(:preset, fn -> :advanced end)
      |> assign_new(:toolbar, fn -> [] end)
+     |> assign_new(:deny, fn -> [] end)
      |> assign_new(:placeholder, fn -> "Write something..." end)
      |> assign_new(:height, fn -> "480px" end)
      |> assign_new(:min_height, fn -> nil end)
@@ -184,15 +186,21 @@ defmodule Leaf do
   end
 
   def update(%{action: :set_content, content: content}, socket) do
-    html = markdown_to_html(content, preserve_tags(socket))
+    deny = Map.get(socket.assigns, :deny, [])
+    sanitized_markdown = sanitize_markdown(content, deny)
+
+    html =
+      sanitized_markdown
+      |> markdown_to_html(preserve_tags(socket))
+      |> sanitize_html(deny)
 
     {:ok,
      socket
-     |> assign(:content, content)
+     |> assign(:content, sanitized_markdown)
      |> assign(:visual_html, html)
      |> push_event("leaf-command:#{socket.assigns.id}", %{
        action: "set_content",
-       content: content,
+       content: sanitized_markdown,
        html: html
      })}
   end
@@ -233,10 +241,14 @@ defmodule Leaf do
       socket
       |> assign(assigns)
       |> assign_new(:mode, fn -> parent_mode end)
+    deny = Map.get(socket.assigns, :deny, [])
 
     socket =
       assign_new(socket, :visual_html, fn ->
-        markdown_to_html(socket.assigns.content, preserve_tags(socket))
+        socket.assigns.content
+        |> sanitize_markdown(deny)
+        |> markdown_to_html(preserve_tags(socket))
+        |> sanitize_html(deny)
       end)
 
     {:ok, socket}
@@ -271,6 +283,9 @@ defmodule Leaf do
       data-protect-navigation={to_string(@protect_navigation)}
       data-has-upload={to_string(@upload_handler != nil)}
       data-sync-input-name={@sync_input_name}
+      data-deny-links={to_string(:links in @deny)}
+      data-deny-images={to_string(:images in @deny)}
+      data-deny-video={to_string(:video in @deny)}
     >
       {loading_state_style_tag(@height, @script_nonce)}
 
@@ -746,23 +761,25 @@ defmodule Leaf do
 
             <%!-- Insert --%>
             <div class="flex items-center gap-0.5 mr-2" data-toolbar-section="insert">
-              <button
-                type="button"
-                data-toolbar-action="link"
-                data-toolbar-overflow="insert-link"
-                class="btn btn-xs btn-ghost px-2"
-                title={t("Insert Link")}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  class="w-3.5 h-3.5"
+              <%= unless :links in @deny do %>
+                <button
+                  type="button"
+                  data-toolbar-action="link"
+                  data-toolbar-overflow="insert-link"
+                  class="btn btn-xs btn-ghost px-2"
+                  title={t("Insert Link")}
                 >
-                  <path d="M12.232 4.232a2.5 2.5 0 013.536 3.536l-1.225 1.224a.75.75 0 001.061 1.06l1.224-1.224a4 4 0 00-5.656-5.656l-3 3a4 4 0 00.225 5.865.75.75 0 00.977-1.138 2.5 2.5 0 01-.142-3.667l3-3z" />
-                  <path d="M11.603 7.963a.75.75 0 00-.977 1.138 2.5 2.5 0 01.142 3.667l-3 3a2.5 2.5 0 01-3.536-3.536l1.225-1.224a.75.75 0 00-1.061-1.06l-1.224 1.224a4 4 0 105.656 5.656l3-3a4 4 0 00-.225-5.865z" />
-                </svg>
-              </button>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    class="w-3.5 h-3.5"
+                  >
+                    <path d="M12.232 4.232a2.5 2.5 0 013.536 3.536l-1.225 1.224a.75.75 0 001.061 1.06l1.224-1.224a4 4 0 00-5.656-5.656l-3 3a4 4 0 00.225 5.865.75.75 0 00.977-1.138 2.5 2.5 0 01-.142-3.667l3-3z" />
+                    <path d="M11.603 7.963a.75.75 0 00-.977 1.138 2.5 2.5 0 01.142 3.667l-3 3a2.5 2.5 0 01-3.536-3.536l1.225-1.224a.75.75 0 00-1.061-1.06l-1.224 1.224a4 4 0 105.656 5.656l3-3a4 4 0 00-.225-5.865z" />
+                  </svg>
+                </button>
+              <% end %>
               <button
                 type="button"
                 data-toolbar-action="emoji"
@@ -783,7 +800,7 @@ defmodule Leaf do
                   />
                 </svg>
               </button>
-              <%= if @preset == :advanced and :image in @toolbar do %>
+              <%= if @preset == :advanced and :image in @toolbar and :images not in @deny do %>
                 <div class="relative inline-flex" data-image-split-btn data-toolbar-overflow="insert-image">
                   <button
                     type="button"
@@ -848,7 +865,7 @@ defmodule Leaf do
                   </ul>
                 </div>
               <% end %>
-              <%= if @preset == :advanced and :video in @toolbar do %>
+              <%= if @preset == :advanced and :video in @toolbar and :video not in @deny do %>
                 <button
                   type="button"
                   data-toolbar-action="insert-video"
@@ -1589,35 +1606,53 @@ defmodule Leaf do
 
   @impl true
   def handle_event("content_changed", %{"markdown" => markdown, "html" => html} = params, socket) do
+    sanitized_markdown = sanitize_markdown(markdown, socket.assigns.deny)
+    sanitized_html = sanitize_html(html, socket.assigns.deny)
+
     send(
       self(),
       {:leaf_changed,
        %{
          editor_id: socket.assigns.id,
-         markdown: markdown,
-         html: html,
+         markdown: sanitized_markdown,
+         html: sanitized_html,
          dirty: Map.get(params, "dirty", true)
        }}
     )
 
-    {:noreply, socket |> assign(:content, markdown) |> assign(:visual_html, html)}
+    socket =
+      socket
+      |> assign(:content, sanitized_markdown)
+      |> assign(:visual_html, sanitized_html)
+
+    # If a denied element was stripped from the HTML, push the clean version
+    # back to the client so the hybrid contenteditable doesn't keep showing it.
+    socket =
+      if sanitized_html != html do
+        push_event(socket, "leaf-set-html:#{socket.assigns.id}", %{html: sanitized_html})
+      else
+        socket
+      end
+
+    {:noreply, socket}
   end
 
   def handle_event("markdown_content_changed", %{"content" => content} = params, socket) do
-    html = markdown_to_html(content, preserve_tags(socket))
+    sanitized_markdown = sanitize_markdown(content, socket.assigns.deny)
+    html = sanitized_markdown |> markdown_to_html(preserve_tags(socket)) |> sanitize_html(socket.assigns.deny)
 
     send(
       self(),
       {:leaf_changed,
        %{
          editor_id: socket.assigns.id,
-         markdown: content,
+         markdown: sanitized_markdown,
          html: html,
          dirty: Map.get(params, "dirty", true)
        }}
     )
 
-    {:noreply, assign(socket, :content, content)}
+    {:noreply, assign(socket, :content, sanitized_markdown)}
   end
 
   def handle_event("mode_changed", %{"mode" => mode} = params, socket) do
@@ -1652,13 +1687,15 @@ defmodule Leaf do
   end
 
   def handle_event("html_content_changed", %{"content" => html} = params, socket) do
+    sanitized_html = sanitize_html(html, socket.assigns.deny)
+
     send(
       self(),
       {:leaf_changed,
        %{
          editor_id: socket.assigns.id,
          markdown: socket.assigns.content,
-         html: html,
+         html: sanitized_html,
          dirty: Map.get(params, "dirty", true)
        }}
     )
@@ -1667,17 +1704,27 @@ defmodule Leaf do
   end
 
   def handle_event("sync_markdown_to_visual", %{"markdown" => markdown}, socket) do
-    html = markdown_to_html(markdown, preserve_tags(socket))
+    html =
+      markdown
+      |> sanitize_markdown(socket.assigns.deny)
+      |> markdown_to_html(preserve_tags(socket))
+      |> sanitize_html(socket.assigns.deny)
 
     {:noreply, push_event(socket, "leaf-set-html:#{socket.assigns.id}", %{html: html})}
   end
 
   def handle_event("sync_html_to_visual", %{"html" => html}, socket) do
-    {:noreply, push_event(socket, "leaf-set-html:#{socket.assigns.id}", %{html: html})}
+    sanitized_html = sanitize_html(html, socket.assigns.deny)
+
+    {:noreply, push_event(socket, "leaf-set-html:#{socket.assigns.id}", %{html: sanitized_html})}
   end
 
   def handle_event("convert_markdown_to_html", %{"markdown" => markdown}, socket) do
-    html = markdown_to_html(markdown)
+    html =
+      markdown
+      |> sanitize_markdown(socket.assigns.deny)
+      |> markdown_to_html()
+      |> sanitize_html(socket.assigns.deny)
 
     {:noreply, push_event(socket, "leaf-set-html-textarea:#{socket.assigns.id}", %{html: html})}
   end
@@ -2496,5 +2543,48 @@ defmodule Leaf do
         String.replace(chunk, ~r/\|\|(.+?)\|\|/s, "<span class=\"leaf-spoiler\">\\1</span>")
       end
     end)
+
+  defp sanitize_html(html, deny) when is_binary(html) and is_list(deny) do
+    html
+    |> maybe_strip_html_links(deny)
+    |> maybe_strip_html_images(deny)
+  end
+
+  defp sanitize_markdown(markdown, deny) when is_binary(markdown) and is_list(deny) do
+    markdown
+    |> maybe_strip_markdown_images(deny)
+    |> maybe_strip_markdown_links(deny)
+  end
+
+  defp maybe_strip_html_links(html, deny) do
+    if :links in deny do
+      String.replace(html, ~r/<a\b[^>]*>(.*?)<\/a>/is, "\\1")
+    else
+      html
+    end
+  end
+
+  defp maybe_strip_html_images(html, deny) do
+    if :images in deny do
+      String.replace(html, ~r/<img\b[^>]*\/?\s*>/is, "")
+    else
+      html
+    end
+  end
+
+  defp maybe_strip_markdown_images(markdown, deny) do
+    if :images in deny do
+      String.replace(markdown, ~r/!\[(.*?)\]\((.*?)\)/, "")
+    else
+      markdown
+    end
+  end
+
+  defp maybe_strip_markdown_links(markdown, deny) do
+    if :links in deny do
+      String.replace(markdown, ~r/\[(.*?)\]\((.*?)\)/, "\\1")
+    else
+      markdown
+    end
   end
 end

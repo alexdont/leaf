@@ -1028,6 +1028,9 @@
       this._readonly = this.el.dataset.readonly === "true";
       this._hasUpload = this.el.dataset.hasUpload === "true";
       this._syncInputName = this.el.dataset.syncInputName || "";
+      this._denyLinks = this.el.dataset.denyLinks === "true";
+      this._denyImages = this.el.dataset.denyImages === "true";
+      this._denyVideo = this.el.dataset.denyVideo === "true";
       this._debounceTimer = null;
       this._markdownDebounceTimer = null;
       this._htmlDebounceTimer = null;
@@ -1224,6 +1227,9 @@
       if (newHasUpload !== this._hasUpload) {
         this._hasUpload = newHasUpload;
       }
+      this._denyLinks = this.el.dataset.denyLinks === "true";
+      this._denyImages = this.el.dataset.denyImages === "true";
+      this._denyVideo = this.el.dataset.denyVideo === "true";
 
       // Re-find drag handle after morphdom patch (element may have been replaced)
       if (this._visualWrapper) {
@@ -1859,7 +1865,7 @@
       }
       if (mod && e.key === "k") {
         e.preventDefault();
-        this._insertLink();
+        if (!this._denyLinks) this._insertLink();
         return;
       }
 
@@ -2280,7 +2286,26 @@
       if (html) {
         e.preventDefault();
         var cleaned = cleanPastedHtml(html);
-        document.execCommand("insertHTML", false, cleaned);
+        var container = document.createElement("div");
+        container.innerHTML = cleaned;
+
+        if (this._denyLinks) {
+          container.querySelectorAll("a").forEach(function (anchor) {
+            var parent = anchor.parentNode;
+            while (anchor.firstChild) {
+              parent.insertBefore(anchor.firstChild, anchor);
+            }
+            parent.removeChild(anchor);
+          });
+        }
+
+        if (this._denyImages) {
+          container.querySelectorAll("img").forEach(function (img) {
+            img.remove();
+          });
+        }
+
+        document.execCommand("insertHTML", false, container.innerHTML);
         return;
       }
 
@@ -7699,7 +7724,7 @@
           this._tableToggleHeader();
           break;
         case "link":
-          this._insertLink();
+          if (!this._denyLinks) this._insertLink();
           break;
         case "emoji":
           this._openEmojiPicker();
@@ -7708,6 +7733,7 @@
           this._openSymbolPicker();
           return;
         case "insert-image":
+          if (this._denyImages) break;
           if (this._hasUpload) {
             this.pushEventTo(this.el, "insert_request", {
               editor_id: this._editorId,
@@ -7719,19 +7745,25 @@
           }
           break;
         case "insert-image-upload":
+          if (this._denyImages) break;
           this.pushEventTo(this.el, "insert_request", {
             editor_id: this._editorId,
             type: "image",
           });
           break;
         case "insert-image-url":
-          this._openImageUrlDialog();
-          return;
+          if (!this._denyImages) {
+            this._openImageUrlDialog();
+            return;
+          }
+          break;
         case "insert-video":
-          this.pushEventTo(this.el, "insert_request", {
-            editor_id: this._editorId,
-            type: "video",
-          });
+          if (!this._denyVideo) {
+            this.pushEventTo(this.el, "insert_request", {
+              editor_id: this._editorId,
+              type: "video",
+            });
+          }
           break;
         case "undo":
           document.execCommand("undo", false, null);
@@ -7784,10 +7816,11 @@
         case "taskList": if (pfx) pfx("- [ ] "); break;
         case "callout": if (ins) ins("\n> [!NOTE]\n> \n"); break;
         case "table": if (ins) ins("\n| Header 1 | Header 2 |\n| --- | --- |\n| Cell 1 | Cell 2 |\n| Cell 3 | Cell 4 |\n"); break;
-        case "link": if (lnk) lnk(); break;
+        case "link": if (lnk && !this._denyLinks) lnk(); break;
         case "emoji": this._openEmojiPicker(); break;
         case "symbols": this._openSymbolPicker(); break;
         case "insert-image":
+          if (this._denyImages) break;
           if (this._hasUpload) {
             this.pushEventTo(this.el, "insert_request", { editor_id: this._editorId, type: "image" });
           } else {
@@ -7795,10 +7828,15 @@
           }
           break;
         case "insert-image-upload":
+          if (this._denyImages) break;
           this.pushEventTo(this.el, "insert_request", { editor_id: this._editorId, type: "image" });
           break;
-        case "insert-image-url": this._openImageUrlDialog(); break;
-        case "insert-video": this.pushEventTo(this.el, "insert_request", { editor_id: this._editorId, type: "video" }); break;
+        case "insert-image-url":
+          if (!this._denyImages) this._openImageUrlDialog();
+          break;
+        case "insert-video":
+          if (!this._denyVideo) this.pushEventTo(this.el, "insert_request", { editor_id: this._editorId, type: "video" });
+          break;
         case "removeFormat": break;
         case "undo": break;
         case "redo": break;
@@ -7950,14 +7988,14 @@
     // -- Emoji Picker --
 
     _emojiCategories: [
-      { name: "Smileys", emojis: ["😀","😃","😄","😁","😆","😅","🤣","😂","🙂","🙃","😉","😊","😇","🥰","😍","🤩","😘","😗","😚","😙","🥲","😋","😛","😜","🤪","😝","🤑","🤗","🤭","🤫","🤔","🫡","🤐","🤨","😐","😑","😶","🫥","😏","😒","🙄","😬","🤥","😌","😔","😪","🤤","😴","😷","🤒","🤕","🤢","🤮","🥴","😵","🤯","🥳","🥸","😎","🤓","🧐"] },
-      { name: "Gestures", emojis: ["👋","🤚","🖐","✋","🖖","🫱","🫲","🫳","🫴","👌","🤌","🤏","✌️","🤞","🫰","🤟","🤘","🤙","👈","👉","👆","🖕","👇","☝️","🫵","👍","👎","✊","👊","🤛","🤜","👏","🙌","🫶","👐","🤲","🤝","🙏"] },
-      { name: "Hearts", emojis: ["❤️","🧡","💛","💚","💙","💜","🖤","🤍","🤎","💔","❤️‍🔥","❤️‍🩹","❣️","💕","💞","💓","💗","💖","💘","💝","💟"] },
-      { name: "Animals", emojis: ["🐶","🐱","🐭","🐹","🐰","🦊","🐻","🐼","🐻‍❄️","🐨","🐯","🦁","🐮","🐷","🐸","🐵","🐔","🐧","🐦","🐤","🦆","🦅","🦉","🦇","🐺","🐗","🐴","🦄","🐝","🐛","🦋","🐌","🐞"] },
-      { name: "Food", emojis: ["🍎","🍐","🍊","🍋","🍌","🍉","🍇","🍓","🫐","🍈","🍒","🍑","🥭","🍍","🥥","🥝","🍅","🥑","🍕","🍔","🍟","🌭","🍿","🧁","🍰","🎂","🍩","🍪","🍫","🍬","☕","🍵","🥤","🍺","🍷"] },
-      { name: "Travel", emojis: ["🚗","🚕","🚌","🏎","🚑","🚒","✈️","🚀","🛸","🚁","⛵","🚢","🏠","🏢","🏥","🏫","⛪","🕌","🗼","🗽","⛲","🌋","🏔","🏖","🏕"] },
-      { name: "Objects", emojis: ["⌚","📱","💻","⌨️","🖥","🖨","🖱","💾","💿","📷","📹","🎥","📺","📻","🎙","⏰","🔋","🔌","💡","🔦","🕯","💰","💳","💎","🔧","🔨","🔩","⚙️","📎","📌","✂️","🔑","🗝","🔒","🔓"] },
-      { name: "Symbols", emojis: ["✅","❌","❓","❗","💯","🔥","⭐","🌟","✨","💫","💥","💢","💤","🎵","🎶","🔔","🔕","📣","💬","💭","🏁","🚩","🎯","♻️","⚠️","🚫","❎","✳️","❇️","🔴","🟠","🟡","🟢","🔵","🟣","⚫","⚪"] }
+      { name: "Smileys", emojis: ["😀", "😃", "😄", "😁", "😆", "😅", "🤣", "😂", "🙂", "🙃", "😉", "😊", "😇", "🥰", "😍", "🤩", "😘", "😗", "😚", "😙", "🥲", "😋", "😛", "😜", "🤪", "😝", "🤑", "🤗", "🤭", "🤫", "🤔", "🫡", "🤐", "🤨", "😐", "😑", "😶", "🫥", "😏", "😒", "🙄", "😬", "🤥", "😌", "😔", "😪", "🤤", "😴", "😷", "🤒", "🤕", "🤢", "🤮", "🥴", "😵", "🤯", "🥳", "🥸", "😎", "🤓", "🧐"] },
+      { name: "Gestures", emojis: ["👋", "🤚", "🖐", "✋", "🖖", "🫱", "🫲", "🫳", "🫴", "👌", "🤌", "🤏", "✌️", "🤞", "🫰", "🤟", "🤘", "🤙", "👈", "👉", "👆", "🖕", "👇", "☝️", "🫵", "👍", "👎", "✊", "👊", "🤛", "🤜", "👏", "🙌", "🫶", "👐", "🤲", "🤝", "🙏"] },
+      { name: "Hearts", emojis: ["❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "🤎", "💔", "❤️‍🔥", "❤️‍🩹", "❣️", "💕", "💞", "💓", "💗", "💖", "💘", "💝", "💟"] },
+      { name: "Animals", emojis: ["🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐻‍❄️", "🐨", "🐯", "🦁", "🐮", "🐷", "🐸", "🐵", "🐔", "🐧", "🐦", "🐤", "🦆", "🦅", "🦉", "🦇", "🐺", "🐗", "🐴", "🦄", "🐝", "🐛", "🦋", "🐌", "🐞"] },
+      { name: "Food", emojis: ["🍎", "🍐", "🍊", "🍋", "🍌", "🍉", "🍇", "🍓", "🫐", "🍈", "🍒", "🍑", "🥭", "🍍", "🥥", "🥝", "🍅", "🥑", "🍕", "🍔", "🍟", "🌭", "🍿", "🧁", "🍰", "🎂", "🍩", "🍪", "🍫", "🍬", "☕", "🍵", "🥤", "🍺", "🍷"] },
+      { name: "Travel", emojis: ["🚗", "🚕", "🚌", "🏎", "🚑", "🚒", "✈️", "🚀", "🛸", "🚁", "⛵", "🚢", "🏠", "🏢", "🏥", "🏫", "⛪", "🕌", "🗼", "🗽", "⛲", "🌋", "🏔", "🏖", "🏕"] },
+      { name: "Objects", emojis: ["⌚", "📱", "💻", "⌨️", "🖥", "🖨", "🖱", "💾", "💿", "📷", "📹", "🎥", "📺", "📻", "🎙", "⏰", "🔋", "🔌", "💡", "🔦", "🕯", "💰", "💳", "💎", "🔧", "🔨", "🔩", "⚙️", "📎", "📌", "✂️", "🔑", "🗝", "🔒", "🔓"] },
+      { name: "Symbols", emojis: ["✅", "❌", "❓", "❗", "💯", "🔥", "⭐", "🌟", "✨", "💫", "💥", "💢", "💤", "🎵", "🎶", "🔔", "🔕", "📣", "💬", "💭", "🏁", "🚩", "🎯", "♻️", "⚠️", "🚫", "❎", "✳️", "❇️", "🔴", "🟠", "🟡", "🟢", "🔵", "🟣", "⚫", "⚪"] }
     ],
 
     // Search keywords per emoji (space-separated, lowercase). Covers the
@@ -9114,11 +9152,11 @@
       // Dismiss when clicking outside the editor + popovers
       this._onDocClickForPopover = function (e) {
         if (self._linkPopoverEl && !self._linkPopoverEl.contains(e.target) &&
-            !self._visualEl.contains(e.target)) {
+          !self._visualEl.contains(e.target)) {
           self._dismissLinkPopover();
         }
         if (self._imagePopoverEl && !self._imagePopoverEl.contains(e.target) &&
-            !self._visualEl.contains(e.target)) {
+          !self._visualEl.contains(e.target)) {
           self._dismissImagePopover();
         }
       };
