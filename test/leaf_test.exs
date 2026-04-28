@@ -1,11 +1,87 @@
 defmodule LeafTest do
   use ExUnit.Case
+  import Phoenix.LiveViewTest
 
-  test "Leaf module is loaded" do
-    assert Code.ensure_loaded?(Leaf)
+  alias Phoenix.LiveView.Socket
+
+  test "content_changed strips denied links and images" do
+    socket = base_socket(deny: [:links, :images])
+
+    html = ~s(<p>See <a href="https://example.com">docs</a> <img src="/x.png" alt="x"></p>)
+    markdown = "See [docs](https://example.com) ![x](/x.png)"
+
+    assert {:noreply, new_socket} =
+             Leaf.handle_event(
+               "content_changed",
+               %{"markdown" => markdown, "html" => html},
+               socket
+             )
+
+    assert_received {:leaf_changed,
+                     %{editor_id: "editor-1", markdown: pushed_md, html: pushed_html}}
+
+    refute pushed_md =~ "[docs](https://example.com)"
+    refute pushed_md =~ "![x](/x.png)"
+    refute pushed_html =~ ~r/<a\b/i
+    refute pushed_html =~ ~r/<img\b/i
+
+    assert new_socket.assigns.content == pushed_md
+    assert new_socket.assigns.visual_html == pushed_html
   end
 
-  test "Leaf.Icon module is loaded" do
-    assert Code.ensure_loaded?(Leaf.Icon)
+  test "markdown_content_changed sanitizes denied markdown and generated html" do
+    socket = base_socket(deny: [:links, :images])
+    markdown = "Visit [docs](https://example.com) and ![x](/x.png)"
+
+    assert {:noreply, new_socket} =
+             Leaf.handle_event("markdown_content_changed", %{"content" => markdown}, socket)
+
+    assert_received {:leaf_changed, %{markdown: pushed_md, html: pushed_html}}
+    refute pushed_md =~ "[docs](https://example.com)"
+    refute pushed_md =~ "![x](/x.png)"
+    refute pushed_html =~ ~r/<a\b/i
+    refute pushed_html =~ ~r/<img\b/i
+    assert new_socket.assigns.content == pushed_md
+  end
+
+  test "html_content_changed sanitizes denied html" do
+    socket = base_socket(deny: [:links, :images], content: "safe")
+    html = ~s(<p><a href="https://example.com">docs</a><img src="/x.png" alt="x"></p>)
+
+    assert {:noreply, new_socket} =
+             Leaf.handle_event("html_content_changed", %{"content" => html}, socket)
+
+    assert_received {:leaf_changed, %{markdown: "safe", html: pushed_html}}
+    refute pushed_html =~ ~r/<a\b/i
+    refute pushed_html =~ ~r/<img\b/i
+    assert new_socket.assigns.visual_html == pushed_html
+  end
+
+  test "deny flags hide link, image and video toolbar buttons" do
+    rendered =
+      render_component(&Leaf.leaf_editor/1,
+        id: "editor-1",
+        content: "",
+        mode: :visual,
+        preset: :advanced,
+        toolbar: [:image, :video],
+        deny: [:links, :images, :video]
+      )
+
+    refute rendered =~ ~s(data-toolbar-action="link")
+    refute rendered =~ ~s(data-toolbar-action="insert-image")
+    refute rendered =~ ~s(data-toolbar-action="insert-video")
+  end
+
+  defp base_socket(opts \\ []) do
+    %Socket{
+      assigns: %{
+        __changed__: %{},
+        id: "editor-1",
+        content: Keyword.get(opts, :content, ""),
+        visual_html: Keyword.get(opts, :visual_html, ""),
+        deny: Keyword.get(opts, :deny, [])
+      }
+    }
   end
 end
