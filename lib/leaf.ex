@@ -988,7 +988,7 @@ defmodule Leaf do
        }}
     )
 
-    {:noreply, socket}
+    {:noreply, assign(socket, :visual_html, sanitized_html)}
   end
 
   def handle_event("sync_markdown_to_visual", %{"markdown" => markdown}, socket) do
