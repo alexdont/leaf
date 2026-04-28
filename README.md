@@ -73,6 +73,7 @@ Then use it in your templates:
   content={@content}
   mode={:visual}
   toolbar={[:image, :video]}
+  deny={[:links, :images, :markdown_mode]}
   placeholder="Write something..."
   readonly={false}
   height="480px"
@@ -90,6 +91,7 @@ Then use it in your templates:
   content={@content}
   mode={:visual}
   toolbar={[:image, :video]}
+  deny={[:links, :images, :markdown_mode]}
   placeholder="Write something..."
   readonly={false}
   height="480px"
@@ -100,16 +102,17 @@ Then use it in your templates:
 
 ### Assigns
 
-| Assign | Type | Default | Description |
-|---|---|---|---|
-| `id` | string | required | Unique editor ID |
-| `content` | string | `""` | Markdown content |
-| `mode` | `:visual` \| `:markdown` | `:visual` | Initial editor mode |
-| `toolbar` | list | `[]` | Extra toolbar buttons (`:image`, `:video`) |
-| `placeholder` | string | `"Write something..."` | Placeholder text |
-| `readonly` | boolean | `false` | Read-only mode |
-| `height` | string | `"480px"` | Minimum editor height |
-| `debounce` | integer | `400` | Debounce interval in ms |
+| Assign        | Type                     | Default                | Description                                                                         |
+| ------------- | ------------------------ | ---------------------- | ----------------------------------------------------------------------------------- |
+| `id`          | string                   | required               | Unique editor ID                                                                    |
+| `content`     | string                   | `""`                   | Markdown content                                                                    |
+| `mode`        | `:visual` \| `:markdown` | `:visual`              | Initial editor mode                                                                 |
+| `toolbar`     | list                     | `[]`                   | Extra toolbar buttons (`:image`, `:video`)                                          |
+| `deny`        | list                     | `[]`                   | Disallowed features (`:links`, `:images`, `:video`, `:markdown_mode`, `:html_mode`) |
+| `placeholder` | string                   | `"Write something..."` | Placeholder text                                                                    |
+| `readonly`    | boolean                  | `false`                | Read-only mode                                                                      |
+| `height`      | string                   | `"480px"`              | Minimum editor height                                                               |
+| `debounce`    | integer                  | `400`                  | Debounce interval in ms                                                             |
 
 ### Messages to Parent
 
