@@ -35,6 +35,11 @@ defmodule Leaf do
   - `{:leaf_insert_request, %{editor_id, type: :image | :video}}` — Insert requested
   - `{:leaf_mode_changed, %{editor_id, mode: :visual | :markdown}}` — Mode switched
 
+  ## Security Note
+
+  The deny-list regex sanitization in this component is a UX layer only.
+  Consumers must still validate and allow-list content at the persistence boundary.
+
   ## Commands from Parent
 
   Use `send_update/2`:
@@ -148,14 +153,18 @@ defmodule Leaf do
   def update(%{action: :set_content, content: content}, socket) do
     deny = Map.get(socket.assigns, :deny, [])
 
-    html =
+    sanitized_markdown =
       content
+      |> sanitize_markdown(deny)
+
+    html =
+      sanitized_markdown
       |> markdown_to_html()
       |> sanitize_html(deny)
 
     {:ok,
      socket
-     |> assign(:content, content)
+     |> assign(:content, sanitized_markdown)
      |> push_event("leaf-set-html:#{socket.assigns.id}", %{html: html})}
   end
 
