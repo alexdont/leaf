@@ -35,6 +35,11 @@ defmodule Leaf do
   - `{:leaf_insert_request, %{editor_id, type: :image | :video}}` — Insert requested
   - `{:leaf_mode_changed, %{editor_id, mode: :visual | :markdown}}` — Mode switched
 
+  ## Security Note
+
+  The deny-list regex sanitization in this component is a UX layer only.
+  Consumers must still validate and allow-list content at the persistence boundary.
+
   ## Commands from Parent
 
   Use `send_update/2`:

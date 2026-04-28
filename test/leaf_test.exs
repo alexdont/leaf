@@ -73,6 +73,17 @@ defmodule LeafTest do
     assert new_socket.assigns.visual_html == pushed_html
   end
 
+  test "set_content sanitizes markdown before assigning content" do
+    socket = base_socket(deny: [:links, :images])
+    content = "See [docs](https://example.com) ![x](/x.png)"
+
+    assert {:ok, new_socket} =
+             Leaf.update(%{action: :set_content, content: content}, socket)
+
+    refute new_socket.assigns.content =~ "[docs](https://example.com)"
+    refute new_socket.assigns.content =~ "![x](/x.png)"
+  end
+
   test "deny flags hide link, image and video toolbar buttons" do
     rendered =
       render_component(&Leaf.leaf_editor/1,
