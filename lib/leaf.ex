@@ -1062,7 +1062,7 @@ defmodule Leaf do
   defp markdown_to_html(""), do: ""
 
   defp markdown_to_html(markdown) do
-    case Earmark.as_html(markdown) do
+    case Earmark.as_html(markdown, breaks: true) do
       {:ok, html, _} -> clean_html(html)
       {:error, _, _} -> "<p>#{Phoenix.HTML.html_escape(markdown)}</p>"
     end
