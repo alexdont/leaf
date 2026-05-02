@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.11
+
+- Treat single newlines in markdown as line breaks when rendering to HTML for visual mode (`breaks: true` passed to Earmark). Content like emoji-prefixed lists or any line-by-line text without blank lines now renders line-by-line in visual mode, matching how the markdown source visually appears in markdown mode and how editors like GitHub, Slack, and Notion handle the same input. Round-trips through visual→markdown still preserve the original `\n`-separated source.
+
 ## 0.2.10
 
 - Fix the editor expanding horizontally on mount and stealing space from sibling flex items. The outer wrapper and the toolbar now have `min-width: 0` so the editor's intrinsic min-content width can no longer push past its parent's allocated width. Pages with a `flex-[2] / flex-1` split (or similar) no longer redistribute when the editor finishes mounting.
