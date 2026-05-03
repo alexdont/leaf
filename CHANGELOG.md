@@ -1,12 +1,8 @@
 # Changelog
 
-## 0.2.13
-
-- Fix Shift+Enter paragraph-merge needing two presses to take effect. The boundary check now uses the cursor's text-content position relative to the block (instead of `Range.compareBoundaryPoints`, which compared boundary containers exactly and missed the case where the cursor was inside a trailing text node vs. between block children). A single Shift+Enter at the end of a `<p>` (or start of one) now merges with the adjacent paragraph the first time.
-
 ## 0.2.12
 
-- Shift+Enter at the end of a `<p>` (or at the start of one) now merges that paragraph with its `<p>` neighbor into a single paragraph with an internal `<br>`. Previously the browser only inserted a `<br>` at the cursor and left the surrounding `<p>`s separate — visually it looked merged, but a visual→markdown→visual round-trip turned it back into separate paragraphs because the markdown ended up with blank-line-separated paragraphs instead of single-newline-separated lines.
+- Shift+Enter at the end of a `<p>` (or at the start of one) now merges that paragraph with its `<p>` neighbor into a single paragraph with an internal `<br>`, on the first press. Previously the browser only inserted a `<br>` at the cursor and left the surrounding `<p>`s separate — visually it looked merged, but a visual→markdown→visual round-trip turned it back into separate paragraphs because the markdown ended up with blank-line-separated paragraphs instead of single-newline-separated lines. Mid-paragraph Shift+Enter still inserts a `<br>` like before.
 
 ## 0.2.11
 
