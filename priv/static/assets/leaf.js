@@ -990,15 +990,18 @@
         var block = this._getCurrentBlock();
         if (!block || !block.tagName || block.tagName.toLowerCase() !== "p") return;
 
-        var endRef = document.createRange();
-        endRef.selectNodeContents(block);
-        endRef.collapse(false);
-        var startRef = document.createRange();
-        startRef.selectNodeContents(block);
-        startRef.collapse(true);
+        // Container-agnostic boundary detection: compute the text length
+        // from the start of the block up to the cursor and compare against
+        // the block's total text length. Works whether the cursor lives in
+        // a text node, between block children, or after a trailing <br>.
+        var prefix = document.createRange();
+        prefix.selectNodeContents(block);
+        prefix.setEnd(range.endContainer, range.endOffset);
+        var prefixLen = prefix.toString().length;
+        var totalLen = block.textContent.length;
 
-        var atEnd = range.compareBoundaryPoints(Range.END_TO_END, endRef) === 0;
-        var atStart = range.compareBoundaryPoints(Range.START_TO_START, startRef) === 0;
+        var atEnd = prefixLen === totalLen;
+        var atStart = prefixLen === 0;
 
         var keep = null;
         var merge = null;
