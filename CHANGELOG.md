@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.12
+
+- Shift+Enter at the end of a `<p>` (or at the start of one) now merges that paragraph with its `<p>` neighbor into a single paragraph with an internal `<br>`. Previously the browser only inserted a `<br>` at the cursor and left the surrounding `<p>`s separate — visually it looked merged, but a visual→markdown→visual round-trip turned it back into separate paragraphs because the markdown ended up with blank-line-separated paragraphs instead of single-newline-separated lines.
+
 ## 0.2.11
 
 - Treat single newlines in markdown as line breaks when rendering to HTML for visual mode (`breaks: true` passed to Earmark). Content like emoji-prefixed lists or any line-by-line text without blank lines now renders line-by-line in visual mode, matching how the markdown source visually appears in markdown mode and how editors like GitHub, Slack, and Notion handle the same input. Round-trips through visual→markdown still preserve the original `\n`-separated source.
