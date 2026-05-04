@@ -688,6 +688,7 @@
       this._registerMarkdownHelpers();
       this._setupMarkdownTextarea();
       this._setupHtmlTextarea();
+      this._setupGripDoubleClick();
 
       this._wordCountEl = this.el.querySelector("[data-word-count]");
       this._charCountEl = this.el.querySelector("[data-char-count]");
@@ -890,6 +891,44 @@
       return document.getElementById(
         this._editorId + "-html-textarea"
       );
+    },
+
+    _setupGripDoubleClick: function () {
+      // Double-clicking the resize grip on any of the three editors should
+      // auto-fit that editor's height to its content. The native grip is UA
+      // chrome and doesn't fire its own events, but the underlying element
+      // still gets dblclick — we just check that the click landed in the
+      // bottom-right corner where the grip lives.
+      var minHeight = parseInt(this.el.dataset.height || "480", 10);
+      var GRIP_PX = 18;
+
+      var fitToContent = function (el) {
+        var prev = el.style.height;
+        el.style.height = "auto";
+        var natural = el.scrollHeight;
+        if (!natural) {
+          el.style.height = prev;
+          return;
+        }
+        el.style.height = Math.max(minHeight, natural) + "px";
+      };
+
+      var attach = function (el) {
+        if (!el) return;
+        el.addEventListener("dblclick", function (e) {
+          var rect = el.getBoundingClientRect();
+          var inGripArea =
+            e.clientX > rect.right - GRIP_PX &&
+            e.clientY > rect.bottom - GRIP_PX;
+          if (!inGripArea) return;
+          e.preventDefault();
+          fitToContent(el);
+        });
+      };
+
+      attach(this._visualEl);
+      attach(this._getMarkdownTextarea());
+      attach(this._getHtmlTextarea());
     },
 
     _debouncedPushHtmlChange: function (content) {
