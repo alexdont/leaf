@@ -83,7 +83,7 @@ defmodule Leaf do
   """
   attr(:id, :string, required: true)
   attr(:content, :string, default: "")
-  attr(:mode, :atom, default: :visual, values: [:visual, :markdown, :html])
+  attr(:mode, :atom, default: :hybrid, values: [:visual, :hybrid, :markdown, :html])
   attr(:preset, :atom, default: :advanced, values: [:advanced, :simple])
   attr(:toolbar, :list, default: [])
   attr(:placeholder, :string, default: "Write something...")
@@ -152,7 +152,8 @@ defmodule Leaf do
      |> push_event("leaf-set-html:#{socket.assigns.id}", %{html: html})}
   end
 
-  def update(%{action: :set_mode, mode: mode}, socket) when mode in [:visual, :markdown, :html] do
+  def update(%{action: :set_mode, mode: mode}, socket)
+      when mode in [:visual, :hybrid, :markdown, :html] do
     {:ok,
      socket
      |> assign(:mode, mode)
@@ -163,7 +164,7 @@ defmodule Leaf do
   end
 
   def update(assigns, socket) do
-    {parent_mode, assigns} = Map.pop(assigns, :mode, :visual)
+    {parent_mode, assigns} = Map.pop(assigns, :mode, :hybrid)
 
     socket =
       socket
@@ -806,6 +807,25 @@ defmodule Leaf do
           </button>
           <button
             type="button"
+            data-mode-tab="hybrid"
+            class={["btn btn-xs px-2", (@mode == :hybrid && "btn-active") || "btn-ghost"]}
+            title={t("Hybrid mode")}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              class="w-3.5 h-3.5"
+            >
+              <path
+                fill-rule="evenodd"
+                d="M9 4.5a.75.75 0 0 1 .721.544l.813 2.846a3.75 3.75 0 0 0 2.576 2.576l2.846.813a.75.75 0 0 1 0 1.442l-2.846.813a3.75 3.75 0 0 0-2.576 2.576l-.813 2.846a.75.75 0 0 1-1.442 0l-.813-2.846a3.75 3.75 0 0 0-2.576-2.576L1.044 12.22a.75.75 0 0 1 0-1.442l2.846-.813A3.75 3.75 0 0 0 6.466 7.39l.813-2.846A.75.75 0 0 1 9 4.5Z"
+                clip-rule="evenodd"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
             data-mode-tab="markdown"
             class={["btn btn-xs px-2", (@mode == :markdown && "btn-active") || "btn-ghost"]}
             title={t("Markdown mode")}
@@ -832,7 +852,7 @@ defmodule Leaf do
 
         <div data-leaf-content>
         <%!-- Visual Editor (contenteditable) --%>
-        <div data-visual-wrapper class={["relative", @mode != :visual && "hidden"]}>
+        <div data-visual-wrapper class={["relative", @mode not in [:visual, :hybrid] && "hidden"]}>
           <%!-- Block drag handle (positioned by JS) --%>
           <div data-drag-handle class="leaf-drag-handle" style="display:none">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor">
@@ -1083,6 +1103,17 @@ defmodule Leaf do
     [data-visual-toolbar] [data-insert-more-dropdown] {
       display: inline-flex;
       align-items: center;
+    }
+
+    /* Hybrid mode (Obsidian-style live preview): per-char contenteditable=false
+       spans inserted by the JS hook around markdown delimiters when the
+       cursor is inside a formatted element. Faded so they look like a
+       hint and never inherit the parent's bold/italic/strike styling. */
+    .leaf-syntax-decoration {
+      opacity: 0.55;
+      font-weight: normal;
+      font-style: normal;
+      text-decoration: none;
     }
     """
   end

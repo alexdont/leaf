@@ -503,6 +503,13 @@
         return inner + "\n";
 
       case "span":
+        // Hybrid-mode syntax decorations are visual only — never serialize.
+        if (
+          node.classList &&
+          node.classList.contains("leaf-syntax-decoration")
+        ) {
+          return "";
+        }
         if (
           node.classList &&
           node.classList.contains("leaf-spoiler")
@@ -1112,17 +1119,19 @@
 
       var mod = e.ctrlKey || e.metaKey;
 
-      if (mod && e.key === "b") {
+      if (mod && (e.key === "b" || e.key === "i" || (e.shiftKey && e.key === "x"))) {
         e.preventDefault();
-        if (this._isInsideHeading()) return;
-        document.execCommand("bold", false, null);
+        if (e.key === "b" && this._isInsideHeading()) return;
+        var preSnapshot = this._snapshotFormattingElements();
+        var cmd =
+          e.key === "b"
+            ? "bold"
+            : e.key === "i"
+              ? "italic"
+              : "strikeThrough";
+        document.execCommand(cmd, false, null);
         this._updateToolbarState();
-        return;
-      }
-      if (mod && e.key === "i") {
-        e.preventDefault();
-        document.execCommand("italic", false, null);
-        this._updateToolbarState();
+        this._deferredSyntaxRefresh(preSnapshot);
         return;
       }
       if (mod && e.key === "u") {
@@ -1133,12 +1142,6 @@
       if (mod && e.key === "k") {
         e.preventDefault();
         this._insertLink();
-        return;
-      }
-      if (mod && e.shiftKey && e.key === "x") {
-        e.preventDefault();
-        document.execCommand("strikeThrough", false, null);
-        this._updateToolbarState();
         return;
       }
 
@@ -1164,10 +1167,17 @@
       // text node if there is one, otherwise insert an NBSP so the cursor
       // has a home and typing isn't pulled back inside by contenteditable
       // boundary affinity).
+      //
+      // Skip in hybrid mode — the user expects to navigate "through" the
+      // visible markdown delimiters (e.g. the `**` decorations around a
+      // bolded word). Using browser-default arrow behavior naturally gives
+      // them an extra press to cross the boundary, which approximates
+      // delimiter-by-delimiter movement.
       if (
         (e.key === "ArrowRight" || e.key === "ArrowLeft") &&
         !mod &&
-        !e.shiftKey
+        !e.shiftKey &&
+        this._mode !== "hybrid"
       ) {
         var arrowSel = window.getSelection();
         if (
@@ -1431,7 +1441,10 @@
       ];
       wrappers.forEach(function (w) {
         if (!w.el) return;
-        if (w.mode === mode) {
+        // Hybrid mode reuses the visual wrapper — same DOM, same toolbar,
+        // just an extra `data-mode="hybrid"` selector for syntax decorations.
+        var visible = w.mode === mode || (w.mode === "visual" && mode === "hybrid");
+        if (visible) {
           w.el.classList.remove("hidden");
         } else {
           w.el.classList.add("hidden");
@@ -1636,16 +1649,226 @@
       }
 
       document.addEventListener("selectionchange", function () {
-        if (self._mode === "visual" && self._visualEl) {
+        if (
+          (self._mode === "visual" || self._mode === "hybrid") &&
+          self._visualEl
+        ) {
           var sel = window.getSelection();
           if (
             sel.rangeCount > 0 &&
             self._visualEl.contains(sel.anchorNode)
           ) {
             self._updateToolbarState();
+            self._updateSyntaxDecorations();
+          } else if (document.activeElement !== self._visualEl) {
+            // Cursor is outside the editor AND focus is elsewhere — user
+            // genuinely left. Clear. If the cursor is transiently outside
+            // (e.g., right after a toolbar click) but focus is still on the
+            // editor, leave decorations alone so they survive long enough
+            // for the deferred refresh to take over.
+            self._clearSyntaxDecoration();
           }
+        } else {
+          self._clearSyntaxDecoration();
         }
       });
+    },
+
+    _updateSyntaxDecorations: function () {
+      // In hybrid mode, when the cursor enters an inline-formatting
+      // element, insert real text-bearing spans for the markdown delimiters
+      // so the cursor can step through each char with arrow keys. When the
+      // cursor leaves, the spans come out. The spans use `data-leaf-syntax-
+      // decoration` (also a class for CSS) so htmlToMarkdown can skip them.
+      if (this._mode !== "hybrid") {
+        this._clearSyntaxDecoration();
+        return;
+      }
+      // Re-entry guard — our DOM mutations fire selectionchange too.
+      if (this._syntaxMutating) return;
+
+      var sel = window.getSelection();
+      if (!sel.rangeCount) {
+        this._clearSyntaxDecoration();
+        return;
+      }
+      var ancestor = this._activeFormattingForCursor(sel);
+      if (this._decoratedAncestor === ancestor) return;
+
+      var savedRange = sel.getRangeAt(0).cloneRange();
+      this._syntaxMutating = true;
+      try {
+        if (this._decoratedAncestor) {
+          this._removeDelimitersFrom(this._decoratedAncestor);
+        }
+        if (ancestor) {
+          this._addDelimitersTo(ancestor);
+        }
+        this._decoratedAncestor = ancestor || null;
+
+        // Place the cursor. If it was already inside the ancestor, restore
+        // exactly where the user was. If it was at the boundary OUTSIDE
+        // the ancestor (Chrome lands the anchor in the parent when arrowing
+        // into a formatting element), jump past the leading or trailing
+        // decorations to the content edge so it sits at `**|hello**`,
+        // not `|**hello**`.
+        var newRange = null;
+        if (ancestor) {
+          var delim = this._delimiterFor(ancestor);
+          if (
+            delim &&
+            !ancestor.contains(savedRange.startContainer) &&
+            ancestor !== savedRange.startContainer
+          ) {
+            var ancRange = document.createRange();
+            ancRange.selectNode(ancestor);
+            var fromLeft =
+              savedRange.compareBoundaryPoints(
+                Range.START_TO_START,
+                ancRange,
+              ) <= 0;
+            newRange = document.createRange();
+            if (fromLeft) {
+              newRange.setStart(ancestor, delim.length);
+            } else {
+              newRange.setStart(
+                ancestor,
+                ancestor.childNodes.length - delim.length,
+              );
+            }
+            newRange.collapse(true);
+          }
+        }
+        try {
+          sel.removeAllRanges();
+          sel.addRange(newRange || savedRange);
+        } catch (_e) {
+          /* range no longer valid (extremely rare) — leave selection alone */
+        }
+      } finally {
+        this._syntaxMutating = false;
+      }
+    },
+
+    _formattingSelector:
+      "b, strong, i, em, s, del, strike, code, u, sub, sup, mark, a, .leaf-spoiler",
+
+    _snapshotFormattingElements: function () {
+      if (!this._visualEl) return null;
+      var nodes = this._visualEl.querySelectorAll(this._formattingSelector);
+      var set = new Set();
+      for (var i = 0; i < nodes.length; i++) set.add(nodes[i]);
+      return set;
+    },
+
+    // Re-run decoration on the next tick. Chrome leaves the selection in a
+    // transient state immediately after execCommand, and any selectionchange
+    // events queued by the DOM mutation fire async — running on the next
+    // tick lets all of that settle before we look up the formatting ancestor.
+    // `preSnapshot` is a Set of formatting elements present before the
+    // action; we compare against the post-action set to find the newly
+    // inserted wrapper, which is the most reliable signal — selection state
+    // after execCommand can't always be trusted across browsers.
+    _deferredSyntaxRefresh: function (preSnapshot) {
+      var self = this;
+      setTimeout(function () {
+        self._clearSyntaxDecoration();
+
+        var ancestor = self._findNewFormatting(preSnapshot);
+        if (!ancestor) return;
+
+        self._syntaxMutating = true;
+        try {
+          self._addDelimitersTo(ancestor);
+          self._decoratedAncestor = ancestor;
+        } finally {
+          self._syntaxMutating = false;
+        }
+      }, 0);
+    },
+
+    _findNewFormatting: function (preSnapshot) {
+      if (!this._visualEl) return null;
+
+      // Diff the post-action set against the pre-action snapshot. A newly
+      // inserted wrapper is the one that wasn't there before.
+      if (preSnapshot) {
+        var post = this._visualEl.querySelectorAll(this._formattingSelector);
+        for (var i = 0; i < post.length; i++) {
+          if (!preSnapshot.has(post[i])) return post[i];
+        }
+      }
+
+      // Fallback: standard cursor-based lookup. Used when no snapshot was
+      // captured (e.g., the toolbar action was a no-op or we're being
+      // called from a non-toolbar path).
+      var sel = window.getSelection();
+      if (sel.rangeCount > 0) {
+        var byCursor = this._activeFormattingForCursor(sel);
+        if (byCursor) return byCursor;
+      }
+      return null;
+    },
+
+    _clearSyntaxDecoration: function () {
+      if (this._decoratedAncestor) {
+        this._syntaxMutating = true;
+        try {
+          this._removeDelimitersFrom(this._decoratedAncestor);
+        } finally {
+          this._syntaxMutating = false;
+        }
+        this._decoratedAncestor = null;
+      }
+    },
+
+    _delimiterFor: function (el) {
+      if (!el || !el.tagName) return null;
+      var tag = el.tagName.toLowerCase();
+      if (tag === "strong" || tag === "b") return "**";
+      if (tag === "em" || tag === "i") return "*";
+      if (tag === "s" || tag === "del" || tag === "strike") return "~~";
+      if (tag === "code") return "`";
+      if (
+        tag === "span" &&
+        el.classList &&
+        el.classList.contains("leaf-spoiler")
+      ) {
+        return "||";
+      }
+      return null;
+    },
+
+    _addDelimitersTo: function (el) {
+      var delim = this._delimiterFor(el);
+      if (!delim) return;
+
+      // One span per char so the cursor stops at each char boundary when
+      // arrow-keying. Spans are editable plain text — no contenteditable=
+      // false (which made cursor stepping unreliable across browsers).
+      for (var i = delim.length - 1; i >= 0; i--) {
+        var leading = document.createElement("span");
+        leading.className = "leaf-syntax-decoration";
+        leading.setAttribute("data-leaf-syntax-decoration", "");
+        leading.textContent = delim[i];
+        el.insertBefore(leading, el.firstChild);
+      }
+      for (var j = 0; j < delim.length; j++) {
+        var trailing = document.createElement("span");
+        trailing.className = "leaf-syntax-decoration";
+        trailing.setAttribute("data-leaf-syntax-decoration", "");
+        trailing.textContent = delim[j];
+        el.appendChild(trailing);
+      }
+    },
+
+    _removeDelimitersFrom: function (el) {
+      if (!el) return;
+      var spans = el.querySelectorAll(".leaf-syntax-decoration");
+      for (var k = 0; k < spans.length; k++) {
+        var s = spans[k];
+        if (s.parentNode) s.parentNode.removeChild(s);
+      }
     },
 
     // -- Sticky toolbar --
@@ -1758,6 +1981,11 @@
 
       if (!this._visualEl) return;
       this._visualEl.focus({ preventScroll: true });
+
+      // Snapshot existing formatting wrappers before the action so we can
+      // diff against the post-action set to find the newly inserted one.
+      // More reliable than guessing from post-action selection state.
+      var preSnapshot = this._snapshotFormattingElements();
 
       switch (action) {
         case "bold":
@@ -1875,6 +2103,7 @@
 
       this._updateToolbarState();
       this._debouncedPushVisualChange();
+      this._deferredSyntaxRefresh(preSnapshot);
     },
 
     _execMarkdownToolbarAction: function (action) {
@@ -2227,6 +2456,48 @@
         }
         node = node.parentNode;
       }
+      return null;
+    },
+
+    // Like _inlineFormattingAncestor but also catches the boundary case:
+    // when the cursor is between a plain text node and a formatting sibling,
+    // Chrome puts the anchor in the parent — so the standard ancestor walk
+    // misses the formatting until the cursor steps one character in.
+    _activeFormattingForCursor: function (sel) {
+      if (!sel || !sel.rangeCount) return null;
+
+      var inside = this._inlineFormattingAncestor(sel.anchorNode);
+      if (inside) return inside;
+
+      var range = sel.getRangeAt(0);
+      var node = range.endContainer;
+      var offset = range.endOffset;
+
+      if (node.nodeType === Node.TEXT_NODE) {
+        if (offset === node.textContent.length && node.nextSibling) {
+          var nextAncestor = this._inlineFormattingAncestor(node.nextSibling);
+          if (nextAncestor) return nextAncestor;
+        }
+        if (offset === 0 && node.previousSibling) {
+          var prevAncestor = this._inlineFormattingAncestor(
+            node.previousSibling,
+          );
+          if (prevAncestor) return prevAncestor;
+        }
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        var children = node.childNodes;
+        var afterChild = children[offset];
+        var beforeChild = children[offset - 1];
+        if (afterChild) {
+          var afterAncestor = this._inlineFormattingAncestor(afterChild);
+          if (afterAncestor) return afterAncestor;
+        }
+        if (beforeChild) {
+          var beforeAncestor = this._inlineFormattingAncestor(beforeChild);
+          if (beforeAncestor) return beforeAncestor;
+        }
+      }
+
       return null;
     },
 
