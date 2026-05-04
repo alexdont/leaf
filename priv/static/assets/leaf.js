@@ -253,6 +253,22 @@
     "  box-sizing: border-box;",
     "}",
     ".leaf-toolbar-placeholder { visibility: hidden; }",
+
+    // Resize-grip tooltip (shown when the mouse is over the bottom-right
+    // resize grip; hint that double-click auto-fits height to content).
+    ".leaf-grip-tooltip {",
+    "  position: fixed; pointer-events: none; z-index: 100000;",
+    "  background: rgba(17, 24, 39, 0.92); color: #f9fafb;",
+    "  padding: 4px 8px; border-radius: 4px;",
+    "  font: 500 11px/1.3 ui-sans-serif, system-ui, -apple-system, sans-serif;",
+    "  white-space: nowrap;",
+    "  opacity: 0; transform: translateY(2px);",
+    "  transition: opacity 0.12s ease-out, transform 0.12s ease-out;",
+    "  box-shadow: 0 2px 8px rgba(0,0,0,0.18);",
+    "}",
+    ".leaf-grip-tooltip.leaf-grip-tooltip-visible {",
+    "  opacity: 1; transform: translateY(0);",
+    "}",
   ].join("\n");
 
   function injectStyles() {
@@ -792,6 +808,10 @@
       this._closeEmojiPicker();
       this._dismissLinkPopover();
       this._dismissImageUrlDialog();
+      if (this._gripTooltipCleanup) {
+        this._gripTooltipCleanup();
+        this._gripTooltipCleanup = null;
+      }
       if (this._imageDropdownMenu) {
         this._imageDropdownMenu.remove();
         this._imageDropdownMenu = null;
@@ -898,9 +918,36 @@
       // auto-fit that editor's height to its content. The native grip is UA
       // chrome and doesn't fire its own events, but the underlying element
       // still gets dblclick — we just check that the click landed in the
-      // bottom-right corner where the grip lives.
+      // bottom-right corner where the grip lives. While we're here, also
+      // show a small tooltip when hovering the grip area so the gesture is
+      // discoverable.
+      var self = this;
       var minHeight = parseInt(this.el.dataset.height || "480", 10);
       var GRIP_PX = 18;
+      var tooltip = null;
+
+      var ensureTooltip = function () {
+        if (tooltip) return tooltip;
+        tooltip = document.createElement("div");
+        tooltip.className = "leaf-grip-tooltip";
+        tooltip.textContent = "Drag to resize · Double-click to fit content";
+        document.body.appendChild(tooltip);
+        return tooltip;
+      };
+
+      var hideTooltip = function () {
+        if (tooltip) tooltip.classList.remove("leaf-grip-tooltip-visible");
+      };
+
+      var showTooltipFor = function (el) {
+        var rect = el.getBoundingClientRect();
+        var tt = ensureTooltip();
+        tt.classList.add("leaf-grip-tooltip-visible");
+        // Position above the grip, right-aligned with the editor's right edge.
+        var ttRect = tt.getBoundingClientRect();
+        tt.style.left = Math.max(4, rect.right - ttRect.width - 4) + "px";
+        tt.style.top = rect.bottom - GRIP_PX - ttRect.height - 6 + "px";
+      };
 
       var fitToContent = function (el) {
         var prev = el.style.height;
@@ -924,11 +971,31 @@
           e.preventDefault();
           fitToContent(el);
         });
+        el.addEventListener("mousemove", function (e) {
+          var rect = el.getBoundingClientRect();
+          var inGripArea =
+            e.clientX > rect.right - GRIP_PX &&
+            e.clientY > rect.bottom - GRIP_PX;
+          if (inGripArea) {
+            showTooltipFor(el);
+          } else {
+            hideTooltip();
+          }
+        });
+        el.addEventListener("mouseleave", hideTooltip);
       };
 
       attach(this._visualEl);
       attach(this._getMarkdownTextarea());
       attach(this._getHtmlTextarea());
+
+      // Stash for cleanup in destroyed().
+      this._gripTooltipCleanup = function () {
+        if (tooltip && tooltip.parentNode) {
+          tooltip.parentNode.removeChild(tooltip);
+        }
+        tooltip = null;
+      };
     },
 
     _debouncedPushHtmlChange: function (content) {
