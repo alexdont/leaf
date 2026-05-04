@@ -2112,7 +2112,12 @@
 
         switch (action) {
           case "bold":
-            active = document.queryCommandState("bold") || /^h[1-6]$/.test(blockTag);
+            // Heading tags compute to font-weight:700 in our editor CSS, so
+            // queryCommandState("bold") reports true for headings even
+            // without an explicit <b>/<strong>. Probe for the actual element
+            // ancestor instead so the bold button only lights up for real
+            // bold spans.
+            active = self._isInsideTag("b") || self._isInsideTag("strong");
             break;
           case "italic":
             active = document.queryCommandState("italic");
@@ -2164,6 +2169,23 @@
           btn.classList.remove("btn-active");
         }
       });
+
+      // Reflect the current heading level on the heading dropdown trigger so
+      // users can see at a glance whether the cursor sits in a heading and
+      // which level it is — instead of having the bold button mislead them
+      // by lighting up for headings.
+      var headingTrigger = this.el.querySelector("[data-heading-trigger]");
+      if (headingTrigger) {
+        var label = headingTrigger.querySelector("[data-heading-trigger-label]");
+        var headingMatch = /^h([1-6])$/.exec(blockTag);
+        if (headingMatch) {
+          if (label) label.textContent = "H" + headingMatch[1];
+          headingTrigger.classList.add("btn-active");
+        } else {
+          if (label) label.textContent = "H";
+          headingTrigger.classList.remove("btn-active");
+        }
+      }
     },
 
     _isInsideTag: function (tagName) {
