@@ -1153,11 +1153,12 @@
         }
       }
 
-      // Arrow-out-of-spoiler: when the cursor is at the start/end of a
-      // spoiler span and the user presses ArrowLeft/ArrowRight, move it to a
-      // definite position OUTSIDE the span (start of the adjacent text node
-      // if there is one, otherwise insert a space so the cursor has a home
-      // and typing isn't pulled back inside the span by contenteditable
+      // Arrow-out-of-formatting: when the cursor is at the start/end of an
+      // inline formatting element (bold, italic, strike, code, link,
+      // spoiler, etc.) and the user presses ArrowLeft/ArrowRight, move it
+      // to a definite position OUTSIDE the element (start of the adjacent
+      // text node if there is one, otherwise insert an NBSP so the cursor
+      // has a home and typing isn't pulled back inside by contenteditable
       // boundary affinity).
       if (
         (e.key === "ArrowRight" || e.key === "ArrowLeft") &&
@@ -1171,13 +1172,13 @@
           arrowSel.isCollapsed
         ) {
           var arrowRange = arrowSel.getRangeAt(0);
-          var arrowSpoiler = this._spoilerAncestor(arrowRange.endContainer);
-          if (arrowSpoiler) {
+          var arrowEl = this._inlineFormattingAncestor(arrowRange.endContainer);
+          if (arrowEl) {
             var sPrefix = document.createRange();
-            sPrefix.selectNodeContents(arrowSpoiler);
+            sPrefix.selectNodeContents(arrowEl);
             sPrefix.setEnd(arrowRange.endContainer, arrowRange.endOffset);
             var sLen = sPrefix.toString().length;
-            var sTotal = arrowSpoiler.textContent.length;
+            var sTotal = arrowEl.textContent.length;
 
             var visualEl = this._visualEl;
             var landCursor = function (newRange) {
@@ -1189,22 +1190,31 @@
 
             if (e.key === "ArrowRight" && sLen === sTotal) {
               e.preventDefault();
-              var nextSib = arrowSpoiler.nextSibling;
+              var nextSib = arrowEl.nextSibling;
               var afterRange = document.createRange();
               if (
                 nextSib &&
                 nextSib.nodeType === Node.TEXT_NODE &&
                 nextSib.textContent.length > 0
               ) {
-                afterRange.setStart(nextSib, 0);
+                // Land 1 char into the next text rather than at offset 0,
+                // because (nextSib, 0) is the same visual position as end
+                // of the formatting wrapper — Chrome's boundary affinity
+                // keeps the cursor styled "inside" until it crosses an
+                // actual character. Advancing one char makes the escape
+                // visible on a single press.
+                afterRange.setStart(
+                  nextSib,
+                  Math.min(1, nextSib.textContent.length)
+                );
               } else {
                 // Non-breaking space: a regular trailing space at end of a
                 // <p> collapses visually, leaving the cursor stuck at the
-                // end of the spoiler. NBSP doesn't collapse.
+                // end of the formatting wrapper. NBSP doesn't collapse.
                 var spaceR = document.createTextNode(" ");
-                arrowSpoiler.parentNode.insertBefore(
+                arrowEl.parentNode.insertBefore(
                   spaceR,
-                  arrowSpoiler.nextSibling
+                  arrowEl.nextSibling
                 );
                 afterRange.setStart(spaceR, 1);
               }
@@ -1213,7 +1223,7 @@
             }
             if (e.key === "ArrowLeft" && sLen === 0) {
               e.preventDefault();
-              var prevSib = arrowSpoiler.previousSibling;
+              var prevSib = arrowEl.previousSibling;
               var beforeRange = document.createRange();
               if (
                 prevSib &&
@@ -1223,7 +1233,7 @@
                 beforeRange.setStart(prevSib, prevSib.textContent.length);
               } else {
                 var spaceL = document.createTextNode(" ");
-                arrowSpoiler.parentNode.insertBefore(spaceL, arrowSpoiler);
+                arrowEl.parentNode.insertBefore(spaceL, arrowEl);
                 beforeRange.setStart(spaceL, 0);
               }
               landCursor(beforeRange);
@@ -1234,22 +1244,24 @@
       }
 
       if (e.key === "Enter" && !e.shiftKey) {
-        // If the cursor is inside a spoiler span, break out of it: insert a
-        // fresh <p> after the current block and move the cursor there.
-        // Otherwise the browser would split the spoiler into the new
-        // paragraph, making every subsequent paragraph a spoiler too.
+        // If the cursor is inside an inline formatting element (bold,
+        // italic, strike, code, link, spoiler, etc.), break out of it:
+        // insert a fresh <p> after the current block and move the cursor
+        // there. Otherwise the browser would split the wrapper into the
+        // new paragraph, making every subsequent paragraph carry the same
+        // formatting.
         var sel = window.getSelection();
         if (sel && sel.rangeCount && sel.isCollapsed) {
-          var spoiler = this._spoilerAncestor(sel.anchorNode);
-          if (spoiler) {
-            var blockOfSpoiler = this._getCurrentBlock();
-            if (blockOfSpoiler && blockOfSpoiler.parentNode) {
+          var fmt = this._inlineFormattingAncestor(sel.anchorNode);
+          if (fmt) {
+            var blockOfFmt = this._getCurrentBlock();
+            if (blockOfFmt && blockOfFmt.parentNode) {
               e.preventDefault();
               var newP = document.createElement("p");
               newP.appendChild(document.createElement("br"));
-              blockOfSpoiler.parentNode.insertBefore(
+              blockOfFmt.parentNode.insertBefore(
                 newP,
-                blockOfSpoiler.nextSibling
+                blockOfFmt.nextSibling
               );
               var nr = document.createRange();
               nr.setStart(newP, 0);
@@ -2188,6 +2200,41 @@
           node.classList.contains("leaf-spoiler")
         ) {
           return node;
+        }
+        node = node.parentNode;
+      }
+      return null;
+    },
+
+    // Closest inline-formatting wrapper around `node` that the user might
+    // want to escape from when arrowing past its boundary or pressing Enter
+    // inside it. Includes the spoiler span as a class match.
+    _inlineFormattingAncestor: function (node) {
+      var tags = [
+        "b",
+        "strong",
+        "i",
+        "em",
+        "s",
+        "del",
+        "strike",
+        "code",
+        "u",
+        "sub",
+        "sup",
+        "mark",
+        "a",
+      ];
+      while (node && node !== this._visualEl) {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          var tag = node.tagName ? node.tagName.toLowerCase() : "";
+          if (tags.indexOf(tag) !== -1) return node;
+          if (
+            node.classList &&
+            node.classList.contains("leaf-spoiler")
+          ) {
+            return node;
+          }
         }
         node = node.parentNode;
       }
