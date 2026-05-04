@@ -1071,6 +1071,19 @@ defmodule Leaf do
       0% { background-position: 100% 50%; }
       100% { background-position: -100% 50%; }
     }
+
+    /* Toolbar alignment — emitted inline so the icon row sits on a single
+       centerline at first paint, before the JS hook injects the full
+       editor stylesheet. Without this the toolbar is briefly jagged. */
+    [data-visual-toolbar] svg { display: block; }
+    [data-visual-toolbar] button { line-height: 1; }
+    [data-visual-toolbar] [data-heading-dropdown],
+    [data-visual-toolbar] [data-inline-more-dropdown],
+    [data-visual-toolbar] [data-table-dropdown],
+    [data-visual-toolbar] [data-insert-more-dropdown] {
+      display: inline-flex;
+      align-items: center;
+    }
     """
   end
 

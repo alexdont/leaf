@@ -297,26 +297,9 @@
     "  cursor: text;",
     "}",
 
-    // Toolbar icon alignment — keeps text-glyph buttons (B/I/S/H) and
-    // SVG icons sitting on the exact same vertical centerline. Without
-    // these, bare <svg> elements default to inline-baseline alignment
-    // and text glyphs get inflated by the inherited line-height, so the
-    // row of icons looks subtly jagged.
-    "[data-visual-toolbar] svg { display: block; }",
-    "[data-visual-toolbar] button { line-height: 1; }",
-
-    // Dropdown wrappers (heading, inline-more, table, insert-more) are
-    // plain `position: relative` divs — without `inline-flex` they render
-    // as block elements whose line-height inflates the wrapper above the
-    // button it contains, pushing the button to the top of the wrapper.
-    // The image-split-btn already has inline-flex; the others didn't.
-    "[data-visual-toolbar] [data-heading-dropdown],",
-    "[data-visual-toolbar] [data-inline-more-dropdown],",
-    "[data-visual-toolbar] [data-table-dropdown],",
-    "[data-visual-toolbar] [data-insert-more-dropdown] {",
-    "  display: inline-flex;",
-    "  align-items: center;",
-    "}",
+    // (Toolbar alignment rules live in the server-side inline <style>
+    // block — see loading_state_css/1 in lib/leaf.ex — so they apply on
+    // first paint, before this CSS is injected by mounted().)
 
     // Sticky toolbar
     "[data-visual-toolbar].leaf-toolbar-sticky {",
