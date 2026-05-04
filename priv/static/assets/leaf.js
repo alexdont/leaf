@@ -980,10 +980,48 @@
       if (e.key === "Enter" && e.shiftKey) {
         // Force a soft break inside the current block. Some browsers
         // (notably Chromium with defaultParagraphSeparator set to "p")
-        // otherwise treat Shift+Enter the same as Enter and start a new
-        // <p> instead of inserting a <br>.
+        // wrap insertHTML output in a new <p> when the cursor is at the
+        // end of a block — manually inserting a <br> via the Range API
+        // sidesteps that and guarantees the break stays inside the
+        // current parent.
         e.preventDefault();
-        document.execCommand("insertHTML", false, "<br>");
+        var sel = window.getSelection();
+        if (!sel || !sel.rangeCount) return;
+        var range = sel.getRangeAt(0);
+        range.deleteContents();
+
+        // Determine if cursor sits at the end of the current block before
+        // we mutate the DOM. Using textContent length (rather than
+        // checking br.nextSibling after the insert) avoids false negatives
+        // when range.insertNode splits a text node and leaves an empty
+        // sibling text node behind.
+        var block = this._getCurrentBlock();
+        var atEndOfBlock = false;
+        if (block) {
+          var prefix = document.createRange();
+          prefix.selectNodeContents(block);
+          prefix.setEnd(range.endContainer, range.endOffset);
+          atEndOfBlock = prefix.toString().length === block.textContent.length;
+        }
+
+        var br = document.createElement("br");
+        range.insertNode(br);
+
+        // At end of a block the inserted <br> alone has no visible height
+        // — append a filler <br> so the cursor lands on a visible empty
+        // line. This is the standard contenteditable trick.
+        if (atEndOfBlock) {
+          var filler = document.createElement("br");
+          br.parentNode.insertBefore(filler, br.nextSibling);
+        }
+
+        var newRange = document.createRange();
+        newRange.setStartAfter(br);
+        newRange.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(newRange);
+
+        this._visualEl.dispatchEvent(new Event("input", { bubbles: true }));
         return;
       }
     },
