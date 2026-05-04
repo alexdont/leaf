@@ -1108,8 +1108,11 @@
     // -- Event handlers --
 
     _onVisualInput: function () {
-      if (this._mode !== "visual") return;
+      if (this._mode !== "visual" && this._mode !== "hybrid") return;
       this._dismissLinkPopover();
+      if (this._mode === "hybrid" && !this._syntaxMutating) {
+        this._maybeUnwrapTamperedFormatting();
+      }
       this._debouncedPushVisualChange();
       this._updateCounts();
     },
@@ -1808,6 +1811,75 @@
         if (byCursor) return byCursor;
       }
       return null;
+    },
+
+    // After a contenteditable input event in hybrid mode, verify the active
+    // decorated wrapper still has its delimiter spans intact at both ends.
+    // If the user edited or deleted any delimiter character, drop the
+    // wrapper entirely so the formatting it represented is broken.
+    _maybeUnwrapTamperedFormatting: function () {
+      var wrapper = this._decoratedAncestor;
+      if (!wrapper || !wrapper.isConnected) return;
+      var delim = this._delimiterFor(wrapper);
+      if (!delim) return;
+
+      var children = wrapper.childNodes;
+      var n = delim.length;
+      if (children.length < n * 2) {
+        this._unwrapTamperedFormatting(wrapper);
+        return;
+      }
+
+      for (var i = 0; i < n; i++) {
+        var c = children[i];
+        if (
+          !c ||
+          c.nodeType !== Node.ELEMENT_NODE ||
+          !c.classList.contains("leaf-syntax-decoration") ||
+          c.textContent !== delim[i]
+        ) {
+          this._unwrapTamperedFormatting(wrapper);
+          return;
+        }
+      }
+      for (var j = 0; j < n; j++) {
+        var c2 = children[children.length - n + j];
+        if (
+          !c2 ||
+          c2.nodeType !== Node.ELEMENT_NODE ||
+          !c2.classList.contains("leaf-syntax-decoration") ||
+          c2.textContent !== delim[j]
+        ) {
+          this._unwrapTamperedFormatting(wrapper);
+          return;
+        }
+      }
+    },
+
+    _unwrapTamperedFormatting: function (wrapper) {
+      var parent = wrapper.parentNode;
+      if (!parent) return;
+      this._syntaxMutating = true;
+      try {
+        var child = wrapper.firstChild;
+        while (child) {
+          var next = child.nextSibling;
+          if (
+            !(
+              child.nodeType === Node.ELEMENT_NODE &&
+              child.classList &&
+              child.classList.contains("leaf-syntax-decoration")
+            )
+          ) {
+            parent.insertBefore(child, wrapper);
+          }
+          child = next;
+        }
+        parent.removeChild(wrapper);
+        this._decoratedAncestor = null;
+      } finally {
+        this._syntaxMutating = false;
+      }
     },
 
     _clearSyntaxDecoration: function () {
