@@ -192,7 +192,7 @@ defmodule Leaf do
       data-debounce={@debounce}
       data-readonly={@readonly}
       data-height={@height}
-      data-has-upload={to_string(:image in @toolbar)}
+      data-has-upload={to_string(@upload_handler != nil)}
     >
       {loading_state_style_tag(@height, @script_nonce)}
 
@@ -993,6 +993,13 @@ defmodule Leaf do
 
     {:noreply, push_event(socket, "leaf-set-html-textarea:#{socket.assigns.id}", %{html: html})}
   end
+
+  # The image-URL dialog (and other media popovers) push these to signal the
+  # server that a modal UI is active. Currently no-op on the server side —
+  # they exist so a future hook can react (suspend autosave, freeze the
+  # component, etc.) without the LiveView crashing on an unmatched event.
+  def handle_event("media_ui_opened", _params, socket), do: {:noreply, socket}
+  def handle_event("media_ui_closed", _params, socket), do: {:noreply, socket}
 
   # -- Helpers --
 
