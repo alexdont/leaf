@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.12
+
+- Force Shift+Enter to always insert a soft break (`<br>`) inside the current block. Some browsers — notably Chromium contenteditables that have `defaultParagraphSeparator` set to `"p"` — otherwise treat Shift+Enter the same as plain Enter and start a new `<p>`. The editor now intercepts the key and inserts a `<br>` explicitly, so a single Shift+Enter always continues the current paragraph on a new line and any following `<p>` stays separate.
+
 ## 0.2.11
 
 - Treat single newlines in markdown as line breaks when rendering to HTML for visual mode (`breaks: true` passed to Earmark). Content like emoji-prefixed lists or any line-by-line text without blank lines now renders line-by-line in visual mode, matching how the markdown source visually appears in markdown mode and how editors like GitHub, Slack, and Notion handle the same input. Round-trips through visual→markdown still preserve the original `\n`-separated source.

@@ -977,6 +977,15 @@
         }
       }
 
+      if (e.key === "Enter" && e.shiftKey) {
+        // Force a soft break inside the current block. Some browsers
+        // (notably Chromium with defaultParagraphSeparator set to "p")
+        // otherwise treat Shift+Enter the same as Enter and start a new
+        // <p> instead of inserting a <br>.
+        e.preventDefault();
+        document.execCommand("insertHTML", false, "<br>");
+        return;
+      }
     },
 
     _onPaste: function (e) {
