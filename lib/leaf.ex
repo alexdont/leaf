@@ -259,7 +259,7 @@ defmodule Leaf do
                   title={t("Headings")}
                   data-heading-trigger
                 >
-                  H
+                  <span data-heading-trigger-label>H</span>
                 </button>
                 <ul
                   class="hidden absolute top-full left-0 menu bg-base-200 rounded-box z-50 w-28 p-1 shadow-sm"
@@ -378,6 +378,15 @@ defmodule Leaf do
                           />
                         </svg>
                         <span>{t("Inline Code")}</span>
+                      </button>
+                    </li>
+                    <li>
+                      <button
+                        type="button"
+                        data-toolbar-action="spoiler"
+                      >
+                        <span class="inline-block w-3.5 h-2.5 bg-current rounded-sm" aria-hidden="true"></span>
+                        <span>{t("Spoiler")}</span>
                       </button>
                     </li>
                   </ul>
@@ -1074,6 +1083,22 @@ defmodule Leaf do
     html
     |> String.replace(~r/<(h[1-6]|p|li|blockquote|a)([^>]*)>\n/, "<\\1\\2>")
     |> String.replace(~r/\s*<\/(h[1-6]|p|li|blockquote|a)>/, "</\\1>")
+    |> apply_spoiler_syntax()
     |> String.trim()
+  end
+
+  # Convert `||text||` (Discord-style spoiler) to <span class="leaf-spoiler">.
+  # Skip anything inside <code>…</code> or <pre>…</pre> so literal pipes in
+  # code samples stay literal.
+  defp apply_spoiler_syntax(html) do
+    html
+    |> String.split(~r/(<(?:pre|code)\b[^>]*>.*?<\/(?:pre|code)>)/is, include_captures: true)
+    |> Enum.map_join("", fn chunk ->
+      if String.match?(chunk, ~r/^<(?:pre|code)\b/i) do
+        chunk
+      else
+        String.replace(chunk, ~r/\|\|(.+?)\|\|/s, "<span class=\"leaf-spoiler\">\\1</span>")
+      end
+    end)
   end
 end

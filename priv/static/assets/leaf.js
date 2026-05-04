@@ -25,6 +25,31 @@
   window.LeafHooks = window.LeafHooks || {};
 
   // =========================================================================
+  // Reveal hidden spoilers on click (works for any .leaf-spoiler on the page,
+  // not just inside an editor — so consumer-rendered output works too).
+  // =========================================================================
+
+  document.addEventListener("click", function (e) {
+    var node = e.target;
+    while (node && node !== document.body) {
+      if (
+        node.nodeType === 1 &&
+        node.classList &&
+        node.classList.contains("leaf-spoiler") &&
+        !node.classList.contains("leaf-spoiler-revealed")
+      ) {
+        // Inside the editor, the spoiler is always shown for editing —
+        // don't intercept clicks (let the cursor land normally).
+        if (node.closest && node.closest("[data-editor-visual]")) return;
+        e.preventDefault();
+        node.classList.add("leaf-spoiler-revealed");
+        return;
+      }
+      node = node.parentNode;
+    }
+  });
+
+  // =========================================================================
   // Inject CSS styles for the visual editor
   // =========================================================================
 
@@ -246,6 +271,32 @@
     "}",
     ".leaf-image-url-dialog .leaf-image-url-insert:hover { opacity: 0.9; }",
 
+    // Spoiler (||text||) — censored block; click to reveal. Hidden by default
+    // wherever it's rendered (consumer output, preview panes, etc.).
+    ".leaf-spoiler {",
+    "  background: var(--color-base-content, #1f2937);",
+    "  color: transparent;",
+    "  border-radius: 3px;",
+    "  padding: 0 2px;",
+    "  cursor: pointer;",
+    "  user-select: none;",
+    "  transition: color 0.15s ease, background 0.15s ease;",
+    "}",
+    ".leaf-spoiler.leaf-spoiler-revealed {",
+    "  color: inherit;",
+    "  background: color-mix(in oklab, var(--color-base-content, #1f2937) 12%, transparent);",
+    "  user-select: text;",
+    "}",
+    // Inside the editor, spoilers are always shown so the writer can see and
+    // edit what they typed. A subtle background hint keeps the spoiler-ness
+    // visible at a glance.
+    "[data-editor-visual] .leaf-spoiler {",
+    "  background: color-mix(in oklab, var(--color-base-content, #1f2937) 12%, transparent);",
+    "  color: inherit;",
+    "  user-select: text;",
+    "  cursor: text;",
+    "}",
+
     // Sticky toolbar
     "[data-visual-toolbar].leaf-toolbar-sticky {",
     "  position: fixed;",
@@ -446,6 +497,15 @@
 
       case "div":
         return inner + "\n";
+
+      case "span":
+        if (
+          node.classList &&
+          node.classList.contains("leaf-spoiler")
+        ) {
+          return "||" + inner + "||";
+        }
+        return inner;
 
       default:
         return inner;
@@ -1093,7 +1153,117 @@
         }
       }
 
+      // Arrow-out-of-spoiler: when the cursor is at the start/end of a
+      // spoiler span and the user presses ArrowLeft/ArrowRight, move it to a
+      // definite position OUTSIDE the span (start of the adjacent text node
+      // if there is one, otherwise insert a space so the cursor has a home
+      // and typing isn't pulled back inside the span by contenteditable
+      // boundary affinity).
+      if (
+        (e.key === "ArrowRight" || e.key === "ArrowLeft") &&
+        !mod &&
+        !e.shiftKey
+      ) {
+        var arrowSel = window.getSelection();
+        if (
+          arrowSel &&
+          arrowSel.rangeCount &&
+          arrowSel.isCollapsed
+        ) {
+          var arrowRange = arrowSel.getRangeAt(0);
+          var arrowSpoiler = this._spoilerAncestor(arrowRange.endContainer);
+          if (arrowSpoiler) {
+            var sPrefix = document.createRange();
+            sPrefix.selectNodeContents(arrowSpoiler);
+            sPrefix.setEnd(arrowRange.endContainer, arrowRange.endOffset);
+            var sLen = sPrefix.toString().length;
+            var sTotal = arrowSpoiler.textContent.length;
+
+            var visualEl = this._visualEl;
+            var landCursor = function (newRange) {
+              newRange.collapse(true);
+              arrowSel.removeAllRanges();
+              arrowSel.addRange(newRange);
+              visualEl.dispatchEvent(new Event("input", { bubbles: true }));
+            };
+
+            if (e.key === "ArrowRight" && sLen === sTotal) {
+              e.preventDefault();
+              var nextSib = arrowSpoiler.nextSibling;
+              var afterRange = document.createRange();
+              if (
+                nextSib &&
+                nextSib.nodeType === Node.TEXT_NODE &&
+                nextSib.textContent.length > 0
+              ) {
+                afterRange.setStart(nextSib, 0);
+              } else {
+                // Non-breaking space: a regular trailing space at end of a
+                // <p> collapses visually, leaving the cursor stuck at the
+                // end of the spoiler. NBSP doesn't collapse.
+                var spaceR = document.createTextNode(" ");
+                arrowSpoiler.parentNode.insertBefore(
+                  spaceR,
+                  arrowSpoiler.nextSibling
+                );
+                afterRange.setStart(spaceR, 1);
+              }
+              landCursor(afterRange);
+              return;
+            }
+            if (e.key === "ArrowLeft" && sLen === 0) {
+              e.preventDefault();
+              var prevSib = arrowSpoiler.previousSibling;
+              var beforeRange = document.createRange();
+              if (
+                prevSib &&
+                prevSib.nodeType === Node.TEXT_NODE &&
+                prevSib.textContent.length > 0
+              ) {
+                beforeRange.setStart(prevSib, prevSib.textContent.length);
+              } else {
+                var spaceL = document.createTextNode(" ");
+                arrowSpoiler.parentNode.insertBefore(spaceL, arrowSpoiler);
+                beforeRange.setStart(spaceL, 0);
+              }
+              landCursor(beforeRange);
+              return;
+            }
+          }
+        }
+      }
+
       if (e.key === "Enter" && !e.shiftKey) {
+        // If the cursor is inside a spoiler span, break out of it: insert a
+        // fresh <p> after the current block and move the cursor there.
+        // Otherwise the browser would split the spoiler into the new
+        // paragraph, making every subsequent paragraph a spoiler too.
+        var sel = window.getSelection();
+        if (sel && sel.rangeCount && sel.isCollapsed) {
+          var spoiler = this._spoilerAncestor(sel.anchorNode);
+          if (spoiler) {
+            var blockOfSpoiler = this._getCurrentBlock();
+            if (blockOfSpoiler && blockOfSpoiler.parentNode) {
+              e.preventDefault();
+              var newP = document.createElement("p");
+              newP.appendChild(document.createElement("br"));
+              blockOfSpoiler.parentNode.insertBefore(
+                newP,
+                blockOfSpoiler.nextSibling
+              );
+              var nr = document.createRange();
+              nr.setStart(newP, 0);
+              nr.collapse(true);
+              sel.removeAllRanges();
+              sel.addRange(nr);
+              this._visualEl.dispatchEvent(
+                new Event("input", { bubbles: true })
+              );
+              return;
+            }
+          }
+        }
+
         var block = this._getCurrentBlock();
         if (
           block &&
@@ -1572,6 +1742,9 @@
         case "code":
           this._wrapSelectionWith("code");
           break;
+        case "spoiler":
+          this._toggleSpoiler();
+          break;
         case "heading1":
           this._toggleHeading("h1");
           break;
@@ -1682,6 +1855,7 @@
         case "superscript": if (fmt) fmt("<sup>", "</sup>"); break;
         case "subscript": if (fmt) fmt("<sub>", "</sub>"); break;
         case "code": if (fmt) fmt("`", "`"); break;
+        case "spoiler": if (fmt) fmt("||", "||"); break;
         case "heading1": if (pfx) pfx("# "); break;
         case "heading2": if (pfx) pfx("## "); break;
         case "heading3": if (pfx) pfx("### "); break;
@@ -2006,6 +2180,53 @@
       }
     },
 
+    _spoilerAncestor: function (node) {
+      while (node && node !== this._visualEl) {
+        if (
+          node.nodeType === Node.ELEMENT_NODE &&
+          node.classList &&
+          node.classList.contains("leaf-spoiler")
+        ) {
+          return node;
+        }
+        node = node.parentNode;
+      }
+      return null;
+    },
+
+    _toggleSpoiler: function () {
+      var sel = window.getSelection();
+      if (!sel.rangeCount) return;
+      var range = sel.getRangeAt(0);
+
+      // If cursor / selection is inside an existing spoiler, unwrap it.
+      var existing = this._spoilerAncestor(range.commonAncestorContainer);
+      if (existing) {
+        var text = document.createTextNode(existing.textContent);
+        existing.parentNode.replaceChild(text, existing);
+        return;
+      }
+
+      var selected = range.toString();
+      if (!selected.length) return;
+
+      try {
+        var span = document.createElement("span");
+        span.className = "leaf-spoiler";
+        range.surroundContents(span);
+      } catch (_e) {
+        var escaped = selected
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+        document.execCommand(
+          "insertHTML",
+          false,
+          '<span class="leaf-spoiler">' + escaped + "</span>"
+        );
+      }
+    },
+
     _insertTable: function () {
       var html =
         "<table><thead><tr><th>Header 1</th><th>Header 2</th></tr></thead>" +
@@ -2160,6 +2381,12 @@
             break;
           case "code":
             active = self._isInsideTag("code");
+            break;
+          case "spoiler":
+            var sel = window.getSelection();
+            active =
+              sel.rangeCount > 0 &&
+              !!self._spoilerAncestor(sel.anchorNode);
             break;
         }
 
