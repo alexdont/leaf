@@ -275,8 +275,26 @@
 
   function nodeToMarkdown(node) {
     var result = "";
+    var prevWasBr = false;
     for (var i = 0; i < node.childNodes.length; i++) {
-      result += convertNode(node.childNodes[i]);
+      var child = node.childNodes[i];
+      var emit = convertNode(child);
+
+      // Earmark's HTML output (with breaks: true) puts a literal "\n" after
+      // every <br> as pretty-print whitespace. Without stripping, the
+      // <br>'s "\n" plus the text node's leading "\n" become "\n\n" — a
+      // markdown paragraph break — and the round-trip splits a single
+      // paragraph into multiple.
+      if (prevWasBr && child.nodeType === Node.TEXT_NODE) {
+        emit = emit.replace(/^[\n\r\t]+/, "");
+      }
+
+      prevWasBr =
+        child.nodeType === Node.ELEMENT_NODE &&
+        child.tagName &&
+        child.tagName.toLowerCase() === "br";
+
+      result += emit;
     }
     return result;
   }
@@ -322,6 +340,14 @@
         return inner.trim() + "\n\n";
 
       case "br":
+        // The Shift+Enter handler appends a filler <br> at the end of a
+        // block so the cursor has a visible empty line to sit on. That
+        // filler is for visual presentation only — emitting "\n" for it
+        // would cause "<br><br>" sequences to round-trip as paragraph
+        // breaks, splitting a single paragraph into multiple.
+        if (node.hasAttribute && node.hasAttribute("data-leaf-filler")) {
+          return "";
+        }
         return "\n";
 
       case "strong":
@@ -1009,9 +1035,12 @@
 
         // At end of a block the inserted <br> alone has no visible height
         // — append a filler <br> so the cursor lands on a visible empty
-        // line. This is the standard contenteditable trick.
+        // line. This is the standard contenteditable trick. Mark it with
+        // data-leaf-filler so htmlToMarkdown emits "" for it and the
+        // <br><br> pair doesn't round-trip as a paragraph break.
         if (atEndOfBlock) {
           var filler = document.createElement("br");
+          filler.setAttribute("data-leaf-filler", "");
           br.parentNode.insertBefore(filler, br.nextSibling);
         }
 

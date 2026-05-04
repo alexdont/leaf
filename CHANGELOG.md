@@ -3,6 +3,7 @@
 ## 0.2.12
 
 - Force Shift+Enter to always insert a soft break (`<br>`) inside the current block. Some browsers — notably Chromium contenteditables that have `defaultParagraphSeparator` set to `"p"` — otherwise treat Shift+Enter the same as plain Enter and start a new `<p>`. The editor now intercepts the key and inserts a `<br>` explicitly, so a single Shift+Enter always continues the current paragraph on a new line and any following `<p>` stays separate.
+- Preserve `<br>` soft breaks across visual↔markdown↔html round-trips. Earmark's `breaks: true` HTML output puts a literal `\n` after every `<br>` as pretty-print whitespace, which `htmlToMarkdown` was reading and combining with the `<br>`'s own `\n` into `\n\n` — a markdown paragraph break — causing a single paragraph with internal soft breaks to split into multiple paragraphs after a round-trip. The walker now strips leading newlines from text nodes that follow a `<br>`. Same root cause for the cursor-visibility filler `<br>` that the Shift+Enter handler appends at end of block — it's now marked `data-leaf-filler` and skipped by the markdown walker so a Shift+Enter at end of paragraph doesn't get serialized as a paragraph break.
 
 ## 0.2.11
 
