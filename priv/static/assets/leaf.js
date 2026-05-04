@@ -1507,6 +1507,26 @@
 
     _setupToolbar: function () {
       var self = this;
+
+      // Preserve the contenteditable's selection on miss-clicks anywhere
+      // in the editor's chrome (toolbar gaps, mode tabs, footer, border,
+      // dividers, bg-base-200 background, etc.). preventDefault on
+      // mousedown blocks the focus shift but still lets the click event
+      // through, so buttons / dropdown triggers / mode switcher all keep
+      // working. Carve out the contenteditable itself and form controls
+      // so cursor placement and text-input focus aren't broken.
+      this.el.addEventListener("mousedown", function (e) {
+        var target = e.target;
+        if (self._visualEl && self._visualEl.contains(target)) return;
+        if (target && target.tagName) {
+          var tag = target.tagName.toLowerCase();
+          if (tag === "input" || tag === "textarea" || tag === "select") {
+            return;
+          }
+        }
+        e.preventDefault();
+      });
+
       var buttons = this.el.querySelectorAll("[data-toolbar-action]");
 
       buttons.forEach(function (btn) {
