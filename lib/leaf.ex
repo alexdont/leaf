@@ -839,11 +839,11 @@ defmodule Leaf do
             contenteditable={if @readonly, do: "false", else: "true"}
             class={[
               "content-editor-visual",
-              "overflow-y-auto p-4 pl-10",
+              "overflow-auto p-4 pl-10",
               "focus:outline-none",
               @readonly && "opacity-70 cursor-not-allowed"
             ]}
-            style={"min-height: #{@height}"}
+            style={"min-height: #{@height}; height: #{@height}; resize: vertical;"}
           >
             {raw(@visual_html)}
           </div>
