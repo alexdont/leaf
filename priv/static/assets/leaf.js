@@ -385,8 +385,11 @@
     if (node.nodeType === Node.TEXT_NODE) {
       // Hybrid-mode keystroke redirects insert U+00A0 for trailing spaces
       // (so HTML doesn't collapse them); normalize back to regular spaces
-      // when serializing to markdown.
-      return node.textContent.replace(/ /g, " ");
+      // when serializing to markdown. Heading-decoration cursor anchoring
+      // sometimes leaves U+200B (ZWSP) — strip those too.
+      return node.textContent
+        .replace(/​/g, "")
+        .replace(/ /g, " ");
     }
 
     if (node.nodeType !== Node.ELEMENT_NODE) {
@@ -1116,6 +1119,7 @@
       if (this._mode === "hybrid" && !this._syntaxMutating) {
         this._maybeUnwrapTamperedFormatting();
         this._maybeAutoFormat();
+        this._maybeAutoFormatHeading();
       }
       this._debouncedPushVisualChange();
       this._updateCounts();
@@ -1560,7 +1564,8 @@
           spans[i].parentNode.removeChild(spans[i]);
         }
       }
-      return tmp.innerHTML;
+      // Strip cursor-anchoring ZWSPs introduced by heading decoration.
+      return tmp.innerHTML.replace(/​/g, "");
     },
 
     _getMarkdownTextarea: function () {
@@ -1709,6 +1714,7 @@
           ) {
             self._updateToolbarState();
             self._updateSyntaxDecorations();
+            self._updateHeadingDecoration();
           } else if (document.activeElement !== self._visualEl) {
             // Cursor is outside the editor AND focus is elsewhere — user
             // genuinely left. Clear. If the cursor is transiently outside
@@ -1716,11 +1722,14 @@
             // editor, leave decorations alone so they survive long enough
             // for the deferred refresh to take over.
             self._clearSyntaxDecoration();
+            self._clearHeadingDecoration();
           }
         } else {
           self._clearSyntaxDecoration();
+          self._clearHeadingDecoration();
         }
       });
+
     },
 
     _updateSyntaxDecorations: function () {
@@ -2226,6 +2235,113 @@
       return result;
     },
 
+    // Convert a plain `<p>` to the matching `<h1>`–`<h6>` when its text
+    // starts with 1–6 `#` chars followed by a space. The `# ` prefix is
+    // consumed so the heading begins empty (or with whatever the user
+    // typed after the space, if it was pasted as a chunk).
+    _maybeAutoFormatHeading: function () {
+      var sel = window.getSelection();
+      if (!sel.rangeCount) return;
+      var range = sel.getRangeAt(0);
+      if (!range.collapsed) return;
+
+      var block = this._getCurrentBlock();
+      if (!block || !block.tagName) return;
+      if (block.tagName.toLowerCase() !== "p") return;
+
+      var text = block.textContent;
+      // Trigger separator allows either a regular space or ` `
+      // — Chrome auto-converts a trailing space in a `<p>` to `&nbsp;`,
+      // which used to slip past a strict ` ` match.
+      var m = text.match(/^(#{1,6})[  ]/);
+      if (!m) return;
+
+      var newTag = "h" + m[1].length;
+      var prefixLen = m[0].length;
+
+      this._syntaxMutating = true;
+      try {
+        var heading = document.createElement(newTag);
+        while (block.firstChild) {
+          heading.appendChild(block.firstChild);
+        }
+        block.parentNode.replaceChild(heading, block);
+
+        // Strip the `# ` prefix walking text descendants in document
+        // order — covers cases where Chrome split the typed chars
+        // across `<br>` placeholders or nested wrappers.
+        this._trimLeadingTextChars(heading, prefixLen);
+
+        // If the heading ended up empty (typical case: user typed `# `
+        // into a fresh paragraph, which had only a placeholder `<br>`),
+        // add a `<br>` so Chrome renders the empty heading with height.
+        if (
+          !heading.firstChild ||
+          (heading.childNodes.length === 1 &&
+            heading.firstChild.nodeType === Node.TEXT_NODE &&
+            heading.firstChild.textContent === "")
+        ) {
+          heading.innerHTML = "<br>";
+        }
+
+        // Place cursor at the start of the heading. The user just typed
+        // the trigger space, so they expect their next keystroke to land
+        // at the heading's beginning rather than wherever the original
+        // `# ` cursor offset would have mapped to.
+        var caret = document.createRange();
+        var firstText = this._firstTextDescendant(heading);
+        if (firstText) {
+          caret.setStart(firstText, 0);
+        } else {
+          caret.setStart(heading, 0);
+        }
+        caret.collapse(true);
+        try {
+          sel.removeAllRanges();
+          sel.addRange(caret);
+        } catch (_e) {
+          /* range invalidated mid-frame — skip */
+        }
+      } finally {
+        this._syntaxMutating = false;
+      }
+      // Reveal the `# ` markers right at conversion. Click-driven flow
+      // takes over for subsequent shows/hides.
+      this._updateHeadingDecoration();
+    },
+
+    _trimLeadingTextChars: function (root, count) {
+      while (count > 0) {
+        var first = this._firstTextDescendant(root);
+        if (!first) return;
+        var len = first.textContent.length;
+        if (len === 0) {
+          if (first.parentNode) first.parentNode.removeChild(first);
+          continue;
+        }
+        if (len <= count) {
+          count -= len;
+          if (first.parentNode) first.parentNode.removeChild(first);
+        } else {
+          first.textContent = first.textContent.slice(count);
+          return;
+        }
+      }
+    },
+
+    _firstTextDescendant: function (root) {
+      var c = root.firstChild;
+      while (c) {
+        if (c.nodeType === Node.TEXT_NODE) return c;
+        if (c.nodeType === Node.ELEMENT_NODE) {
+          var f = this._firstTextDescendant(c);
+          if (f) return f;
+        }
+        c = c.nextSibling;
+      }
+      return null;
+    },
+
     _applyAutoFormat: function (
       runNodes,
       cursorNode,
@@ -2726,6 +2842,133 @@
         this._syntaxMutating = false;
       }
       this._decoratedAncestors = [];
+    },
+
+    // Heading decoration: when the cursor sits inside a `<h1>`–`<h6>`,
+    // prepend leading `# `…`###### ` decoration spans so the markdown
+    // shorthand is visible the same way `**bold**` markers are. Only the
+    // leading delimiter is shown — markdown headings have no closing.
+    _updateHeadingDecoration: function () {
+      var sel = window.getSelection();
+      if (!sel.rangeCount) {
+        this._clearHeadingDecoration();
+        return;
+      }
+      if (this._syntaxMutating) return;
+
+      var node = sel.anchorNode;
+      var heading = null;
+      while (node && node !== this._visualEl) {
+        if (
+          node.nodeType === Node.ELEMENT_NODE &&
+          node.tagName &&
+          /^h[1-6]$/i.test(node.tagName)
+        ) {
+          heading = node;
+          break;
+        }
+        node = node.parentNode;
+      }
+
+      if (this._decoratedHeading === heading) return;
+
+      this._syntaxMutating = true;
+      try {
+        if (this._decoratedHeading && this._decoratedHeading.isConnected) {
+          this._removeHeadingDecorationFrom(this._decoratedHeading);
+        }
+        if (heading) {
+          this._addHeadingDecorationTo(heading);
+        }
+        this._decoratedHeading = heading || null;
+      } finally {
+        this._syntaxMutating = false;
+      }
+    },
+
+    _clearHeadingDecoration: function () {
+      if (!this._decoratedHeading) return;
+      this._syntaxMutating = true;
+      try {
+        if (this._decoratedHeading.isConnected) {
+          this._removeHeadingDecorationFrom(this._decoratedHeading);
+        }
+      } finally {
+        this._syntaxMutating = false;
+      }
+      this._decoratedHeading = null;
+    },
+
+
+    _addHeadingDecorationTo: function (heading) {
+      var level = parseInt(heading.tagName.slice(1), 10);
+      if (!level || level < 1 || level > 6) return;
+      var prefix = "";
+      for (var n = 0; n < level; n++) prefix += "#";
+      prefix += " ";
+      // Insert one span per char so the cursor can step through each
+      // glyph the same way the inline `**`/`~~` markers work. Reverse so
+      // the final order is `# space` (or `## space`, etc.) at the start.
+      for (var i = prefix.length - 1; i >= 0; i--) {
+        var span = document.createElement("span");
+        span.className = "leaf-syntax-decoration";
+        span.setAttribute("data-leaf-syntax-decoration", "");
+        span.textContent = prefix[i];
+        heading.insertBefore(span, heading.firstChild);
+      }
+
+      // If the cursor was at heading element-offset 0 (the post-
+      // conversion empty case), it's now BEFORE the spans we just
+      // prepended. Element-offset cursors are also vulnerable to
+      // caret-affinity snapping into the trailing decoration span, which
+      // would make typed chars extend that span (and inherit its
+      // grayed-out decoration styling). Insert a fresh empty text node
+      // right after the decoration spans and anchor the cursor INSIDE
+      // it, so typing extends THIS text (heading-styled) instead.
+      var sel = window.getSelection();
+      if (sel.rangeCount > 0) {
+        var range = sel.getRangeAt(0);
+        if (
+          range.collapsed &&
+          range.startContainer === heading &&
+          range.startOffset === 0
+        ) {
+          var anchorNode = heading.childNodes[prefix.length] || null;
+          // Zero-width space — Chrome's caret affinity at an EMPTY text
+          // node tends to snap into the adjacent decoration span (so the
+          // typed letters extend that gray span, then get stripped on
+          // sync). A ZWSP gives the text node real content so the cursor
+          // sticks; htmlToMarkdown / mode-sync filter it back out.
+          var placeholder = document.createTextNode("​");
+          if (anchorNode) {
+            heading.insertBefore(placeholder, anchorNode);
+          } else {
+            heading.appendChild(placeholder);
+          }
+          var newRange = document.createRange();
+          newRange.setStart(placeholder, 1);
+          newRange.collapse(true);
+          try {
+            sel.removeAllRanges();
+            sel.addRange(newRange);
+          } catch (_e) {
+            /* range invalidated mid-frame — skip */
+          }
+        }
+      }
+    },
+
+    _removeHeadingDecorationFrom: function (heading) {
+      // Only remove DIRECT-child decoration spans — descendant ones come
+      // from inline formatting (e.g., `**bold**` inside the heading) and
+      // are owned by the inline decoration system.
+      var children = Array.prototype.slice.call(heading.children);
+      for (var i = 0; i < children.length; i++) {
+        var c = children[i];
+        if (c.classList && c.classList.contains("leaf-syntax-decoration")) {
+          heading.removeChild(c);
+        }
+      }
     },
 
     _delimiterFor: function (el) {
