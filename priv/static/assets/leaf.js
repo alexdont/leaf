@@ -2867,19 +2867,20 @@
         }
         this._decoratedAncestors = chain;
 
-        // Place the caret INSIDE the innermost wrapper, just before the
-        // first trailing decoration span. That's the same "past the body"
-        // position the cursor naturally drifts into when the user clicks
-        // back into an existing wrapper, so chain detection on the next
-        // selectionchange always walks up to the wrapper (no fragile
-        // boundary fallback needed). Typing the next char still escapes
-        // the wrapper via `_maybeRedirectPastTrailingBlock` route 1.
+        // Place the caret INSIDE the innermost wrapper, immediately AFTER
+        // the last trailing decoration span. That puts the visible caret
+        // past the closing `**` (so the user sees `**bold**|` rather than
+        // `**bold|**`) while still anchoring inside the wrapper, so chain
+        // detection on the next selectionchange walks up to the wrapper
+        // and decoration markers stay visible. Typing the next char still
+        // escapes the wrapper via `_maybeRedirectPastTrailingBlock` route 1
+        // (which fires for any cursor position past the inner body).
         var caret = document.createRange();
         var innermost = chain[0];
         var innerDelim = innermost
           ? this._delimiterFor(innermost)
           : null;
-        var firstTrailing = null;
+        var lastTrailing = null;
         if (innerDelim) {
           var spans = Array.prototype.filter.call(
             innermost.children,
@@ -2891,11 +2892,11 @@
             }
           );
           if (spans.length === 2 * innerDelim.length) {
-            firstTrailing = spans[innerDelim.length];
+            lastTrailing = spans[spans.length - 1];
           }
         }
-        if (firstTrailing) {
-          caret.setStartBefore(firstTrailing);
+        if (lastTrailing) {
+          caret.setStartAfter(lastTrailing);
         } else {
           caret.setStartAfter(wrapper);
         }
@@ -3062,11 +3063,14 @@
       try {
         var textNode;
         if (afterAnchor && afterAnchor.nodeType === Node.TEXT_NODE) {
-          // Extend the existing immediately-following text node so further
-          // keystrokes flow into a single contiguous text run instead of
-          // a chain of separate one-char text nodes.
+          // Insert at the START of the existing trailing text node — the
+          // cursor is logically right after the wrapper, not at the end of
+          // whatever text already lives further down the line. Extending
+          // here keeps subsequent characters in one contiguous text run
+          // (the next keystroke uses native browser insertion at offset >0
+          // so this redirect path doesn't fire again).
           textNode = afterAnchor;
-          textNode.appendData(insertedChar);
+          textNode.insertData(0, insertedChar);
         } else {
           textNode = document.createTextNode(insertedChar);
           if (afterAnchor) {
@@ -3076,7 +3080,7 @@
           }
         }
         var caret = document.createRange();
-        caret.setStart(textNode, textNode.data.length);
+        caret.setStart(textNode, insertedChar.length);
         caret.collapse(true);
         try {
           sel.removeAllRanges();
