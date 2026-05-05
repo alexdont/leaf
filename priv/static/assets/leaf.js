@@ -383,7 +383,10 @@
 
   function convertNode(node) {
     if (node.nodeType === Node.TEXT_NODE) {
-      return node.textContent;
+      // Hybrid-mode keystroke redirects insert U+00A0 for trailing spaces
+      // (so HTML doesn't collapse them); normalize back to regular spaces
+      // when serializing to markdown.
+      return node.textContent.replace(/ /g, " ");
     }
 
     if (node.nodeType !== Node.ELEMENT_NODE) {
@@ -1489,8 +1492,13 @@
     _syncModes: function (from, to) {
       var self = this;
 
-      if (from === "visual") {
-        // Visual → get innerHTML
+      if (from === "visual" || from === "hybrid") {
+        // Visual / hybrid both render into the same contenteditable.
+        // Decoration spans in hybrid are stripped by htmlToMarkdown via
+        // their `leaf-syntax-decoration` class, so the markdown branch
+        // round-trips cleanly. The html branch keeps decoration spans —
+        // strip them before handing to the html textarea so they don't
+        // leak into raw-HTML editing.
         var visualHtml = this._visualEl ? this._visualEl.innerHTML : "";
 
         if (to === "markdown") {
@@ -1498,7 +1506,9 @@
           if (mdTa) mdTa.value = htmlToMarkdown(visualHtml);
         } else if (to === "html") {
           var htmlTa = this._getHtmlTextarea();
-          if (htmlTa) htmlTa.value = visualHtml;
+          if (htmlTa) {
+            htmlTa.value = this._stripDecorationSpans(visualHtml);
+          }
         }
 
       } else if (from === "markdown") {
@@ -1534,6 +1544,22 @@
           if (mdTa) mdTa.value = htmlToMarkdown(rawHtml);
         }
       }
+    },
+
+    _stripDecorationSpans: function (html) {
+      // Returns `html` with all `.leaf-syntax-decoration` spans removed.
+      // Used when handing hybrid-mode content to the html textarea so the
+      // raw-html view doesn't get cluttered with cursor-only delimiter
+      // markup.
+      var tmp = document.createElement("div");
+      tmp.innerHTML = html;
+      var spans = tmp.querySelectorAll(".leaf-syntax-decoration");
+      for (var i = 0; i < spans.length; i++) {
+        if (spans[i].parentNode) {
+          spans[i].parentNode.removeChild(spans[i]);
+        }
+      }
+      return tmp.innerHTML;
     },
 
     _getMarkdownTextarea: function () {
@@ -2117,62 +2143,42 @@
     // the wrapper ourselves and tell the caller to preventDefault. Returns
     // true if it did the insertion, false otherwise.
     _maybeRedirectPastTrailingBlock: function (key) {
-      if (!this._decoratedAncestors || this._decoratedAncestors.length === 0) {
-        return false;
-      }
-      // Innermost defines "past the bolded body" — once the cursor moves
-      // past the innermost wrapper's first trailing decoration span, the
-      // user is logically outside the formatted content and any typed
-      // character belongs in the surrounding block, beyond the *outermost*
-      // wrapper.
-      var innermost = this._decoratedAncestors[0];
-      var wrapper =
-        this._decoratedAncestors[this._decoratedAncestors.length - 1];
-      if (!innermost.isConnected || !wrapper.isConnected) return false;
-      var delim = this._delimiterFor(innermost);
-      if (!delim) return false;
-
       var sel = window.getSelection();
       if (!sel.rangeCount) return false;
       var range = sel.getRangeAt(0);
       if (!range.collapsed) return false;
 
-      var allSpans = Array.prototype.filter.call(
-        innermost.children,
-        function (c) {
-          return (
-            c.classList && c.classList.contains("leaf-syntax-decoration")
-          );
-        },
-      );
-      var n = delim.length;
-      if (allSpans.length !== 2 * n) return false;
-      var firstTrailing = allSpans[n];
-
-      // Strict `> 0`: cursor exactly at the body's end (just before
-      // trailing) is left alone — typing there extends the bolded content.
-      var probe = document.createRange();
-      probe.setStartBefore(firstTrailing);
-      probe.collapse(true);
-      if (
-        range.compareBoundaryPoints(Range.START_TO_START, probe) <= 0
-      ) {
-        return false;
-      }
+      var wrapper = this._findRedirectWrapper(range);
+      if (!wrapper || !wrapper.isConnected) return false;
 
       var parent = wrapper.parentNode;
       if (!parent) return false;
-      var textNode = document.createTextNode(key);
+      // Substitute regular spaces with U+00A0 so HTML doesn't collapse a
+      // trailing space at the end of the block (`<p>hello </p>` would
+      // otherwise render with no visible trailing whitespace until a
+      // non-space character follows). htmlToMarkdown maps NBSPs back to
+      // regular spaces on serialization so the markdown stays clean.
+      var insertedChar = key === " " ? " " : key;
       var afterAnchor = wrapper.nextSibling;
       this._syntaxMutating = true;
       try {
-        if (afterAnchor) {
-          parent.insertBefore(textNode, afterAnchor);
+        var textNode;
+        if (afterAnchor && afterAnchor.nodeType === Node.TEXT_NODE) {
+          // Extend the existing immediately-following text node so further
+          // keystrokes flow into a single contiguous text run instead of
+          // a chain of separate one-char text nodes.
+          textNode = afterAnchor;
+          textNode.appendData(insertedChar);
         } else {
-          parent.appendChild(textNode);
+          textNode = document.createTextNode(insertedChar);
+          if (afterAnchor) {
+            parent.insertBefore(textNode, afterAnchor);
+          } else {
+            parent.appendChild(textNode);
+          }
         }
         var caret = document.createRange();
-        caret.setStart(textNode, key.length);
+        caret.setStart(textNode, textNode.data.length);
         caret.collapse(true);
         try {
           sel.removeAllRanges();
@@ -2183,8 +2189,81 @@
       } finally {
         this._syntaxMutating = false;
       }
-      this._updateSyntaxDecorations();
+      // Intentionally NOT calling `_updateSyntaxDecorations()` —
+      // selectionchange will clean up decorations naturally once the
+      // cursor moves somewhere unambiguously outside the wrapper.
       return true;
+    },
+
+    _findRedirectWrapper: function (range) {
+      // Returns the formatting wrapper to redirect typing past, or null
+      // if the cursor's current position doesn't warrant a redirect.
+      // Two routes:
+      //   1. Cursor is inside a currently-decorated wrapper, past the
+      //      innermost wrapper's body (`**hello*|*` / `**hello**|`).
+      //   2. Cursor is in the wrapper's immediately-following sibling
+      //      text node — redirect remains armed so subsequent keystrokes
+      //      keep flowing past the wrapper instead of getting pulled
+      //      back inside by Chrome's caret affinity.
+      // Only the first route requires decorations to currently be active,
+      // so route 2 keeps working after they've cleared.
+
+      // Route 1: inside a decorated wrapper, past inner body.
+      if (this._decoratedAncestors && this._decoratedAncestors.length > 0) {
+        var innermost = this._decoratedAncestors[0];
+        var outermost =
+          this._decoratedAncestors[this._decoratedAncestors.length - 1];
+        if (innermost.isConnected && outermost.isConnected) {
+          var delim = this._delimiterFor(innermost);
+          if (delim) {
+            var allSpans = Array.prototype.filter.call(
+              innermost.children,
+              function (c) {
+                return (
+                  c.classList &&
+                  c.classList.contains("leaf-syntax-decoration")
+                );
+              },
+            );
+            var n = delim.length;
+            if (allSpans.length === 2 * n) {
+              var firstTrailing = allSpans[n];
+              var probe = document.createRange();
+              probe.setStartBefore(firstTrailing);
+              probe.collapse(true);
+              var pastBody =
+                range.compareBoundaryPoints(
+                  Range.START_TO_START,
+                  probe,
+                ) > 0;
+              if (pastBody) {
+                var afterOutermost = document.createRange();
+                afterOutermost.setStartAfter(outermost);
+                afterOutermost.collapse(true);
+                var pastWrapper =
+                  range.compareBoundaryPoints(
+                    Range.START_TO_START,
+                    afterOutermost,
+                  ) > 0;
+                if (!pastWrapper) return outermost;
+                // Past the wrapper but possibly in its adjacent text —
+                // fall through to route 2.
+              }
+            }
+          }
+        }
+      }
+
+      // Route 2: cursor in wrapper's immediately-following text node.
+      var startContainer = range.startContainer;
+      if (
+        startContainer.nodeType === Node.TEXT_NODE &&
+        startContainer.previousSibling &&
+        this._isFormattingElement(startContainer.previousSibling)
+      ) {
+        return startContainer.previousSibling;
+      }
+      return null;
     },
 
     _normalizeDecorationSpans: function (wrapper, delim) {
