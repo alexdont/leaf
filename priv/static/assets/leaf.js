@@ -2867,8 +2867,38 @@
         }
         this._decoratedAncestors = chain;
 
+        // Place the caret INSIDE the innermost wrapper, just before the
+        // first trailing decoration span. That's the same "past the body"
+        // position the cursor naturally drifts into when the user clicks
+        // back into an existing wrapper, so chain detection on the next
+        // selectionchange always walks up to the wrapper (no fragile
+        // boundary fallback needed). Typing the next char still escapes
+        // the wrapper via `_maybeRedirectPastTrailingBlock` route 1.
         var caret = document.createRange();
-        caret.setStartAfter(wrapper);
+        var innermost = chain[0];
+        var innerDelim = innermost
+          ? this._delimiterFor(innermost)
+          : null;
+        var firstTrailing = null;
+        if (innerDelim) {
+          var spans = Array.prototype.filter.call(
+            innermost.children,
+            function (c) {
+              return (
+                c.classList &&
+                c.classList.contains("leaf-syntax-decoration")
+              );
+            }
+          );
+          if (spans.length === 2 * innerDelim.length) {
+            firstTrailing = spans[innerDelim.length];
+          }
+        }
+        if (firstTrailing) {
+          caret.setStartBefore(firstTrailing);
+        } else {
+          caret.setStartAfter(wrapper);
+        }
         caret.collapse(true);
         var sel = window.getSelection();
         try {
@@ -3129,10 +3159,16 @@
         }
       }
 
-      // Route 2: cursor in wrapper's immediately-following text node.
+      // Route 2: cursor at offset 0 of the wrapper's immediately-following
+      // text node. Only the boundary position is ambiguous — Chrome's caret
+      // affinity can pull the cursor back inside the wrapper, so we redirect
+      // manually. Once the user has moved deeper into the text, typing
+      // belongs in-place and a redirect would silently send the keystroke
+      // to the end of the line.
       var startContainer = range.startContainer;
       if (
         startContainer.nodeType === Node.TEXT_NODE &&
+        range.startOffset === 0 &&
         startContainer.previousSibling &&
         this._isFormattingElement(startContainer.previousSibling)
       ) {
