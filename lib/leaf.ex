@@ -1115,6 +1115,16 @@ defmodule Leaf do
       font-style: normal;
       text-decoration: none;
     }
+
+    /* Widen the hit area for hybrid-mode `<hr>` rules so the click
+       handler can reliably swap them to an editable `<p>---</p>`.
+       Default HR is a 2-3px line that's nearly impossible to land on. */
+    .content-editor-visual hr {
+      padding: 6px 0;
+      margin: 0.25em 0;
+      cursor: pointer;
+    }
+
     """
   end
 

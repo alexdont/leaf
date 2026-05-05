@@ -1121,6 +1121,7 @@
         this._maybeAutoFormat();
         this._maybeAutoFormatHeading();
         this._maybeAdjustHeadingLevel();
+        this._maybeAutoFormatHr();
       }
       this._debouncedPushVisualChange();
       this._updateCounts();
@@ -1145,6 +1146,21 @@
         e.key.length === 1
       ) {
         if (this._maybeRedirectPastTrailingBlock(e.key)) {
+          e.preventDefault();
+          return;
+        }
+      }
+
+      // Arrow up/down crossing an `<hr>` boundary swaps it for an
+      // editable `<p data-leaf-hr-source>---</p>` so the user can land
+      // ON the rule with their cursor instead of skipping past it.
+      if (
+        (this._mode === "visual" || this._mode === "hybrid") &&
+        !mod &&
+        !e.shiftKey &&
+        (e.key === "ArrowDown" || e.key === "ArrowUp")
+      ) {
+        if (this._maybeArrowIntoHr(e.key)) {
           e.preventDefault();
           return;
         }
@@ -1703,6 +1719,24 @@
         });
       }
 
+      // Mousedown on a rendered `<hr>` swaps it for an editable
+      // `<p data-leaf-hr-source>---</p>` so the user can adjust or
+      // delete the rule. We use `mousedown` (not `click`) and
+      // `preventDefault` so the browser doesn't first place the cursor
+      // in an adjacent paragraph and shift `e.target` away from the
+      // thin HR line. The `selectionchange` listener swaps back to a
+      // real `<hr>` once the cursor leaves the source paragraph.
+      if (this._visualEl) {
+        this._visualEl.addEventListener("mousedown", function (e) {
+          if (self._mode !== "visual" && self._mode !== "hybrid") return;
+          var hr = self._hrAtClick(e);
+          if (hr) {
+            e.preventDefault();
+            self._showHrSource(hr);
+          }
+        });
+      }
+
       document.addEventListener("selectionchange", function () {
         if (
           (self._mode === "visual" || self._mode === "hybrid") &&
@@ -1716,6 +1750,7 @@
             self._updateToolbarState();
             self._updateSyntaxDecorations();
             self._updateHeadingDecoration();
+            self._maybeRestoreHrFromSource();
           } else if (document.activeElement !== self._visualEl) {
             // Cursor is outside the editor AND focus is elsewhere — user
             // genuinely left. Clear. If the cursor is transiently outside
@@ -2309,6 +2344,231 @@
       // Reveal the `# ` markers right at conversion. Click-driven flow
       // takes over for subsequent shows/hides.
       this._updateHeadingDecoration();
+    },
+
+    // `---` (3+ dashes) on its own line auto-formats to a real `<hr>`,
+    // mirroring the toolbar's "Insert horizontal rule" button. A fresh
+    // `<p>` is created right after the rule and the cursor is moved
+    // there so the user can keep typing.
+    _maybeAutoFormatHr: function () {
+      if (this._syntaxMutating) return;
+      var sel = window.getSelection();
+      if (!sel.rangeCount) return;
+      var range = sel.getRangeAt(0);
+      if (!range.collapsed) return;
+
+      var block = this._getCurrentBlock();
+      if (!block || !block.tagName) return;
+      if (block.tagName.toLowerCase() !== "p") return;
+      // Skip the `<p data-leaf-hr-source>` placeholder — that paragraph
+      // is in source-edit mode for an existing rule and shouldn't be
+      // re-converted while the cursor is inside it.
+      if (block.hasAttribute("data-leaf-hr-source")) return;
+
+      var text = block.textContent.replace(/ /g, "");
+      if (!/^-{3,}$/.test(text)) return;
+
+      var parent = block.parentNode;
+      if (!parent) return;
+
+      this._syntaxMutating = true;
+      try {
+        var hr = document.createElement("hr");
+        var nextP = document.createElement("p");
+        nextP.innerHTML = "<br>";
+        parent.insertBefore(hr, block);
+        parent.insertBefore(nextP, block);
+        parent.removeChild(block);
+
+        var caret = document.createRange();
+        caret.setStart(nextP, 0);
+        caret.collapse(true);
+        try {
+          sel.removeAllRanges();
+          sel.addRange(caret);
+        } catch (_e) {
+          /* range invalidated mid-frame — skip */
+        }
+      } finally {
+        this._syntaxMutating = false;
+      }
+    },
+
+    // Detect an Arrow Down/Up keystroke about to cross an `<hr>`
+    // boundary. If the next/previous block sibling is an `<hr>`, swap
+    // it to source-edit mode and place the cursor inside; the
+    // selectionchange listener swaps it back when the cursor leaves.
+    _maybeArrowIntoHr: function (key) {
+      var sel = window.getSelection();
+      if (!sel.rangeCount) return false;
+      var range = sel.getRangeAt(0);
+      if (!range.collapsed) return false;
+      var block = this._getCurrentBlock();
+      if (!block || !block.parentNode) return false;
+
+      if (key === "ArrowDown") {
+        var next = block.nextElementSibling;
+        if (!next || !next.tagName || next.tagName.toLowerCase() !== "hr") {
+          return false;
+        }
+        if (!this._isCursorOnLastLineOfBlock(range, block)) return false;
+        this._showHrSource(next);
+        return true;
+      }
+      if (key === "ArrowUp") {
+        var prev = block.previousElementSibling;
+        if (!prev || !prev.tagName || prev.tagName.toLowerCase() !== "hr") {
+          return false;
+        }
+        if (!this._isCursorOnFirstLineOfBlock(range, block)) return false;
+        this._showHrSource(prev);
+        return true;
+      }
+      return false;
+    },
+
+    // Rect-based "cursor is on the first/last visual line of this block"
+    // checks. We can't use `Range.compareBoundaryPoints` against a
+    // `selectNodeContents`-collapsed range because (block, 0) and (firstChild,
+    // 0) aren't considered equal even though they're at the same visual spot,
+    // and trailing `<br>` fillers throw the end-side comparison off too.
+    // Comparing client rects sidesteps both problems and naturally handles
+    // multi-line wrapping.
+    _isCursorOnFirstLineOfBlock: function (range, block) {
+      var caretRect = this._caretRect(range);
+      if (!caretRect) return false;
+      var blockRect = block.getBoundingClientRect();
+      var lineHeight =
+        parseFloat(getComputedStyle(block).lineHeight) || 20;
+      return caretRect.top - blockRect.top < lineHeight * 0.6;
+    },
+
+    _isCursorOnLastLineOfBlock: function (range, block) {
+      var caretRect = this._caretRect(range);
+      if (!caretRect) return false;
+      var blockRect = block.getBoundingClientRect();
+      var lineHeight =
+        parseFloat(getComputedStyle(block).lineHeight) || 20;
+      return blockRect.bottom - caretRect.bottom < lineHeight * 0.6;
+    },
+
+    // A collapsed range often returns a zero-sized rect — especially in
+    // `<p><br></p>` or right next to a `<br>`. Fall back to inserting a
+    // temporary zero-width-space span, measuring it, and removing it. The
+    // `_syntaxMutating` flag is asserted around the mutation so the input
+    // pipeline can't re-enter while we're probing.
+    _caretRect: function (range) {
+      var rect = range.getBoundingClientRect();
+      if (rect && (rect.top || rect.bottom || rect.left || rect.right)) {
+        return rect;
+      }
+      var marker = document.createElement("span");
+      marker.appendChild(document.createTextNode("​"));
+      var probe = range.cloneRange();
+      var prevMutating = this._syntaxMutating;
+      this._syntaxMutating = true;
+      try {
+        probe.insertNode(marker);
+        rect = marker.getBoundingClientRect();
+      } catch (_e) {
+        rect = null;
+      } finally {
+        if (marker.parentNode) marker.parentNode.removeChild(marker);
+        var sel = window.getSelection();
+        try {
+          sel.removeAllRanges();
+          sel.addRange(range);
+        } catch (_e) {
+          /* selection invalidated — best effort only */
+        }
+        this._syntaxMutating = prevMutating;
+      }
+      return rect;
+    },
+
+    // Returns the `<hr>` at the mousedown coordinates if any. Checks
+    // `e.target` first, then falls back to the topmost few elements via
+    // `elementsFromPoint` so a near-miss on the thin rule line still
+    // counts. Without this, a tiny HR is essentially unclickable.
+    _hrAtClick: function (e) {
+      if (e.target && e.target.tagName && e.target.tagName.toLowerCase() === "hr") {
+        return e.target;
+      }
+      if (
+        typeof document.elementsFromPoint === "function" &&
+        typeof e.clientX === "number" &&
+        typeof e.clientY === "number"
+      ) {
+        var stack = document.elementsFromPoint(e.clientX, e.clientY);
+        for (var i = 0; i < stack.length && i < 6; i++) {
+          if (stack[i].tagName && stack[i].tagName.toLowerCase() === "hr") {
+            return stack[i];
+          }
+        }
+      }
+      return null;
+    },
+
+    // Replace a rendered `<hr>` with a `<p data-leaf-hr-source>---</p>`
+    // and put the cursor inside, so the user can edit (or delete) the
+    // rule. The selectionchange listener calls `_maybeRestoreHrFromSource`
+    // when the cursor leaves to swap the placeholder back to an `<hr>`.
+    _showHrSource: function (hr) {
+      if (this._syntaxMutating) return;
+      this._syntaxMutating = true;
+      try {
+        var p = document.createElement("p");
+        p.setAttribute("data-leaf-hr-source", "");
+        p.textContent = "---";
+        hr.parentNode.replaceChild(p, hr);
+
+        var sel = window.getSelection();
+        var caret = document.createRange();
+        if (p.firstChild && p.firstChild.nodeType === Node.TEXT_NODE) {
+          caret.setStart(p.firstChild, p.firstChild.textContent.length);
+        } else {
+          caret.setStart(p, 0);
+        }
+        caret.collapse(true);
+        try {
+          sel.removeAllRanges();
+          sel.addRange(caret);
+        } catch (_e) {
+          /* range invalidated mid-frame — skip */
+        }
+      } finally {
+        this._syntaxMutating = false;
+      }
+    },
+
+    _maybeRestoreHrFromSource: function () {
+      if (!this._visualEl) return;
+      var sources = this._visualEl.querySelectorAll(
+        "p[data-leaf-hr-source]",
+      );
+      if (!sources.length) return;
+      var sel = window.getSelection();
+      var anchor = sel.rangeCount > 0 ? sel.anchorNode : null;
+      for (var i = 0; i < sources.length; i++) {
+        var p = sources[i];
+        // Cursor still inside this source paragraph? Leave it alone.
+        if (anchor && p.contains(anchor)) continue;
+        // Otherwise either swap back to a real `<hr>` (still valid HR
+        // syntax) or just drop the marker attribute (user edited the
+        // dashes into something else).
+        var text = p.textContent.replace(/ /g, "");
+        this._syntaxMutating = true;
+        try {
+          if (/^-{3,}$/.test(text)) {
+            var hr = document.createElement("hr");
+            p.parentNode.replaceChild(hr, p);
+          } else {
+            p.removeAttribute("data-leaf-hr-source");
+          }
+        } finally {
+          this._syntaxMutating = false;
+        }
+      }
     },
 
     _trimLeadingTextChars: function (root, count) {
