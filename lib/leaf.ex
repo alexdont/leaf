@@ -787,6 +787,25 @@ defmodule Leaf do
           <div class="divider divider-horizontal mx-0.5 h-6"></div>
           <button
             type="button"
+            data-mode-tab="hybrid"
+            class={["btn btn-xs px-2", (@mode == :hybrid && "btn-active") || "btn-ghost"]}
+            title={t("Hybrid mode")}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              class="w-3.5 h-3.5"
+            >
+              <path
+                fill-rule="evenodd"
+                d="M9 4.5a.75.75 0 0 1 .721.544l.813 2.846a3.75 3.75 0 0 0 2.576 2.576l2.846.813a.75.75 0 0 1 0 1.442l-2.846.813a3.75 3.75 0 0 0-2.576 2.576l-.813 2.846a.75.75 0 0 1-1.442 0l-.813-2.846a3.75 3.75 0 0 0-2.576-2.576L1.044 12.22a.75.75 0 0 1 0-1.442l2.846-.813A3.75 3.75 0 0 0 6.466 7.39l.813-2.846A.75.75 0 0 1 9 4.5Z"
+                clip-rule="evenodd"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
             data-mode-tab="visual"
             class={["btn btn-xs px-2", (@mode == :visual && "btn-active") || "btn-ghost"]}
             title={t("Visual mode")}
@@ -801,25 +820,6 @@ defmodule Leaf do
               <path
                 fill-rule="evenodd"
                 d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
-                clip-rule="evenodd"
-              />
-            </svg>
-          </button>
-          <button
-            type="button"
-            data-mode-tab="hybrid"
-            class={["btn btn-xs px-2", (@mode == :hybrid && "btn-active") || "btn-ghost"]}
-            title={t("Hybrid mode")}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-              class="w-3.5 h-3.5"
-            >
-              <path
-                fill-rule="evenodd"
-                d="M9 4.5a.75.75 0 0 1 .721.544l.813 2.846a3.75 3.75 0 0 0 2.576 2.576l2.846.813a.75.75 0 0 1 0 1.442l-2.846.813a3.75 3.75 0 0 0-2.576 2.576l-.813 2.846a.75.75 0 0 1-1.442 0l-.813-2.846a3.75 3.75 0 0 0-2.576-2.576L1.044 12.22a.75.75 0 0 1 0-1.442l2.846-.813A3.75 3.75 0 0 0 6.466 7.39l.813-2.846A.75.75 0 0 1 9 4.5Z"
                 clip-rule="evenodd"
               />
             </svg>
