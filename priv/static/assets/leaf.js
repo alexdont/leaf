@@ -1538,8 +1538,11 @@
         var mdTa = this._getMarkdownTextarea();
         var markdown = mdTa ? mdTa.value : "";
 
-        if (to === "visual") {
-          // Server converts markdown→html, pushes back via leaf-set-html event
+        // Hybrid shares the visual contenteditable, so the markdown→hybrid
+        // path needs the same server-side markdown→html sync as
+        // markdown→visual; without this branch, switching from markdown to
+        // hybrid leaves the visual DOM showing whatever it had before.
+        if (to === "visual" || to === "hybrid") {
           this.pushEventTo(this.el, "sync_markdown_to_visual", {
             editor_id: this._editorId,
             markdown: markdown,
@@ -1556,8 +1559,8 @@
         var htmlTa = this._getHtmlTextarea();
         var rawHtml = htmlTa ? htmlTa.value : "";
 
-        if (to === "visual") {
-          // Set innerHTML directly
+        if (to === "visual" || to === "hybrid") {
+          // Set innerHTML directly; hybrid uses the same contenteditable.
           if (this._visualEl) {
             this._visualEl.innerHTML = rawHtml || "<p><br></p>";
           }
