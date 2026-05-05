@@ -172,13 +172,6 @@
     ".leaf-drag-handle:active { cursor: grabbing; }",
     ".leaf-drag-handle svg { width: 18px; height: 18px; pointer-events: none; }",
 
-    // Horizontal rule
-    ".content-editor-visual hr {",
-    "  border: none;",
-    "  border-top: 1px solid color-mix(in oklab, var(--color-base-content, #1f2937) 15%, transparent);",
-    "  margin: 1.5em 0;",
-    "}",
-
     // Selection
     ".content-editor-visual ::selection { background-color: Highlight !important; color: HighlightText !important; }",
     ".content-editor-visual *::selection { background-color: Highlight !important; color: HighlightText !important; }",
@@ -1532,6 +1525,12 @@
           if (htmlTa) {
             htmlTa.value = this._stripDecorationSpans(visualHtml);
           }
+        } else if (from === "hybrid" && to === "visual") {
+          // Same contenteditable, but visual mode shouldn't show the
+          // hybrid cursor-anchoring `**` / `*` / `~~` / `||` / `# `
+          // decoration spans. Strip them in-place so the user sees the
+          // rendered formatting only.
+          this._stripDecorationSpansFromVisualEl();
         }
 
       } else if (from === "markdown") {
@@ -1587,6 +1586,42 @@
       }
       // Strip cursor-anchoring ZWSPs introduced by heading decoration.
       return tmp.innerHTML.replace(/​/g, "");
+    },
+
+    // Hybrid → visual transition: remove every cursor-anchoring decoration
+    // span from the live contenteditable in-place. Resets the tracking
+    // state so a later switch back to hybrid starts clean.
+    _stripDecorationSpansFromVisualEl: function () {
+      if (!this._visualEl) return;
+      this._syntaxMutating = true;
+      try {
+        var spans = this._visualEl.querySelectorAll(
+          ".leaf-syntax-decoration"
+        );
+        for (var i = 0; i < spans.length; i++) {
+          if (spans[i].parentNode) {
+            spans[i].parentNode.removeChild(spans[i]);
+          }
+        }
+        // Heading decoration leaves cursor-anchoring ZWSP text nodes when
+        // it adds the `# ` markers; clean those up too so they don't
+        // surface as invisible characters in plain visual mode.
+        var walker = document.createTreeWalker(
+          this._visualEl,
+          NodeFilter.SHOW_TEXT,
+          null
+        );
+        var text;
+        while ((text = walker.nextNode())) {
+          if (text.nodeValue && text.nodeValue.indexOf("​") !== -1) {
+            text.nodeValue = text.nodeValue.replace(/​/g, "");
+          }
+        }
+      } finally {
+        this._syntaxMutating = false;
+      }
+      this._decoratedAncestors = [];
+      this._decoratedHeading = null;
     },
 
     _getMarkdownTextarea: function () {
@@ -2007,6 +2042,11 @@
     // inserted wrapper, which is the most reliable signal — selection state
     // after execCommand can't always be trusted across browsers.
     _deferredSyntaxRefresh: function (preSnapshot) {
+      // Decoration spans are a hybrid-mode feature only. In plain visual
+      // mode, inserting `**`/`*`/`~~` text spans inside the new wrapper
+      // would surface the literal markdown delimiters next to the bold /
+      // italic / strike text, which the user never asked to see.
+      if (this._mode !== "hybrid") return;
       var self = this;
       setTimeout(function () {
         self._clearSyntaxDecoration();
@@ -2348,6 +2388,47 @@
       // Reveal the `# ` markers right at conversion. Click-driven flow
       // takes over for subsequent shows/hides.
       this._updateHeadingDecoration();
+    },
+
+    // Toolbar HR insert. We build the DOM by hand instead of using
+    // `document.execCommand("insertHorizontalRule")` because the latter
+    // produces inconsistent structure across browsers (HR sometimes left
+    // wrapped inside the original `<p>`, no trailing paragraph created,
+    // stray `<br>` siblings) which then fails to round-trip through
+    // `htmlToMarkdown` cleanly. This is the same shape `_maybeAutoFormatHr`
+    // builds in hybrid mode, which we know serializes correctly.
+    _insertHorizontalRule: function () {
+      if (!this._visualEl) return;
+      var sel = window.getSelection();
+      if (!sel.rangeCount) return;
+
+      var block = this._getCurrentBlock();
+      if (!block || !block.parentNode) {
+        block = this._visualEl.lastElementChild;
+        if (!block) {
+          block = document.createElement("p");
+          block.innerHTML = "<br>";
+          this._visualEl.appendChild(block);
+        }
+      }
+
+      var parent = block.parentNode;
+      var hr = document.createElement("hr");
+      var trailing = document.createElement("p");
+      trailing.innerHTML = "<br>";
+
+      parent.insertBefore(hr, block.nextSibling);
+      parent.insertBefore(trailing, hr.nextSibling);
+
+      var caret = document.createRange();
+      caret.setStart(trailing, 0);
+      caret.collapse(true);
+      try {
+        sel.removeAllRanges();
+        sel.addRange(caret);
+      } catch (_e) {
+        /* range invalidated mid-frame — skip */
+      }
     },
 
     // `---` (3+ dashes) on its own line auto-formats to a real `<hr>`,
@@ -3199,6 +3280,13 @@
     // shorthand is visible the same way `**bold**` markers are. Only the
     // leading delimiter is shown — markdown headings have no closing.
     _updateHeadingDecoration: function () {
+      // The `# ` / `## ` / etc. markers are a hybrid-mode feature only.
+      // In plain visual mode they'd surface as literal characters at
+      // the start of every heading the cursor enters.
+      if (this._mode !== "hybrid") {
+        this._clearHeadingDecoration();
+        return;
+      }
       var sel = window.getSelection();
       if (!sel.rangeCount) {
         this._clearHeadingDecoration();
@@ -3652,7 +3740,7 @@
           document.execCommand("formatBlock", false, "pre");
           break;
         case "horizontalRule":
-          document.execCommand("insertHorizontalRule", false, null);
+          this._insertHorizontalRule();
           break;
         case "table":
           this._insertTable();
