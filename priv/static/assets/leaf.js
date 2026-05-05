@@ -1120,6 +1120,7 @@
         this._maybeUnwrapTamperedFormatting();
         this._maybeAutoFormat();
         this._maybeAutoFormatHeading();
+        this._maybeAdjustHeadingLevel();
       }
       this._debouncedPushVisualChange();
       this._updateCounts();
@@ -2968,6 +2969,119 @@
         if (c.classList && c.classList.contains("leaf-syntax-decoration")) {
           heading.removeChild(c);
         }
+      }
+    },
+
+    // When the user edits the `# ` decoration block of a heading (adds
+    // or removes hash chars), retag the heading to the matching level.
+    // Counts `#` chars in the leading sequence (decoration spans + any
+    // typed text) up to the first space; that count becomes the new
+    // level (clamped 1–6).
+    _maybeAdjustHeadingLevel: function () {
+      if (!this._decoratedHeading || !this._decoratedHeading.isConnected) {
+        return;
+      }
+      if (this._syntaxMutating) return;
+      var heading = this._decoratedHeading;
+      var match = heading.tagName
+        ? heading.tagName.toLowerCase().match(/^h([1-6])$/)
+        : null;
+      if (!match) return;
+      var oldLevel = parseInt(match[1], 10);
+
+      var hashCount = 0;
+      var leadingChildren = [];
+      var done = false;
+      var c = heading.firstChild;
+      while (c && !done) {
+        var nodeText = null;
+        if (c.nodeType === Node.TEXT_NODE) {
+          nodeText = c.textContent;
+        } else if (
+          c.nodeType === Node.ELEMENT_NODE &&
+          this._isDecorationSpan(c)
+        ) {
+          nodeText = c.textContent;
+        }
+        if (nodeText === null) break;
+
+        var allConsumed = true;
+        for (var i = 0; i < nodeText.length; i++) {
+          var ch = nodeText[i];
+          if (ch === "#") {
+            hashCount++;
+          } else if (ch === " ") {
+            done = true;
+            break;
+          } else {
+            allConsumed = false;
+            break;
+          }
+        }
+
+        if (allConsumed || done) {
+          leadingChildren.push(c);
+          c = c.nextSibling;
+        } else {
+          break;
+        }
+      }
+
+      if (hashCount === 0) return;
+      var newLevel = Math.min(hashCount, 6);
+      if (newLevel === oldLevel) return;
+
+      this._retagHeading(heading, "h" + newLevel, leadingChildren);
+    },
+
+    _retagHeading: function (oldHeading, newTag, leadingChildren) {
+      this._syntaxMutating = true;
+      try {
+        var newHeading = document.createElement(newTag);
+        var newLevel = parseInt(newTag.slice(1), 10) || 1;
+
+        // Drop the old leading section (decorations + any user-typed
+        // hash/space text). The new decoration set is added fresh below.
+        for (var i = 0; i < leadingChildren.length; i++) {
+          if (leadingChildren[i].parentNode === oldHeading) {
+            oldHeading.removeChild(leadingChildren[i]);
+          }
+        }
+
+        while (oldHeading.firstChild) {
+          newHeading.appendChild(oldHeading.firstChild);
+        }
+        oldHeading.parentNode.replaceChild(newHeading, oldHeading);
+        this._decoratedHeading = newHeading;
+
+        this._addHeadingDecorationTo(newHeading);
+
+        // Park the cursor at the end of the last `#` decoration span
+        // (i.e., `###|` for h3) so further `#`/Backspace edits keep
+        // adjusting the level naturally without bouncing the cursor to
+        // the heading's content area.
+        var sel = window.getSelection();
+        var lastHashSpan = newHeading.children[newLevel - 1];
+        if (
+          lastHashSpan &&
+          lastHashSpan.firstChild &&
+          lastHashSpan.firstChild.nodeType === Node.TEXT_NODE
+        ) {
+          var caret = document.createRange();
+          caret.setStart(
+            lastHashSpan.firstChild,
+            lastHashSpan.firstChild.textContent.length,
+          );
+          caret.collapse(true);
+          try {
+            sel.removeAllRanges();
+            sel.addRange(caret);
+          } catch (_e) {
+            /* range invalidated mid-frame — skip */
+          }
+        }
+      } finally {
+        this._syntaxMutating = false;
       }
     },
 
