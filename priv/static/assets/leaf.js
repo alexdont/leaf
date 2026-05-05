@@ -1088,6 +1088,13 @@
       var text = "";
       if (this._mode === "visual") {
         text = this._visualEl ? this._visualEl.innerText : "";
+      } else if (this._mode === "hybrid") {
+        // Same contenteditable as visual, but strip the cursor-anchoring
+        // `**`/`*`/`~~`/`# ` decoration spans before counting so the
+        // numbers don't jitter as the cursor moves in/out of formatted
+        // runs (decoration spans are present only while the cursor is
+        // inside their wrapper).
+        text = this._visualEl ? this._readPlainTextWithoutDecorations() : "";
       } else if (this._mode === "markdown") {
         var ta = this._getMarkdownTextarea();
         text = ta ? ta.value : "";
@@ -1622,6 +1629,23 @@
       }
       this._decoratedAncestors = [];
       this._decoratedHeading = null;
+    },
+
+    // Non-destructive read of the contenteditable's text with hybrid-only
+    // decoration spans (and their cursor-anchoring ZWSPs) filtered out.
+    // Used for footer word/char counting so the numbers reflect the
+    // user-perceived content, independent of where the cursor sits.
+    _readPlainTextWithoutDecorations: function () {
+      if (!this._visualEl) return "";
+      var clone = this._visualEl.cloneNode(true);
+      var spans = clone.querySelectorAll(".leaf-syntax-decoration");
+      for (var i = 0; i < spans.length; i++) {
+        if (spans[i].parentNode) {
+          spans[i].parentNode.removeChild(spans[i]);
+        }
+      }
+      var text = clone.innerText || clone.textContent || "";
+      return text.replace(/​/g, "");
     },
 
     _getMarkdownTextarea: function () {
