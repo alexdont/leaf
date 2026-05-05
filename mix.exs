@@ -12,7 +12,8 @@ defmodule Leaf.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       name: "Leaf",
-      description: "Dual-mode visual WYSIWYG + markdown editor for Phoenix LiveView",
+      description:
+        "Visual WYSIWYG + Obsidian-style hybrid live preview + markdown editor for Phoenix LiveView",
       package: package(),
       docs: docs(),
       source_url: @source_url,
