@@ -1115,6 +1115,7 @@
       this._dismissLinkPopover();
       if (this._mode === "hybrid" && !this._syntaxMutating) {
         this._maybeUnwrapTamperedFormatting();
+        this._maybeAutoFormat();
       }
       this._debouncedPushVisualChange();
       this._updateCounts();
@@ -2014,6 +2015,210 @@
       return null;
     },
 
+    // After a contenteditable input event in hybrid mode, scan the text node
+    // around the cursor for a completed markdown-delimiter pattern that ends
+    // exactly at the cursor (e.g. the user just typed the closing `**` of
+    // `**hello**`). If one matches, splice the text node and replace the
+    // matched run with the corresponding wrapper element, then decorate
+    // it inline so the existing chain logic takes over.
+    _maybeAutoFormat: function () {
+      var sel = window.getSelection();
+      if (!sel.rangeCount) return;
+      var range = sel.getRangeAt(0);
+      if (!range.collapsed) return;
+      var node = range.startContainer;
+      if (node.nodeType !== Node.TEXT_NODE) return;
+      var parent = node.parentNode;
+      if (!parent) return;
+
+      // Skip auto-format when the cursor sits INSIDE a currently-decorated
+      // wrapper — auto-format inside an active wrapper would fight with
+      // the normalize/unwrap pipeline. Cursor in adjacent text past a
+      // wrapper is fine (and necessary so a second `**word**` after the
+      // first one still triggers).
+      if (this._decoratedAncestors && this._decoratedAncestors.length > 0) {
+        for (var di = 0; di < this._decoratedAncestors.length; di++) {
+          if (this._decoratedAncestors[di].contains(node)) return;
+        }
+      }
+
+      // Chrome sometimes inserts a sibling text node mid-sequence rather
+      // than extending the existing one — so the "before-cursor" text we
+      // need to scan can span more than one text node. Track the cursor's
+      // offset within the running combined text, and accumulate text from
+      // every text sibling in the contiguous run up to the cursor's node
+      // (an element sibling resets the run since auto-format only operates
+      // on contiguous text).
+      var offset = range.startOffset;
+      var before = "";
+      var runNodes = [];
+      var cursorGlobalOffset = -1;
+      var c = parent.firstChild;
+      while (c) {
+        if (c === node) {
+          cursorGlobalOffset = before.length + offset;
+          before += node.textContent.slice(0, offset);
+          runNodes.push(node);
+          break;
+        }
+        if (c.nodeType === Node.TEXT_NODE) {
+          before += c.textContent;
+          runNodes.push(c);
+        } else {
+          before = "";
+          runNodes = [];
+        }
+        c = c.nextSibling;
+      }
+      if (cursorGlobalOffset < 0) return;
+
+      // Order: 3-char first (`***...***`), then 2-char delimiters, then
+      // 1-char. Italic uses lookbehind to avoid matching the inner half
+      // of `**bold**`. `[^DELIM\n]+?` keeps each pattern self-contained.
+      var patterns = [
+        { regex: /\*\*\*([^*\n]+?)\*\*\*$/, type: "boldItalic" },
+        { regex: /\*\*([^*\n]+?)\*\*$/, tag: "strong", delim: "**" },
+        { regex: /~~([^~\n]+?)~~$/, tag: "del", delim: "~~" },
+        {
+          regex: /\|\|([^|\n]+?)\|\|$/,
+          tag: "span",
+          delim: "||",
+          isSpoiler: true,
+        },
+        { regex: /(?<!\*)\*([^*\n]+?)\*$/, tag: "em", delim: "*" },
+        { regex: /`([^`\n]+?)`$/, tag: "code", delim: "`" },
+      ];
+      for (var i = 0; i < patterns.length; i++) {
+        var m = before.match(patterns[i].regex);
+        if (m) {
+          this._applyAutoFormat(
+            runNodes,
+            node,
+            offset,
+            cursorGlobalOffset,
+            m,
+            patterns[i],
+          );
+          return;
+        }
+      }
+    },
+
+    _applyAutoFormat: function (
+      runNodes,
+      cursorNode,
+      cursorOffset,
+      cursorGlobalOffset,
+      match,
+      pattern,
+    ) {
+      var inner = match[1];
+      if (!inner) return;
+      var matchLen = match[0].length;
+      var matchStartGlobal = cursorGlobalOffset - matchLen;
+
+      // Find which run node contains the match's start position, and the
+      // offset within that node. The match's end is the cursor itself.
+      var startNode = null;
+      var startOffset = 0;
+      var acc = 0;
+      for (var k = 0; k < runNodes.length; k++) {
+        var rn = runNodes[k];
+        var rlen =
+          rn === cursorNode ? cursorOffset : rn.textContent.length;
+        if (acc + rlen >= matchStartGlobal) {
+          startNode = rn;
+          startOffset = matchStartGlobal - acc;
+          break;
+        }
+        acc += rlen;
+      }
+      if (!startNode) return;
+
+      var wrapper;
+      var chain;
+      if (pattern.type === "boldItalic") {
+        var emEl = document.createElement("em");
+        emEl.textContent = inner;
+        wrapper = document.createElement("strong");
+        wrapper.appendChild(emEl);
+        chain = [emEl, wrapper];
+      } else if (pattern.isSpoiler) {
+        wrapper = document.createElement("span");
+        wrapper.classList.add("leaf-spoiler");
+        wrapper.textContent = inner;
+        chain = [wrapper];
+      } else {
+        wrapper = document.createElement(pattern.tag);
+        wrapper.textContent = inner;
+        chain = [wrapper];
+      }
+
+      this._syntaxMutating = true;
+      try {
+        // Clear any previously-decorated wrappers — they're not the
+        // current focus and their decoration spans should fade.
+        if (this._decoratedAncestors) {
+          for (var p = 0; p < this._decoratedAncestors.length; p++) {
+            if (this._decoratedAncestors[p].isConnected) {
+              this._removeDelimitersFrom(this._decoratedAncestors[p]);
+            }
+          }
+        }
+
+        // Splice via Range — handles multi-text-node spans cleanly.
+        var spliceRange = document.createRange();
+        spliceRange.setStart(startNode, startOffset);
+        spliceRange.setEnd(cursorNode, cursorOffset);
+        spliceRange.deleteContents();
+        spliceRange.insertNode(wrapper);
+
+        // Range.insertNode leaves an empty `""` text node on either side
+        // of the wrapper when the split position lands at a text edge.
+        // Clean those up so boundary detection finds the wrapper directly
+        // (an empty text sibling otherwise gets picked as the candidate
+        // and the listener clears the decoration).
+        if (
+          wrapper.previousSibling &&
+          wrapper.previousSibling.nodeType === Node.TEXT_NODE &&
+          wrapper.previousSibling.textContent === ""
+        ) {
+          wrapper.previousSibling.parentNode.removeChild(
+            wrapper.previousSibling,
+          );
+        }
+        if (
+          wrapper.nextSibling &&
+          wrapper.nextSibling.nodeType === Node.TEXT_NODE &&
+          wrapper.nextSibling.textContent === ""
+        ) {
+          wrapper.nextSibling.parentNode.removeChild(wrapper.nextSibling);
+        }
+
+        // Decorate inline AND prime the chain so the listener-driven
+        // `_updateSyntaxDecorations` sees `oldChain == newChain` and
+        // skips its cursor-relocate logic — otherwise the cursor gets
+        // snapped back inside the wrapper at the trailing-content edge.
+        for (var j = 0; j < chain.length; j++) {
+          this._addDelimitersTo(chain[j]);
+        }
+        this._decoratedAncestors = chain;
+
+        var caret = document.createRange();
+        caret.setStartAfter(wrapper);
+        caret.collapse(true);
+        var sel = window.getSelection();
+        try {
+          sel.removeAllRanges();
+          sel.addRange(caret);
+        } catch (_e) {
+          /* range invalidated mid-frame — skip */
+        }
+      } finally {
+        this._syntaxMutating = false;
+      }
+    },
+
     // After a contenteditable input event in hybrid mode, verify the active
     // decorated wrapper still represents valid formatting:
     //   - if the leading or trailing delimiter run is broken (chars edited
@@ -2189,9 +2394,16 @@
       } finally {
         this._syntaxMutating = false;
       }
-      // Intentionally NOT calling `_updateSyntaxDecorations()` —
-      // selectionchange will clean up decorations naturally once the
-      // cursor moves somewhere unambiguously outside the wrapper.
+      // The browser would normally fire `input` here, but our
+      // `preventDefault` suppressed it — drive the same hybrid-mode
+      // post-input handling manually so auto-format still fires for
+      // patterns typed past an existing wrapper (`**bold** **another**`).
+      this._maybeAutoFormat();
+      this._debouncedPushVisualChange();
+      this._updateCounts();
+      // NOTE: NOT calling `_updateSyntaxDecorations()` — selectionchange
+      // will clean up decorations naturally once the cursor moves
+      // somewhere unambiguously outside the wrapper.
       return true;
     },
 
