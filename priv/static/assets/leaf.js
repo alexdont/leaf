@@ -1122,6 +1122,7 @@
         this._maybeAutoFormatHeading();
         this._maybeAdjustHeadingLevel();
         this._maybeAutoFormatHr();
+        this._maybeAutoFormatList();
       }
       this._debouncedPushVisualChange();
       this._updateCounts();
@@ -2382,6 +2383,91 @@
 
         var caret = document.createRange();
         caret.setStart(nextP, 0);
+        caret.collapse(true);
+        try {
+          sel.removeAllRanges();
+          sel.addRange(caret);
+        } catch (_e) {
+          /* range invalidated mid-frame — skip */
+        }
+      } finally {
+        this._syntaxMutating = false;
+      }
+    },
+
+    // Typing `- ` / `* ` / `+ ` at the start of an empty (or just-started)
+    // paragraph swaps the `<p>` for a `<ul><li>…</li></ul>`; `1. ` / `5. ` /
+    // etc. swap to `<ol><li>…</li></ol>`. Mirrors the heading auto-format
+    // path: trigger on the space, strip the marker prefix, drop the cursor
+    // at the start of the new `<li>`. Consecutive list paragraphs get
+    // merged into a single list rather than producing one list per item.
+    _maybeAutoFormatList: function () {
+      if (this._syntaxMutating) return;
+      var sel = window.getSelection();
+      if (!sel.rangeCount) return;
+      var range = sel.getRangeAt(0);
+      if (!range.collapsed) return;
+
+      var block = this._getCurrentBlock();
+      if (!block || !block.tagName) return;
+      if (block.tagName.toLowerCase() !== "p") return;
+      if (block.hasAttribute("data-leaf-hr-source")) return;
+
+      // Chrome auto-converts a typed trailing space inside a `<p>` to NBSP,
+      // so normalize before regex-matching the marker.
+      var text = block.textContent.replace(/ /g, " ");
+      var um = text.match(/^([-*+]) /);
+      var om = !um && text.match(/^(\d+)\. /);
+      if (!um && !om) return;
+
+      var listTag = um ? "ul" : "ol";
+      var prefixLen = um ? 2 : om[1].length + 2;
+      var startNum = om ? parseInt(om[1], 10) : 1;
+
+      var parent = block.parentNode;
+      if (!parent) return;
+
+      this._syntaxMutating = true;
+      try {
+        var li = document.createElement("li");
+        while (block.firstChild) li.appendChild(block.firstChild);
+        this._trimLeadingTextChars(li, prefixLen);
+        if (
+          !li.firstChild ||
+          (li.childNodes.length === 1 &&
+            li.firstChild.nodeType === Node.TEXT_NODE &&
+            li.firstChild.textContent === "")
+        ) {
+          li.innerHTML = "<br>";
+        }
+
+        var prev = block.previousElementSibling;
+        var list;
+        var appending = false;
+        if (
+          prev &&
+          prev.tagName &&
+          prev.tagName.toLowerCase() === listTag
+        ) {
+          list = prev;
+          appending = true;
+        } else {
+          list = document.createElement(listTag);
+          if (om && startNum !== 1) {
+            list.setAttribute("start", String(startNum));
+          }
+        }
+        list.appendChild(li);
+        if (!appending) parent.insertBefore(list, block);
+        parent.removeChild(block);
+
+        var caret = document.createRange();
+        var firstText = this._firstTextDescendant(li);
+        if (firstText) {
+          caret.setStart(firstText, 0);
+        } else {
+          caret.setStart(li, 0);
+        }
         caret.collapse(true);
         try {
           sel.removeAllRanges();
