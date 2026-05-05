@@ -1122,6 +1122,25 @@
 
       var mod = e.ctrlKey || e.metaKey;
 
+      // Hybrid: if the cursor is logically past the bolded body (inside the
+      // trailing decoration block, at the wrapper end, etc.) and the user
+      // is about to insert a character, intercept and insert the char
+      // outside the wrapper ourselves. preventDefault avoids browsers that
+      // cache the selection at keydown-fire-time and would otherwise insert
+      // at the original (inside-wrapper) position regardless of any mid-
+      // handler selection moves.
+      if (
+        this._mode === "hybrid" &&
+        !mod &&
+        e.key &&
+        e.key.length === 1
+      ) {
+        if (this._maybeRedirectPastTrailingBlock(e.key)) {
+          e.preventDefault();
+          return;
+        }
+      }
+
       if (mod && (e.key === "b" || e.key === "i" || (e.shiftKey && e.key === "x"))) {
         e.preventDefault();
         if (e.key === "b" && this._isInsideHeading()) return;
@@ -1814,46 +1833,263 @@
     },
 
     // After a contenteditable input event in hybrid mode, verify the active
-    // decorated wrapper still has its delimiter spans intact at both ends.
-    // If the user edited or deleted any delimiter character, drop the
-    // wrapper entirely so the formatting it represented is broken.
+    // decorated wrapper still represents valid formatting:
+    //   - if the leading or trailing delimiter run is broken (chars edited
+    //     or deleted), the wrapper is unwrapped entirely;
+    //   - if there are stragglers BEFORE the leading run or AFTER the
+    //     trailing run (the user typed at an edge position that landed
+    //     inside the wrapper), those nodes are relocated outside the
+    //     wrapper so the formatting boundary stays in sync with the
+    //     decoration spans.
     _maybeUnwrapTamperedFormatting: function () {
       var wrapper = this._decoratedAncestor;
       if (!wrapper || !wrapper.isConnected) return;
       var delim = this._delimiterFor(wrapper);
       if (!delim) return;
 
-      var children = wrapper.childNodes;
-      var n = delim.length;
-      if (children.length < n * 2) {
+      // Chrome extends a decoration span's textContent rather than
+      // creating a sibling text node when the user types at a span edge
+      // (e.g., space at end of trailing `**`). Split any oversized span
+      // back into [delim-char span] + [adjacent text node] so the rest
+      // of the integrity check operates on cleanly-shaped children.
+      this._syntaxMutating = true;
+      var normalized;
+      try {
+        normalized = this._normalizeDecorationSpans(wrapper, delim);
+      } finally {
+        this._syntaxMutating = false;
+      }
+      if (!normalized) {
         this._unwrapTamperedFormatting(wrapper);
         return;
       }
 
-      for (var i = 0; i < n; i++) {
-        var c = children[i];
-        if (
-          !c ||
-          c.nodeType !== Node.ELEMENT_NODE ||
-          !c.classList.contains("leaf-syntax-decoration") ||
-          c.textContent !== delim[i]
-        ) {
+      var n = delim.length;
+
+      // Decoration spans in document order. The first n are presumed leading,
+      // the last n trailing. If the count is off (a span got deleted), the
+      // user really did break the markup — unwrap.
+      var allSpans = Array.prototype.slice.call(
+        wrapper.querySelectorAll(".leaf-syntax-decoration"),
+      );
+      if (allSpans.length !== 2 * n) {
+        this._unwrapTamperedFormatting(wrapper);
+        return;
+      }
+      for (var i = 0; i < 2 * n; i++) {
+        var expected = i < n ? delim[i] : delim[i - n];
+        if (allSpans[i].textContent !== expected) {
           this._unwrapTamperedFormatting(wrapper);
           return;
         }
       }
-      for (var j = 0; j < n; j++) {
-        var c2 = children[children.length - n + j];
-        if (
-          !c2 ||
-          c2.nodeType !== Node.ELEMENT_NODE ||
-          !c2.classList.contains("leaf-syntax-decoration") ||
-          c2.textContent !== delim[j]
-        ) {
-          this._unwrapTamperedFormatting(wrapper);
-          return;
+
+      var children = Array.prototype.slice.call(wrapper.childNodes);
+      var idxFirstLeading = children.indexOf(allSpans[0]);
+      var idxLastLeading = children.indexOf(allSpans[n - 1]);
+      var idxFirstTrailing = children.indexOf(allSpans[n]);
+      var idxLastTrailing = children.indexOf(allSpans[2 * n - 1]);
+
+      // Stragglers anywhere outside the leading/trailing groups, or
+      // *between* the spans of either group, are relocated outside the
+      // wrapper — leading-side stragglers go before, trailing-side after.
+      // Anything between the last leading span and the first trailing
+      // span is the bold/italic/etc. body and stays put.
+      var beforeStragglers = [];
+      var afterStragglers = [];
+      for (var k = 0; k < idxFirstLeading; k++) {
+        beforeStragglers.push(children[k]);
+      }
+      for (var k2 = idxFirstLeading + 1; k2 < idxLastLeading; k2++) {
+        if (!this._isDecorationSpan(children[k2])) {
+          beforeStragglers.push(children[k2]);
         }
       }
+      for (var k3 = idxFirstTrailing + 1; k3 < idxLastTrailing; k3++) {
+        if (!this._isDecorationSpan(children[k3])) {
+          afterStragglers.push(children[k3]);
+        }
+      }
+      for (var k4 = idxLastTrailing + 1; k4 < children.length; k4++) {
+        afterStragglers.push(children[k4]);
+      }
+
+      if (beforeStragglers.length === 0 && afterStragglers.length === 0) {
+        return;
+      }
+
+      var parent = wrapper.parentNode;
+      if (!parent) return;
+      this._syntaxMutating = true;
+      try {
+        for (var b = 0; b < beforeStragglers.length; b++) {
+          parent.insertBefore(beforeStragglers[b], wrapper);
+        }
+        var afterAnchor = wrapper.nextSibling;
+        for (var a = 0; a < afterStragglers.length; a++) {
+          if (afterAnchor) {
+            parent.insertBefore(afterStragglers[a], afterAnchor);
+          } else {
+            parent.appendChild(afterStragglers[a]);
+          }
+        }
+      } finally {
+        this._syntaxMutating = false;
+      }
+      // Cursor likely sits in a relocated node outside the wrapper now —
+      // re-evaluate decorations so the (stale) wrapper's spans clear.
+      this._updateSyntaxDecorations();
+    },
+
+    _isDecorationSpan: function (node) {
+      return (
+        node &&
+        node.nodeType === Node.ELEMENT_NODE &&
+        node.classList &&
+        node.classList.contains("leaf-syntax-decoration")
+      );
+    },
+
+    // Called from keydown for printable-character keys in hybrid mode.
+    // If the cursor is past the bolded body (inside the trailing decoration
+    // block or at the wrapper's tail), insert the typed character outside
+    // the wrapper ourselves and tell the caller to preventDefault. Returns
+    // true if it did the insertion, false otherwise.
+    _maybeRedirectPastTrailingBlock: function (key) {
+      var wrapper = this._decoratedAncestor;
+      if (!wrapper || !wrapper.isConnected) return false;
+      var delim = this._delimiterFor(wrapper);
+      if (!delim) return false;
+
+      var sel = window.getSelection();
+      if (!sel.rangeCount) return false;
+      var range = sel.getRangeAt(0);
+      if (!range.collapsed) return false;
+
+      var allSpans = wrapper.querySelectorAll(".leaf-syntax-decoration");
+      var n = delim.length;
+      if (allSpans.length !== 2 * n) return false;
+      var firstTrailing = allSpans[n];
+
+      // Strict `> 0`: cursor exactly at the body's end (just before
+      // trailing) is left alone — typing there extends the bolded content.
+      var probe = document.createRange();
+      probe.setStartBefore(firstTrailing);
+      probe.collapse(true);
+      if (
+        range.compareBoundaryPoints(Range.START_TO_START, probe) <= 0
+      ) {
+        return false;
+      }
+
+      var parent = wrapper.parentNode;
+      if (!parent) return false;
+      var textNode = document.createTextNode(key);
+      var afterAnchor = wrapper.nextSibling;
+      this._syntaxMutating = true;
+      try {
+        if (afterAnchor) {
+          parent.insertBefore(textNode, afterAnchor);
+        } else {
+          parent.appendChild(textNode);
+        }
+        var caret = document.createRange();
+        caret.setStart(textNode, key.length);
+        caret.collapse(true);
+        try {
+          sel.removeAllRanges();
+          sel.addRange(caret);
+        } catch (_e) {
+          /* selection invalidated mid-frame — skip */
+        }
+      } finally {
+        this._syntaxMutating = false;
+      }
+      this._updateSyntaxDecorations();
+      return true;
+    },
+
+    _normalizeDecorationSpans: function (wrapper, delim) {
+      // Each `.leaf-syntax-decoration` span should hold exactly one delim
+      // character. If a span got extended (typing at its edge), split off
+      // the extra into a sibling text node, preserving the cursor.
+      // Returns false if any span no longer contains the delim character
+      // (the user really did break it — caller should unwrap).
+      // All our delimiters are repeating-char strings (`**`, `*`, `~~`,
+      // `||`, `` ` ``), so a single delim char identifies them all.
+      var delimChar = delim[0];
+      var sel = window.getSelection();
+      var rangeContainer = null;
+      var rangeOffset = 0;
+      if (sel.rangeCount > 0) {
+        var r = sel.getRangeAt(0);
+        rangeContainer = r.startContainer;
+        rangeOffset = r.startOffset;
+      }
+      var rangeMoved = false;
+
+      var spans = Array.prototype.slice.call(
+        wrapper.querySelectorAll(".leaf-syntax-decoration"),
+      );
+      for (var i = 0; i < spans.length; i++) {
+        var span = spans[i];
+        var text = span.textContent;
+        if (text === delimChar) continue;
+        if (text.length === 0) return false;
+
+        var startsWithDelim = text[0] === delimChar;
+        var endsWithDelim = text[text.length - 1] === delimChar;
+        if (!startsWithDelim && !endsWithDelim) return false;
+
+        var cursorInSpan = rangeContainer === span;
+        var cursorOff = cursorInSpan ? rangeOffset : -1;
+
+        if (startsWithDelim) {
+          var extraTextStart = text.slice(1);
+          span.textContent = delimChar;
+          var afterNode = document.createTextNode(extraTextStart);
+          if (span.nextSibling) {
+            span.parentNode.insertBefore(afterNode, span.nextSibling);
+          } else {
+            span.parentNode.appendChild(afterNode);
+          }
+          if (cursorInSpan && cursorOff > 1) {
+            rangeContainer = afterNode;
+            rangeOffset = Math.min(cursorOff - 1, extraTextStart.length);
+            rangeMoved = true;
+          } else if (cursorInSpan) {
+            rangeOffset = Math.min(cursorOff, 1);
+          }
+        } else {
+          var extraTextEnd = text.slice(0, -1);
+          span.textContent = delimChar;
+          var beforeNode = document.createTextNode(extraTextEnd);
+          span.parentNode.insertBefore(beforeNode, span);
+          if (cursorInSpan) {
+            if (cursorOff <= extraTextEnd.length) {
+              rangeContainer = beforeNode;
+              rangeOffset = cursorOff;
+            } else {
+              rangeContainer = span;
+              rangeOffset = 1;
+            }
+            rangeMoved = true;
+          }
+        }
+      }
+
+      if (rangeMoved && rangeContainer) {
+        try {
+          var newRange = document.createRange();
+          newRange.setStart(rangeContainer, rangeOffset);
+          newRange.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(newRange);
+        } catch (_e) {
+          /* range invalidated by mutation — leave selection alone */
+        }
+      }
+      return true;
     },
 
     _unwrapTamperedFormatting: function (wrapper) {
