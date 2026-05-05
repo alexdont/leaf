@@ -1697,16 +1697,17 @@
     },
 
     _updateSyntaxDecorations: function () {
-      // In hybrid mode, when the cursor enters an inline-formatting
-      // element, insert real text-bearing spans for the markdown delimiters
-      // so the cursor can step through each char with arrow keys. When the
-      // cursor leaves, the spans come out. The spans use `data-leaf-syntax-
-      // decoration` (also a class for CSS) so htmlToMarkdown can skip them.
+      // In hybrid mode, when the cursor enters one or more inline-formatting
+      // elements, insert real text-bearing spans for each level's markdown
+      // delimiters so the cursor can step through every char with arrow keys.
+      // For nested formatting (e.g. `<strong><em>hello</em></strong>`), all
+      // wrappers in the chain are decorated independently — the rendered
+      // result is `***hello***` with the outer `**` as direct children of
+      // `<strong>` and the inner `*` as direct children of `<em>`.
       if (this._mode !== "hybrid") {
         this._clearSyntaxDecoration();
         return;
       }
-      // Re-entry guard — our DOM mutations fire selectionchange too.
       if (this._syntaxMutating) return;
 
       var sel = window.getSelection();
@@ -1714,36 +1715,40 @@
         this._clearSyntaxDecoration();
         return;
       }
-      var ancestor = this._activeFormattingForCursor(sel);
-      if (this._decoratedAncestor === ancestor) return;
+      var newChain = this._findFormattingChainForCursor(sel);
+      var oldChain = this._decoratedAncestors || [];
+      if (this._chainsEqual(oldChain, newChain)) return;
 
       var savedRange = sel.getRangeAt(0).cloneRange();
       this._syntaxMutating = true;
       try {
-        if (this._decoratedAncestor) {
-          this._removeDelimitersFrom(this._decoratedAncestor);
+        for (var i = 0; i < oldChain.length; i++) {
+          if (newChain.indexOf(oldChain[i]) === -1) {
+            this._removeDelimitersFrom(oldChain[i]);
+          }
         }
-        if (ancestor) {
-          this._addDelimitersTo(ancestor);
+        for (var j = 0; j < newChain.length; j++) {
+          if (oldChain.indexOf(newChain[j]) === -1) {
+            this._addDelimitersTo(newChain[j]);
+          }
         }
-        this._decoratedAncestor = ancestor || null;
+        this._decoratedAncestors = newChain;
 
-        // Place the cursor. If it was already inside the ancestor, restore
-        // exactly where the user was. If it was at the boundary OUTSIDE
-        // the ancestor (Chrome lands the anchor in the parent when arrowing
-        // into a formatting element), jump past the leading or trailing
-        // decorations to the content edge so it sits at `**|hello**`,
-        // not `|**hello**`.
+        // Cursor placement. If the cursor was outside the innermost
+        // wrapper (boundary case — Chrome lands the anchor in the parent
+        // when arrowing in), jump past the innermost's leading or trailing
+        // decorations to the content edge.
         var newRange = null;
-        if (ancestor) {
-          var delim = this._delimiterFor(ancestor);
+        if (newChain.length > 0) {
+          var innermost = newChain[0];
+          var delim = this._delimiterFor(innermost);
           if (
             delim &&
-            !ancestor.contains(savedRange.startContainer) &&
-            ancestor !== savedRange.startContainer
+            !innermost.contains(savedRange.startContainer) &&
+            innermost !== savedRange.startContainer
           ) {
             var ancRange = document.createRange();
-            ancRange.selectNode(ancestor);
+            ancRange.selectNode(innermost);
             var fromLeft =
               savedRange.compareBoundaryPoints(
                 Range.START_TO_START,
@@ -1751,11 +1756,11 @@
               ) <= 0;
             newRange = document.createRange();
             if (fromLeft) {
-              newRange.setStart(ancestor, delim.length);
+              newRange.setStart(innermost, delim.length);
             } else {
               newRange.setStart(
-                ancestor,
-                ancestor.childNodes.length - delim.length,
+                innermost,
+                innermost.childNodes.length - delim.length,
               );
             }
             newRange.collapse(true);
@@ -1765,11 +1770,145 @@
           sel.removeAllRanges();
           sel.addRange(newRange || savedRange);
         } catch (_e) {
-          /* range no longer valid (extremely rare) — leave selection alone */
+          /* range no longer valid */
         }
       } finally {
         this._syntaxMutating = false;
       }
+    },
+
+    _findFormattingChainForCursor: function (sel) {
+      if (!sel || !sel.rangeCount) return [];
+      var range = sel.getRangeAt(0);
+
+      // Find the outermost formatting wrapper relevant to the cursor —
+      // walk up from anchor first, then fall back to probing the cursor's
+      // boundary neighbors if anchor isn't inside any formatting.
+      var walkUp = this._collectFormattingAncestors(sel.anchorNode);
+      var outermost = walkUp.length > 0 ? walkUp[walkUp.length - 1] : null;
+
+      if (!outermost) {
+        var candidate = this._findBoundaryFormattingCandidate(range);
+        if (candidate) {
+          var ups = this._collectFormattingAncestors(candidate);
+          if (ups.length > 0) outermost = ups[ups.length - 1];
+        }
+      }
+
+      if (!outermost) return [];
+
+      // Descend the outermost's subtree so every nested formatting layer
+      // gets decorated together — `***hello***` shows all three markers
+      // when the cursor is anywhere on the bolded word, not just when it
+      // reaches the inner content.
+      return this._descendChainAll(outermost);
+    },
+
+    _findBoundaryFormattingCandidate: function (range) {
+      var node = range.endContainer;
+      var offset = range.endOffset;
+      var candidate = null;
+      var fromLeft = true;
+      if (node.nodeType === Node.TEXT_NODE) {
+        if (offset === node.textContent.length && node.nextSibling) {
+          candidate = node.nextSibling;
+          fromLeft = true;
+        } else if (offset === 0 && node.previousSibling) {
+          candidate = node.previousSibling;
+          fromLeft = false;
+        }
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        if (node.childNodes[offset]) {
+          candidate = node.childNodes[offset];
+          fromLeft = true;
+        } else if (offset > 0 && node.childNodes[offset - 1]) {
+          candidate = node.childNodes[offset - 1];
+          fromLeft = false;
+        }
+      }
+      while (candidate && this._isDecorationSpan(candidate)) {
+        candidate = fromLeft ? candidate.nextSibling : candidate.previousSibling;
+      }
+      if (
+        candidate &&
+        candidate.nodeType === Node.ELEMENT_NODE &&
+        this._isFormattingElement(candidate)
+      ) {
+        return candidate;
+      }
+      return null;
+    },
+
+    _descendChainAll: function (root) {
+      // Returns every formatting element in `root`'s subtree, depth-first,
+      // innermost first, including `root` itself. Decoration spans are
+      // skipped during traversal so we don't recurse into them.
+      var result = [];
+      var self = this;
+      function walk(node) {
+        var children = node.children;
+        for (var i = 0; i < children.length; i++) {
+          var c = children[i];
+          if (
+            c.classList &&
+            c.classList.contains("leaf-syntax-decoration")
+          ) {
+            continue;
+          }
+          walk(c);
+        }
+        if (self._isFormattingElement(node)) {
+          result.push(node);
+        }
+      }
+      walk(root);
+      return result;
+    },
+
+    _collectFormattingAncestors: function (node) {
+      // Walk up from `node`, returning every formatting wrapper encountered
+      // up to (but not including) `_visualEl`. Innermost first.
+      var chain = [];
+      var n = node;
+      while (n && n !== this._visualEl) {
+        if (this._isFormattingElement(n)) {
+          chain.push(n);
+        }
+        n = n.parentNode;
+      }
+      return chain;
+    },
+
+    _chainsEqual: function (a, b) {
+      if (a === b) return true;
+      if (!a || !b || a.length !== b.length) return false;
+      for (var i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) return false;
+      }
+      return true;
+    },
+
+    _isFormattingElement: function (node) {
+      if (!node || node.nodeType !== Node.ELEMENT_NODE) return false;
+      var tag = node.tagName ? node.tagName.toLowerCase() : "";
+      var tags = [
+        "b",
+        "strong",
+        "i",
+        "em",
+        "s",
+        "del",
+        "strike",
+        "code",
+        "u",
+        "sub",
+        "sup",
+        "mark",
+        "a",
+      ];
+      if (tags.indexOf(tag) !== -1) return true;
+      if (node.classList && node.classList.contains("leaf-spoiler")) return true;
+      return false;
     },
 
     _formattingSelector:
@@ -1796,13 +1935,30 @@
       setTimeout(function () {
         self._clearSyntaxDecoration();
 
-        var ancestor = self._findNewFormatting(preSnapshot);
-        if (!ancestor) return;
+        // Prefer the cursor-based chain — it captures the full nest stack
+        // (e.g., italicizing already-bold text → [em, strong]).
+        var sel = window.getSelection();
+        var chain =
+          sel.rangeCount > 0
+            ? self._findFormattingChainForCursor(sel)
+            : [];
+
+        // Fallback: if the post-action selection isn't trustworthy,
+        // diff against the snapshot to find the new wrapper, then walk up.
+        if (chain.length === 0 && preSnapshot) {
+          var newFormatting = self._findNewFormatting(preSnapshot);
+          if (newFormatting) {
+            chain = self._collectFormattingAncestors(newFormatting);
+          }
+        }
+        if (chain.length === 0) return;
 
         self._syntaxMutating = true;
         try {
-          self._addDelimitersTo(ancestor);
-          self._decoratedAncestor = ancestor;
+          for (var i = 0; i < chain.length; i++) {
+            self._addDelimitersTo(chain[i]);
+          }
+          self._decoratedAncestors = chain;
         } finally {
           self._syntaxMutating = false;
         }
@@ -1842,16 +1998,26 @@
     //     wrapper so the formatting boundary stays in sync with the
     //     decoration spans.
     _maybeUnwrapTamperedFormatting: function () {
-      var wrapper = this._decoratedAncestor;
-      if (!wrapper || !wrapper.isConnected) return;
+      if (!this._decoratedAncestors || this._decoratedAncestors.length === 0) {
+        return;
+      }
+      // Snapshot — the per-wrapper integrity check may unwrap entries via
+      // _unwrapTamperedFormatting which mutates the live array.
+      var snapshot = this._decoratedAncestors.slice();
+      for (var i = 0; i < snapshot.length; i++) {
+        var wrapper = snapshot[i];
+        if (!wrapper.isConnected) continue;
+        this._processWrapperIntegrity(wrapper);
+      }
+      // Cursor may have shifted out of the inner wrapper as part of
+      // straggler relocation; re-evaluate the chain.
+      this._updateSyntaxDecorations();
+    },
+
+    _processWrapperIntegrity: function (wrapper) {
       var delim = this._delimiterFor(wrapper);
       if (!delim) return;
 
-      // Chrome extends a decoration span's textContent rather than
-      // creating a sibling text node when the user types at a span edge
-      // (e.g., space at end of trailing `**`). Split any oversized span
-      // back into [delim-char span] + [adjacent text node] so the rest
-      // of the integrity check operates on cleanly-shaped children.
       this._syntaxMutating = true;
       var normalized;
       try {
@@ -1865,12 +2031,15 @@
       }
 
       var n = delim.length;
-
-      // Decoration spans in document order. The first n are presumed leading,
-      // the last n trailing. If the count is off (a span got deleted), the
-      // user really did break the markup — unwrap.
-      var allSpans = Array.prototype.slice.call(
-        wrapper.querySelectorAll(".leaf-syntax-decoration"),
+      // Direct decoration-span children only — querying descendants would
+      // wrongly include nested wrappers' decoration spans.
+      var allSpans = Array.prototype.filter.call(
+        wrapper.children,
+        function (c) {
+          return (
+            c.classList && c.classList.contains("leaf-syntax-decoration")
+          );
+        },
       );
       if (allSpans.length !== 2 * n) {
         this._unwrapTamperedFormatting(wrapper);
@@ -1890,11 +2059,6 @@
       var idxFirstTrailing = children.indexOf(allSpans[n]);
       var idxLastTrailing = children.indexOf(allSpans[2 * n - 1]);
 
-      // Stragglers anywhere outside the leading/trailing groups, or
-      // *between* the spans of either group, are relocated outside the
-      // wrapper — leading-side stragglers go before, trailing-side after.
-      // Anything between the last leading span and the first trailing
-      // span is the bold/italic/etc. body and stays put.
       var beforeStragglers = [];
       var afterStragglers = [];
       for (var k = 0; k < idxFirstLeading; k++) {
@@ -1936,9 +2100,6 @@
       } finally {
         this._syntaxMutating = false;
       }
-      // Cursor likely sits in a relocated node outside the wrapper now —
-      // re-evaluate decorations so the (stale) wrapper's spans clear.
-      this._updateSyntaxDecorations();
     },
 
     _isDecorationSpan: function (node) {
@@ -1956,9 +2117,19 @@
     // the wrapper ourselves and tell the caller to preventDefault. Returns
     // true if it did the insertion, false otherwise.
     _maybeRedirectPastTrailingBlock: function (key) {
-      var wrapper = this._decoratedAncestor;
-      if (!wrapper || !wrapper.isConnected) return false;
-      var delim = this._delimiterFor(wrapper);
+      if (!this._decoratedAncestors || this._decoratedAncestors.length === 0) {
+        return false;
+      }
+      // Innermost defines "past the bolded body" — once the cursor moves
+      // past the innermost wrapper's first trailing decoration span, the
+      // user is logically outside the formatted content and any typed
+      // character belongs in the surrounding block, beyond the *outermost*
+      // wrapper.
+      var innermost = this._decoratedAncestors[0];
+      var wrapper =
+        this._decoratedAncestors[this._decoratedAncestors.length - 1];
+      if (!innermost.isConnected || !wrapper.isConnected) return false;
+      var delim = this._delimiterFor(innermost);
       if (!delim) return false;
 
       var sel = window.getSelection();
@@ -1966,7 +2137,14 @@
       var range = sel.getRangeAt(0);
       if (!range.collapsed) return false;
 
-      var allSpans = wrapper.querySelectorAll(".leaf-syntax-decoration");
+      var allSpans = Array.prototype.filter.call(
+        innermost.children,
+        function (c) {
+          return (
+            c.classList && c.classList.contains("leaf-syntax-decoration")
+          );
+        },
+      );
       var n = delim.length;
       if (allSpans.length !== 2 * n) return false;
       var firstTrailing = allSpans[n];
@@ -2028,8 +2206,15 @@
       }
       var rangeMoved = false;
 
-      var spans = Array.prototype.slice.call(
-        wrapper.querySelectorAll(".leaf-syntax-decoration"),
+      // Direct children only — querySelectorAll would also pick up nested
+      // wrappers' decoration spans.
+      var spans = Array.prototype.filter.call(
+        wrapper.children,
+        function (c) {
+          return (
+            c.classList && c.classList.contains("leaf-syntax-decoration")
+          );
+        },
       );
       for (var i = 0; i < spans.length; i++) {
         var span = spans[i];
@@ -2112,22 +2297,28 @@
           child = next;
         }
         parent.removeChild(wrapper);
-        this._decoratedAncestor = null;
+        if (this._decoratedAncestors) {
+          var idx = this._decoratedAncestors.indexOf(wrapper);
+          if (idx !== -1) this._decoratedAncestors.splice(idx, 1);
+        }
       } finally {
         this._syntaxMutating = false;
       }
     },
 
     _clearSyntaxDecoration: function () {
-      if (this._decoratedAncestor) {
-        this._syntaxMutating = true;
-        try {
-          this._removeDelimitersFrom(this._decoratedAncestor);
-        } finally {
-          this._syntaxMutating = false;
-        }
-        this._decoratedAncestor = null;
+      if (!this._decoratedAncestors || this._decoratedAncestors.length === 0) {
+        return;
       }
+      this._syntaxMutating = true;
+      try {
+        for (var i = 0; i < this._decoratedAncestors.length; i++) {
+          this._removeDelimitersFrom(this._decoratedAncestors[i]);
+        }
+      } finally {
+        this._syntaxMutating = false;
+      }
+      this._decoratedAncestors = [];
     },
 
     _delimiterFor: function (el) {
