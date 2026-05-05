@@ -1,15 +1,16 @@
 # Leaf
 
-Dual-mode visual WYSIWYG + markdown editor for Phoenix LiveView.
+Multi-mode visual WYSIWYG + markdown editor for Phoenix LiveView.
 
 **[Live Demo](https://sasha.don.ee/demo/leaf)**
 
 ![Leaf Editor](https://sasha.don.ee/phoenix_kit/file/019d0675-4bb1-7e02-8e51-17f02a37fafe/original/f2bd)
 
 - **Visual mode**: contenteditable div with toolbar formatting (bold, italic, headings, lists, links, code blocks, tables, blockquotes, inline spoilers, etc.)
-- **Drag-and-drop reordering**: drag any block element (headings, paragraphs, lists, images, blockquotes, code blocks) to rearrange content
+- **Hybrid mode** (Obsidian-style live preview): formatting renders inline (bold, italic, strike, code, spoiler, headings, horizontal rule, lists) while the source markers stay editable — typing `**word**`, `*word*`, `~~word~~`, `||word||`, `` `word` ``, `# heading`, `---`, `- item`, or `1. item` auto-formats on the closing delimiter, and the markers fade in/out as the cursor enters and leaves each formatted run
 - **Markdown mode**: plain textarea with toolbar support
 - **HTML mode**: raw HTML editing for power users
+- **Drag-and-drop reordering**: drag any block element (headings, paragraphs, lists, images, blockquotes, code blocks) to rearrange content
 - **Resizable**: drag the bottom-right grip to change height; double-click the grip to auto-fit to content
 - **Spoilers**: Discord-style `||hidden||` markdown that renders as a click-to-reveal censored block in published content
 - Content syncs between modes via [Earmark](https://hex.pm/packages/earmark) and client-side HTML→Markdown conversion
@@ -49,7 +50,7 @@ If you prefer not to use the `deps/` import path (e.g., non-standard project str
 ```javascript
 // Load Leaf from CDN
 const script = document.createElement("script");
-script.src = "https://cdn.jsdelivr.net/gh/alexdont/leaf@v0.2.12/priv/static/assets/leaf.js";
+script.src = "https://cdn.jsdelivr.net/gh/alexdont/leaf@v0.2.13/priv/static/assets/leaf.js";
 script.onload = () => {
   // Leaf is now available at window.LeafHooks
 };
@@ -107,7 +108,7 @@ Then use it in your templates:
 |---|---|---|---|
 | `id` | string | required | Unique editor ID |
 | `content` | string | `""` | Markdown content |
-| `mode` | `:visual` \| `:markdown` \| `:html` | `:visual` | Initial editor mode |
+| `mode` | `:hybrid` \| `:visual` \| `:markdown` \| `:html` | `:hybrid` | Initial editor mode |
 | `preset` | `:advanced` \| `:simple` | `:advanced` | Toolbar preset; `:simple` is a compact subset for comments and lightweight editing |
 | `toolbar` | list | `[]` | Extra toolbar buttons (`:image`, `:video`) |
 | `placeholder` | string | `"Write something..."` | Placeholder text shown when the editor is empty |
