@@ -2072,25 +2072,18 @@
       }
       if (cursorGlobalOffset < 0) return;
 
-      // Order: 3-char first (`***...***`), then 2-char delimiters, then
-      // 1-char. Italic uses lookbehind to avoid matching the inner half
-      // of `**bold**`. `[^DELIM\n]+?` keeps each pattern self-contained.
-      var patterns = [
-        { regex: /\*\*\*([^*\n]+?)\*\*\*$/, type: "boldItalic" },
-        { regex: /\*\*([^*\n]+?)\*\*$/, tag: "strong", delim: "**" },
-        { regex: /~~([^~\n]+?)~~$/, tag: "del", delim: "~~" },
-        {
-          regex: /\|\|([^|\n]+?)\|\|$/,
-          tag: "span",
-          delim: "||",
-          isSpoiler: true,
-        },
-        { regex: /(?<!\*)\*([^*\n]+?)\*$/, tag: "em", delim: "*" },
-        { regex: /`([^`\n]+?)`$/, tag: "code", delim: "`" },
-      ];
+      var patterns = this._autoFormatPatterns;
       for (var i = 0; i < patterns.length; i++) {
-        var m = before.match(patterns[i].regex);
+        var m = before.match(patterns[i].regexAt);
         if (m) {
+          // Defer when an outer delimiter is still open — typing
+          // `~~**word**` shouldn't auto-format the inner `**word**` while
+          // the outer `~~` hasn't closed yet. Once the closing `~~` lands
+          // the outer pattern fires and we recursively wrap the inner.
+          var beforeMatch = before.slice(0, before.length - m[0].length);
+          if (this._hasUnclosedOuterDelim(beforeMatch, patterns[i])) {
+            return;
+          }
           this._applyAutoFormat(
             runNodes,
             node,
@@ -2102,6 +2095,135 @@
           return;
         }
       }
+    },
+
+    // Order: 3-char first (`***...***`), then 2-char delimiters, then
+    // 1-char. Italic uses lookbehind/lookahead to avoid matching either
+    // half of `**bold**`. `[^DELIM\n]+?` keeps each pattern self-contained.
+    // `regexAt` is anchored at end-of-string for the cursor-end check;
+    // `regexAny` is the same pattern without `$` so the recursive inner
+    // builder can find it anywhere in the matched content.
+    _autoFormatPatterns: [
+      {
+        regexAt: /\*\*\*([^*\n]+?)\*\*\*$/,
+        regexAny: /\*\*\*([^*\n]+?)\*\*\*/,
+        type: "boldItalic",
+      },
+      {
+        // Lookbehind/lookahead so `**...**` doesn't match the inner part
+        // of `***...***` (triple → bold-italic) before the user finishes
+        // the closing pair. `(?<!\*)` keeps the opening `**` from being
+        // adjacent to another `*`; `(?!\*)` keeps the closing `**` from
+        // being followed by one.
+        regexAt: /(?<!\*)\*\*([^*\n]+?)\*\*(?!\*)$/,
+        regexAny: /(?<!\*)\*\*([^*\n]+?)\*\*(?!\*)/,
+        tag: "strong",
+        delim: "**",
+      },
+      {
+        regexAt: /~~([^~\n]+?)~~$/,
+        regexAny: /~~([^~\n]+?)~~/,
+        tag: "del",
+        delim: "~~",
+      },
+      {
+        regexAt: /\|\|([^|\n]+?)\|\|$/,
+        regexAny: /\|\|([^|\n]+?)\|\|/,
+        tag: "span",
+        delim: "||",
+        isSpoiler: true,
+      },
+      {
+        regexAt: /(?<!\*)\*([^*\n]+?)\*$/,
+        regexAny: /(?<!\*)\*([^*\n]+?)\*(?!\*)/,
+        tag: "em",
+        delim: "*",
+      },
+      {
+        regexAt: /`([^`\n]+?)`$/,
+        regexAny: /`([^`\n]+?)`/,
+        tag: "code",
+        delim: "`",
+      },
+    ],
+
+    _hasUnclosedOuterDelim: function (textBeforeMatch, currentPattern) {
+      // Single `*` is intentionally skipped — italic and bold share a
+      // character so simple counting is ambiguous across mixed runs.
+      var checks = [
+        { delim: "**", regex: /\*\*/g },
+        { delim: "~~", regex: /~~/g },
+        { delim: "||", regex: /\|\|/g },
+        { delim: "`", regex: /`/g },
+      ];
+      for (var i = 0; i < checks.length; i++) {
+        if (checks[i].delim === currentPattern.delim) continue;
+        var matches = textBeforeMatch.match(checks[i].regex);
+        if (matches && matches.length % 2 === 1) return true;
+      }
+      return false;
+    },
+
+    _createAutoFormatWrapper: function (pattern) {
+      if (pattern.type === "boldItalic") {
+        var emEl = document.createElement("em");
+        var strongEl = document.createElement("strong");
+        strongEl.appendChild(emEl);
+        return strongEl;
+      }
+      if (pattern.isSpoiler) {
+        var span = document.createElement("span");
+        span.classList.add("leaf-spoiler");
+        return span;
+      }
+      return document.createElement(pattern.tag);
+    },
+
+    _buildFormattedFragment: function (text) {
+      // Returns an array of DOM nodes representing `text` with every
+      // matched delimiter pair wrapped in its corresponding element.
+      // Recursive — supports arbitrary depth (e.g., `~~**`code`**~~`).
+      if (!text) return [];
+
+      var earliest = null;
+      var earliestPattern = null;
+      var patterns = this._autoFormatPatterns;
+      for (var i = 0; i < patterns.length; i++) {
+        var re = new RegExp(
+          patterns[i].regexAny.source,
+          patterns[i].regexAny.flags,
+        );
+        var m = re.exec(text);
+        if (m && (earliest === null || m.index < earliest.index)) {
+          earliest = m;
+          earliestPattern = patterns[i];
+        }
+      }
+      if (!earliest) {
+        return [document.createTextNode(text)];
+      }
+
+      var beforeText = text.slice(0, earliest.index);
+      var afterText = text.slice(earliest.index + earliest[0].length);
+      var innerText = earliest[1];
+
+      var wrapper = this._createAutoFormatWrapper(earliestPattern);
+      var innerHost =
+        earliestPattern.type === "boldItalic" ? wrapper.firstChild : wrapper;
+      var innerNodes = this._buildFormattedFragment(innerText);
+      for (var j = 0; j < innerNodes.length; j++) {
+        innerHost.appendChild(innerNodes[j]);
+      }
+
+      var result = [];
+      if (beforeText) {
+        result = result.concat(this._buildFormattedFragment(beforeText));
+      }
+      result.push(wrapper);
+      if (afterText) {
+        result = result.concat(this._buildFormattedFragment(afterText));
+      }
+      return result;
     },
 
     _applyAutoFormat: function (
@@ -2135,23 +2257,16 @@
       }
       if (!startNode) return;
 
-      var wrapper;
-      var chain;
-      if (pattern.type === "boldItalic") {
-        var emEl = document.createElement("em");
-        emEl.textContent = inner;
-        wrapper = document.createElement("strong");
-        wrapper.appendChild(emEl);
-        chain = [emEl, wrapper];
-      } else if (pattern.isSpoiler) {
-        wrapper = document.createElement("span");
-        wrapper.classList.add("leaf-spoiler");
-        wrapper.textContent = inner;
-        chain = [wrapper];
-      } else {
-        wrapper = document.createElement(pattern.tag);
-        wrapper.textContent = inner;
-        chain = [wrapper];
+      // Build the wrapper with inner content recursively formatted, so
+      // a deferred outer that finally closes (e.g. `~~**word**~~`)
+      // produces nested `<del><strong>word</strong></del>` rather than
+      // a single-level wrapper containing raw markdown text.
+      var wrapper = this._createAutoFormatWrapper(pattern);
+      var innerHost =
+        pattern.type === "boldItalic" ? wrapper.firstChild : wrapper;
+      var innerNodes = this._buildFormattedFragment(inner);
+      for (var bf = 0; bf < innerNodes.length; bf++) {
+        innerHost.appendChild(innerNodes[bf]);
       }
 
       this._syntaxMutating = true;
@@ -2195,10 +2310,11 @@
           wrapper.nextSibling.parentNode.removeChild(wrapper.nextSibling);
         }
 
-        // Decorate inline AND prime the chain so the listener-driven
+        // Decorate every formatting element in the wrapper's subtree
+        // (innermost first) AND prime the chain so the listener-driven
         // `_updateSyntaxDecorations` sees `oldChain == newChain` and
-        // skips its cursor-relocate logic — otherwise the cursor gets
-        // snapped back inside the wrapper at the trailing-content edge.
+        // skips its cursor-relocate logic.
+        var chain = this._descendChainAll(wrapper);
         for (var j = 0; j < chain.length; j++) {
           this._addDelimitersTo(chain[j]);
         }
