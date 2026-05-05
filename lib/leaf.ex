@@ -1117,12 +1117,27 @@ defmodule Leaf do
     }
 
     /* Widen the hit area for hybrid-mode `<hr>` rules so the click
-       handler can reliably swap them to an editable `<p>---</p>`.
-       Default HR is a 2-3px line that's nearly impossible to land on. */
+       handler can reliably swap them to an editable `<p>---</p>`, and
+       render the line via a centered `::before` so it sits in the
+       middle of the drag-handle's hover block (the default `<hr>`
+       border-line otherwise hugs the top of its padding box). */
     .content-editor-visual hr {
-      padding: 6px 0;
+      position: relative;
+      border: 0;
+      height: 18px;
       margin: 0.25em 0;
       cursor: pointer;
+      background: transparent;
+    }
+    .content-editor-visual hr::before {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 0;
+      right: 0;
+      border-top: 1px solid currentColor;
+      opacity: 0.3;
+      transform: translateY(-50%);
     }
 
     """

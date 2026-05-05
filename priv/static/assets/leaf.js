@@ -5133,8 +5133,17 @@
       if (!this._dragHandle) return;
       var wrapperRect = this._visualWrapper.getBoundingClientRect();
       var blockRect = block.getBoundingClientRect();
+      var handleHeight = this._dragHandle.offsetHeight || 28;
 
+      // For tall blocks (paragraphs, headings, lists) align the handle to
+      // the block's top so it sits next to the first line. For short
+      // blocks like a hybrid-mode `<hr>` (~18px), top-aligning puts the
+      // handle above the visible content; vertically center it instead so
+      // it lines up with the rule.
       var top = blockRect.top - wrapperRect.top;
+      if (blockRect.height < handleHeight) {
+        top += (blockRect.height - handleHeight) / 2;
+      }
       var left = blockRect.left - wrapperRect.left - 30;
 
       this._dragHandle.style.top = top + "px";
