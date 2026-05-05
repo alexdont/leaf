@@ -1,6 +1,6 @@
 # Leaf
 
-Multi-mode visual WYSIWYG + markdown editor for Phoenix LiveView.
+Visual WYSIWYG + Obsidian-style hybrid live preview + markdown editor for Phoenix LiveView.
 
 **[Live Demo](https://sasha.don.ee/demo/leaf)**
 
