@@ -1204,7 +1204,8 @@ defmodule Leaf do
   defp markdown_to_html(markdown) do
     case Earmark.as_html(markdown, breaks: true) do
       {:ok, html, _} -> clean_html(html)
-      {:error, _, _} -> "<p>#{Phoenix.HTML.html_escape(markdown)}</p>"
+      {:error, _, _} ->
+        "<p>" <> Phoenix.HTML.safe_to_string(Phoenix.HTML.html_escape(markdown)) <> "</p>"
     end
   end
 
@@ -1231,6 +1232,7 @@ defmodule Leaf do
         String.replace(chunk, ~r/\|\|(.+?)\|\|/s, "<span class=\"leaf-spoiler\">\\1</span>")
       end
     end)
+  end
 
   defp sanitize_html(html, deny) when is_binary(html) and is_list(deny) do
     html
@@ -1276,10 +1278,11 @@ defmodule Leaf do
     end
   end
 
-  defp normalize_mode(mode, deny) when mode in [:visual, :markdown, :html] and is_list(deny) do
+  defp normalize_mode(mode, deny) when mode in [:visual, :hybrid, :markdown, :html] and is_list(deny) do
     if mode_denied?(mode, deny), do: :visual, else: mode
   end
 
+  defp mode_denied?(:hybrid, _deny), do: false
   defp mode_denied?(:markdown, deny), do: :markdown_mode in deny
   defp mode_denied?(:html, deny), do: :html_mode in deny
   defp mode_denied?(:visual, _deny), do: false
