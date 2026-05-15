@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.14
+
+- Remove the unused `Leaf.Icon` heroicons-wrapper component (`lib/leaf/icon.ex`) and its smoke test. The module was orphan code referenced nowhere in Leaf's own templates, no external consumer, and never exposed through Leaf's public API moduledoc — keeping it was just noise on the public surface. Anyone who wants a heroicons helper has Phoenix's own `<.icon>` pattern, which is two lines to inline.
+
 ## 0.2.13
 
 - Add **hybrid mode** — Obsidian-style live preview that renders formatting inline (bold, italic, strike, code, spoiler, headings, horizontal rule, ordered/unordered lists) while keeping the source markers editable. Markers (`**`, `*`, `~~`, `||`, `` ` ``, `# `…`###### `) appear as faded characters when the cursor is inside their wrapper and fade out as soon as the cursor leaves; arrowing into a wrapper from either side reveals them again. Hybrid is now the first tab in the mode switcher.
