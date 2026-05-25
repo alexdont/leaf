@@ -1260,6 +1260,28 @@
         }
       }
 
+      // Hybrid source-mode Enter: split the block's source string at
+      // the cursor offset, keep the first half in the original block
+      // (which then exits source mode and renders), open a new
+      // `<p data-leaf-source>` for the second half, and move the
+      // cursor there. Chrome's default Enter handling can't reliably
+      // split content that includes the hidden marker spans —
+      // splitting at `*|*bold**` typically dumps the user into a
+      // fresh empty `<p>` and leaves the formatted run untouched.
+      if (
+        this._mode === "hybrid" &&
+        !mod &&
+        !e.shiftKey &&
+        e.key === "Enter" &&
+        this._sourceBlock &&
+        this._sourceBlock.isConnected
+      ) {
+        if (this._maybeHandleSourceEnter()) {
+          e.preventDefault();
+          return;
+        }
+      }
+
       // Hybrid: if the cursor is logically past the bolded body (inside the
       // trailing decoration block, at the wrapper end, etc.) and the user
       // is about to insert a character, intercept and insert the char
@@ -3859,6 +3881,80 @@
       // would have triggered.
       this._lastSourceStateKey = null;
       this._activeMatchKey = null;
+      this._refreshSourceBlock();
+      this._debouncedPushVisualChange();
+      this._updateCounts();
+      return true;
+    },
+
+    // Source-mode Enter: split the block's source string at the cursor
+    // offset. The first half stays in the original block which then
+    // exits source mode (rendered to HTML); the second half goes into
+    // a new `<p data-leaf-source>` inserted right after, which becomes
+    // the new active source block. Cursor lands at the start of the
+    // new block.
+    _maybeHandleSourceEnter: function () {
+      var sel = window.getSelection();
+      if (!sel.rangeCount) return false;
+      var range = sel.getRangeAt(0);
+      if (!range.collapsed) return false;
+      if (!this._sourceBlock.contains(range.startContainer)) return false;
+
+      var cursorOffset = this._textOffsetInBlock(
+        this._sourceBlock,
+        range.startContainer,
+        range.startOffset
+      );
+      var sourceText = this._sourceBlock.textContent || "";
+      var firstHalf = sourceText.slice(0, cursorOffset);
+      var secondHalf = sourceText.slice(cursorOffset);
+
+      var oldBlock = this._sourceBlock;
+      var parent = oldBlock.parentNode;
+      if (!parent) return false;
+
+      this._syntaxMutating = true;
+      try {
+        // Render the old block's first-half source to HTML and swap
+        // it in. Calling `_exitSourceMode` directly would early-return
+        // because we've already set `_syntaxMutating`, so render
+        // inline via `_renderBlockFromSource` instead.
+        var renderedOld = this._renderBlockFromSource(firstHalf);
+        parent.replaceChild(renderedOld, oldBlock);
+
+        // Create the new source block (always a plain `<p>` — the new
+        // line starts as a fresh paragraph regardless of what tag the
+        // old block was; the user can type `# ` etc. to retag).
+        var newBlock = document.createElement("p");
+        newBlock.setAttribute("data-leaf-source", "p");
+        if (secondHalf.length === 0) {
+          newBlock.innerHTML = "<br>";
+        } else {
+          newBlock.appendChild(document.createTextNode(secondHalf));
+        }
+        parent.insertBefore(newBlock, renderedOld.nextSibling);
+
+        // Cursor at the start of the new block.
+        var newRange = document.createRange();
+        if (
+          newBlock.firstChild &&
+          newBlock.firstChild.nodeType === Node.TEXT_NODE
+        ) {
+          newRange.setStart(newBlock.firstChild, 0);
+        } else {
+          newRange.setStart(newBlock, 0);
+        }
+        newRange.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(newRange);
+
+        this._sourceBlock = newBlock;
+        this._lastSourceStateKey = null;
+        this._activeMatchKey = null;
+      } finally {
+        this._syntaxMutating = false;
+      }
+
       this._refreshSourceBlock();
       this._debouncedPushVisualChange();
       this._updateCounts();
