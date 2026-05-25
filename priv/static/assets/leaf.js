@@ -1228,6 +1228,11 @@
       // span / body-text split inside the block.
       if (this._mode === "hybrid") {
         this._refreshSourceBlock();
+        // List auto-format snaps `- ` / `1. ` (etc.) at the start of a
+        // paragraph into a real `<ul><li>` / `<ol><li>` immediately, so
+        // the user sees the proper bullet / number with normal styling
+        // instead of a faded source marker.
+        this._maybeAutoFormatList();
       }
       this._debouncedPushVisualChange();
       this._updateCounts();
@@ -2706,6 +2711,16 @@
         list.appendChild(li);
         if (!appending) parent.insertBefore(list, block);
         parent.removeChild(block);
+
+        // The just-removed `<p>` was the active source block; the new
+        // `<li>` is rendered (not source-mode), so clear the reference
+        // so subsequent input/keydown handlers don't operate on a
+        // detached node.
+        if (this._sourceBlock === block) {
+          this._sourceBlock = null;
+          this._lastSourceStateKey = null;
+          this._activeMatchKey = null;
+        }
 
         var caret = document.createRange();
         var firstText = this._firstTextDescendant(li);
