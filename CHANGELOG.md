@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.15
+
+- Add a fullscreen toggle button to the toolbar. Clicking it puts the editor host into real OS-level fullscreen via the browser Fullscreen API (`element.requestFullscreen()`) — browser chrome (tabs, address bar, taskbar) hides and the editor fills the entire screen, the same immersive feel as Fresco's nav button. Escape exits natively (handled by the Fullscreen API, no custom keydown listener). Includes Safari webkit-prefix fallbacks. The hook listens to `fullscreenchange` and reflects browser state into a `data-leaf-fullscreen='true'` attribute on the host; an inline CSS rule keyed on that attribute flexes the inner toolbar/body/footer so the editor body absorbs the screen height instead of staying at its configured `:height`. The button uses heroicons arrows-pointing-out / arrows-pointing-in to signal current state. Sits to the right of the mode switcher in the `:advanced` preset only — `:simple` (comments / lightweight editing) skips it. Works in readonly mode too — fullscreen is a view feature, not an edit feature, so it bypasses the readonly guard. Cleanup detaches the `fullscreenchange` listener from `destroyed()` so it doesn't leak across LiveComponent re-mounts.
+
 ## 0.2.14
 
 - Remove the unused `Leaf.Icon` heroicons-wrapper component (`lib/leaf/icon.ex`) and its smoke test. The module was orphan code referenced nowhere in Leaf's own templates, no external consumer, and never exposed through Leaf's public API moduledoc — keeping it was just noise on the public surface. Anyone who wants a heroicons helper has Phoenix's own `<.icon>` pattern, which is two lines to inline.

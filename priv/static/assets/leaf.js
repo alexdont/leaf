@@ -302,6 +302,80 @@
     "}",
     ".leaf-toolbar-placeholder { visibility: hidden; }",
 
+    // Fullscreen mode — triggered via the browser Fullscreen API (see
+    // `_toggleFullscreen` in the hook). The host element fills the screen
+    // at OS level; these CSS rules then flex the inner layout (toolbar +
+    // body + footer) so the editor body absorbs the new height instead of
+    // staying at its configured `:height`. The `data-leaf-fullscreen='true'`
+    // attribute is reflected from `fullscreenchange`, so F11/Escape/API
+    // exit all keep the inner layout in sync.
+    "[data-leaf-fullscreen='true'] {",
+    "  position: fixed !important; inset: 0 !important;",
+    "  width: 100vw !important; height: 100vh !important;",
+    "  z-index: 9999;",
+    "  background: var(--color-base-100, #ffffff);",
+    "  padding: 0.75rem 1rem;",
+    "  display: flex !important; flex-direction: column !important;",
+    "  align-items: stretch !important;",
+    "  overflow: hidden;",
+    "  box-sizing: border-box;",
+    "}",
+    // Force every direct child to take the full row regardless of any
+    // ancestor / Tailwind constraints (`min-w-0`, parent transforms, etc.)
+    // that might have collapsed them to min-content width.
+    "[data-leaf-fullscreen='true'] > * {",
+    "  width: 100% !important;",
+    "  max-width: 100% !important;",
+    "  box-sizing: border-box;",
+    "}",
+    // Editor body: ignore the configured `:height` inline style and grow
+    // to fill whatever the parent flex column hands it. `flex-basis: 0`
+    // (instead of `auto`) starts the item at zero so subsequent
+    // `flex-grow: 1` decides its size from the remaining space alone —
+    // `auto` basis would re-introduce the inline `height: 480px` and
+    // collapse the editor back to its baseline.
+    "[data-leaf-fullscreen='true'] [data-editor-visual],",
+    "[data-leaf-fullscreen='true'] [data-markdown-wrapper] textarea,",
+    "[data-leaf-fullscreen='true'] [data-html-wrapper] textarea {",
+    "  flex: 1 1 0 !important;",
+    "  height: auto !important;",
+    "  min-height: 0 !important;",
+    "  resize: none !important;",
+    "}",
+    // The border-wrapper holds the editor body + footer. Tagged with a
+    // data attribute so the selector survives template reshuffles and
+    // doesn't break if a 4th top-level child gets added to the host.
+    // Drop any `height: …` — flex-basis: 0 + flex-grow: 1 owns sizing
+    // here, and an explicit height can fight the basis (especially in
+    // Safari) and collapse the row.
+    "[data-leaf-fullscreen='true'] [data-leaf-body-wrapper] {",
+    "  flex: 1 1 0 !important;",
+    "  min-height: 0 !important;",
+    "  display: flex !important;",
+    "  flex-direction: column !important;",
+    "}",
+    "[data-leaf-fullscreen='true'] [data-leaf-content] {",
+    "  flex: 1 1 0 !important;",
+    "  min-height: 0 !important;",
+    "  display: flex !important;",
+    "  flex-direction: column !important;",
+    "}",
+    "[data-leaf-fullscreen='true'] [data-visual-wrapper]:not(.hidden),",
+    "[data-leaf-fullscreen='true'] [data-markdown-wrapper]:not(.hidden),",
+    "[data-leaf-fullscreen='true'] [data-html-wrapper]:not(.hidden) {",
+    "  flex: 1 1 0 !important;",
+    "  min-height: 0 !important;",
+    "  display: flex !important;",
+    "  flex-direction: column !important;",
+    "}",
+    // The toolbar shouldn't grow at all — its content height is the
+    // whole height it should ever take in fullscreen. Without this it
+    // can absorb leftover space from the flex column instead of the
+    // editor body.
+    "[data-leaf-fullscreen='true'] [data-visual-toolbar] {",
+    "  flex: 0 0 auto !important;",
+    "}",
+
     // Resize-grip tooltip (shown when the mouse is over the bottom-right
     // resize grip; hint that double-click auto-fits height to content).
     ".leaf-grip-tooltip {",
@@ -808,6 +882,20 @@
           }
         }.bind(this)
       );
+
+      // Fullscreen API state reflection. The browser owns entering/exiting
+      // fullscreen (user click on our button, Escape, F11, programmatic
+      // exit); our DOM follows by listening to `fullscreenchange`. Attach
+      // both prefixed + unprefixed so Safari fires the handler too.
+      this._fullscreenChangeHandler = this._syncFullscreenState.bind(this);
+      document.addEventListener(
+        "fullscreenchange",
+        this._fullscreenChangeHandler
+      );
+      document.addEventListener(
+        "webkitfullscreenchange",
+        this._fullscreenChangeHandler
+      );
     },
 
     updated() {
@@ -892,6 +980,17 @@
       }
       if (this._onDocClickForPopover) {
         document.removeEventListener("mousedown", this._onDocClickForPopover);
+      }
+      if (this._fullscreenChangeHandler) {
+        document.removeEventListener(
+          "fullscreenchange",
+          this._fullscreenChangeHandler
+        );
+        document.removeEventListener(
+          "webkitfullscreenchange",
+          this._fullscreenChangeHandler
+        );
+        this._fullscreenChangeHandler = null;
       }
 
       // Clean up global markdown helper functions
@@ -3735,7 +3834,83 @@
       }
     },
 
+    // -- Fullscreen toggle --
+    //
+    // Uses the browser Fullscreen API (`element.requestFullscreen`) so the
+    // host fills the screen at OS level — browser chrome (tabs, address
+    // bar, OS task bar) hides, exactly like Fresco's nav button. Escape
+    // and OS-level exit gestures are handled natively by the browser.
+    //
+    // Source of truth is `document.fullscreenElement`. The `fullscreenchange`
+    // listener (attached in `mounted`) reflects browser state into the
+    // `data-leaf-fullscreen='true'` attribute, which drives the CSS that
+    // flexes the inner toolbar/body/footer layout so the editor body
+    // absorbs the new height. F11, Escape, the button, and any external
+    // `exitFullscreen()` call all keep our UI in sync because they all
+    // route through the same change event.
+
+    _toggleFullscreen: function () {
+      if (this._fullscreenElement() === this.el) {
+        this._exitFullscreen();
+      } else {
+        this._requestFullscreen(this.el);
+      }
+    },
+
+    // Fullscreen API wrappers with Safari webkit prefix fallbacks. The
+    // request is a user-gesture-only API; click handlers always satisfy
+    // that, so a rejection in practice means the document or iframe
+    // disallows it. We swallow errors silently — falling back to the
+    // old CSS-pin path is possible but not warranted yet.
+    _requestFullscreen: function (el) {
+      var fn = el.requestFullscreen || el.webkitRequestFullscreen ||
+               el.mozRequestFullScreen || el.msRequestFullscreen;
+      if (fn) { try { return fn.call(el); } catch (_) {} }
+    },
+
+    _exitFullscreen: function () {
+      var fn = document.exitFullscreen || document.webkitExitFullscreen ||
+               document.mozCancelFullScreen || document.msExitFullscreen;
+      if (fn) { try { return fn.call(document); } catch (_) {} }
+    },
+
+    _fullscreenElement: function () {
+      return document.fullscreenElement ||
+             document.webkitFullscreenElement ||
+             document.mozFullScreenElement ||
+             document.msFullscreenElement || null;
+    },
+
+    // Reflect `document.fullscreenElement` into our DOM. Called from the
+    // `fullscreenchange` listener attached in `mounted`.
+    _syncFullscreenState: function () {
+      var on = this._fullscreenElement() === this.el;
+      var btn = this.el.querySelector("[data-leaf-fullscreen-btn]");
+      var enterIcon = btn && btn.querySelector("[data-leaf-fullscreen-enter]");
+      var exitIcon = btn && btn.querySelector("[data-leaf-fullscreen-exit]");
+
+      if (on) {
+        this.el.setAttribute("data-leaf-fullscreen", "true");
+        if (btn) btn.title = "Exit fullscreen";
+        if (enterIcon) enterIcon.style.display = "none";
+        if (exitIcon) exitIcon.style.display = "";
+      } else {
+        this.el.removeAttribute("data-leaf-fullscreen");
+        if (btn) btn.title = "Toggle fullscreen";
+        if (enterIcon) enterIcon.style.display = "";
+        if (exitIcon) exitIcon.style.display = "none";
+      }
+    },
+
     _execToolbarAction: function (action) {
+      // Fullscreen is a view-only toggle; let it run regardless of
+      // readonly state or current mode so users can expand the viewer
+      // even when editing is disabled.
+      if (action === "fullscreen") {
+        this._toggleFullscreen();
+        return;
+      }
+
       if (this._readonly) return;
 
       if (this._mode === "markdown") {
