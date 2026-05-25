@@ -3945,7 +3945,23 @@
       var newSource;
       var newCursor;
       if (backspace) {
-        if (cursorOffset <= 0) return false;
+        if (cursorOffset <= 0) {
+          // Backspace at the very start of the editor's only block
+          // would have Chrome delete the `<p>` itself, leaving the
+          // contenteditable with no block wrapper — the drag handle
+          // disappears and subsequent typing lands in a bare text
+          // node. Swallow the keystroke in that case; everywhere else
+          // (block has a previous sibling to merge into), let the
+          // browser's default merge behavior run.
+          if (
+            sourceText.length === 0 &&
+            !this._sourceBlock.previousElementSibling &&
+            !this._sourceBlock.nextElementSibling
+          ) {
+            return true;
+          }
+          return false;
+        }
         newSource =
           sourceText.slice(0, cursorOffset - 1) +
           sourceText.slice(cursorOffset);
