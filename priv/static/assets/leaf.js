@@ -1265,6 +1265,86 @@
         }
       }
 
+      // Backspace inside an empty `<li>`: merge back into the
+      // previous list item rather than letting Chrome's default exit
+      // the list to a sibling `<p>`. The exit behavior leaves the
+      // user stuck in a paragraph below the list — subsequent Enters
+      // create `<p>`s instead of continuing the list, which the user
+      // doesn't expect after just deleting the line they typed.
+      if (
+        (this._mode === "visual" || this._mode === "hybrid") &&
+        !mod &&
+        e.key === "Backspace"
+      ) {
+        var bsBlock = this._getCurrentBlock();
+        if (
+          bsBlock &&
+          bsBlock.tagName &&
+          bsBlock.tagName.toLowerCase() === "li"
+        ) {
+          var bsLiText = (bsBlock.textContent || "")
+            .replace(/[​ ]/g, "")
+            .trim();
+          if (bsLiText === "") {
+            e.preventDefault();
+            var bsList = bsBlock.parentNode;
+            var prevLi = bsBlock.previousElementSibling;
+            if (
+              prevLi &&
+              prevLi.tagName &&
+              prevLi.tagName.toLowerCase() === "li"
+            ) {
+              // Merge: drop the empty `<li>`, place caret at the
+              // logical end of the previous item so the next Enter
+              // builds a fresh sibling.
+              bsList.removeChild(bsBlock);
+              var bsRange = document.createRange();
+              var lastNode = prevLi.lastChild;
+              while (
+                lastNode &&
+                lastNode.nodeType === Node.ELEMENT_NODE &&
+                lastNode.firstChild
+              ) {
+                lastNode = lastNode.lastChild;
+              }
+              if (lastNode && lastNode.nodeType === Node.TEXT_NODE) {
+                bsRange.setStart(lastNode, lastNode.textContent.length);
+              } else {
+                bsRange.setStart(prevLi, prevLi.childNodes.length);
+              }
+              bsRange.collapse(true);
+              var bsSel = window.getSelection();
+              bsSel.removeAllRanges();
+              bsSel.addRange(bsRange);
+              this._visualEl.dispatchEvent(
+                new Event("input", { bubbles: true })
+              );
+              return;
+            }
+            // No previous list item — this is the only `<li>` in
+            // its list. Replace the whole list with a fresh `<p>`
+            // so the user can keep typing without getting stuck in
+            // an empty list.
+            var bsListParent = bsList && bsList.parentNode;
+            if (bsListParent) {
+              var bsP = document.createElement("p");
+              bsP.appendChild(document.createElement("br"));
+              bsListParent.replaceChild(bsP, bsList);
+              var bsRange2 = document.createRange();
+              bsRange2.setStart(bsP, 0);
+              bsRange2.collapse(true);
+              var bsSel2 = window.getSelection();
+              bsSel2.removeAllRanges();
+              bsSel2.addRange(bsRange2);
+              this._visualEl.dispatchEvent(
+                new Event("input", { bubbles: true })
+              );
+            }
+            return;
+          }
+        }
+      }
+
       // Hybrid source-mode Enter: split the block's source string at
       // the cursor offset, keep the first half in the original block
       // (which then exits source mode and renders), open a new
@@ -1504,6 +1584,92 @@
             document.execCommand("formatBlock", false, "p");
             return;
           }
+        }
+
+        // Enter inside an `<li>`: Chrome's default usually splits the
+        // item into a new sibling `<li>`, but after a prior list-exit
+        // (empty-item + Enter → `<p>`) or after editing operations
+        // that leave the list in an odd state, the default can fall
+        // through to a plain `<p>` instead. Handle the split manually
+        // so the list always continues — empty item still exits to a
+        // `<p>` below as expected.
+        if (block && block.tagName && block.tagName.toLowerCase() === "li") {
+          var liParent = block.parentNode;
+          var liText = (block.textContent || "").replace(/[​ ]/g, "").trim();
+          if (liText === "") {
+            // Standard "empty list item exits the list" UX. Convert
+            // the empty `<li>` to a `<p>` placed after the list.
+            e.preventDefault();
+            var liGrandparent = liParent && liParent.parentNode;
+            if (liGrandparent && liParent) {
+              var exitP = document.createElement("p");
+              exitP.appendChild(document.createElement("br"));
+              liGrandparent.insertBefore(exitP, liParent.nextSibling);
+              liParent.removeChild(block);
+              if (!liParent.firstChild) {
+                liGrandparent.removeChild(liParent);
+              }
+              var exitRange = document.createRange();
+              exitRange.setStart(exitP, 0);
+              exitRange.collapse(true);
+              var exitSel = window.getSelection();
+              exitSel.removeAllRanges();
+              exitSel.addRange(exitRange);
+              this._visualEl.dispatchEvent(
+                new Event("input", { bubbles: true })
+              );
+            }
+            return;
+          }
+          // Non-empty `<li>`: split at the cursor so content after the
+          // caret moves into a fresh sibling `<li>`.
+          e.preventDefault();
+          var liSel = window.getSelection();
+          var liRange = liSel.getRangeAt(0);
+          var newLi = document.createElement("li");
+          var afterRange = document.createRange();
+          afterRange.setStart(liRange.startContainer, liRange.startOffset);
+          afterRange.setEndAfter(block.lastChild || block);
+          var afterFragment = afterRange.extractContents();
+          newLi.appendChild(afterFragment);
+          // ZWSP placeholder — Chrome's caret affinity in an empty
+          // `<li>` with just a `<br>` filler tends to hide the cursor
+          // until the user types something (and the list-item number
+          // / bullet sometimes hides too). A zero-width-space text
+          // node gives the cursor a real text-node home so it renders
+          // immediately; the ZWSP is stripped from markdown output by
+          // the existing `_serializeBlockInline` / `htmlToMarkdown`
+          // scrubbers.
+          if (!newLi.firstChild) {
+            newLi.appendChild(document.createTextNode("​"));
+          }
+          liParent.insertBefore(newLi, block.nextSibling);
+          // If we left the source `<li>` empty, drop in a `<br>` so it
+          // still renders with height.
+          if (!block.firstChild) {
+            block.appendChild(document.createElement("br"));
+          }
+          var liNewRange = document.createRange();
+          var firstText = this._firstTextDescendant(newLi);
+          if (firstText) {
+            // Land cursor AFTER the ZWSP so the next keystroke types
+            // past it (the ZWSP is invisible but acts as the caret
+            // anchor until real text replaces the gap).
+            var offsetInText =
+              firstText.textContent === "​"
+                ? 1
+                : 0;
+            liNewRange.setStart(firstText, offsetInText);
+          } else {
+            liNewRange.setStart(newLi, 0);
+          }
+          liNewRange.collapse(true);
+          liSel.removeAllRanges();
+          liSel.addRange(liNewRange);
+          this._visualEl.dispatchEvent(
+            new Event("input", { bubbles: true })
+          );
+          return;
         }
       }
 
