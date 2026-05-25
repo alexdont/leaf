@@ -4232,13 +4232,67 @@
             appendPlain(host, segText.slice(pos, match.start), segOffset + pos);
           }
 
+          var p = match.pattern;
+          // Bold-italic — `***body***` — is the only pattern whose
+          // markers split across two nested wrappers (`**` on strong,
+          // `*` on em). Build it explicitly so each wrapper carries
+          // its own `<span class="leaf-source-marker">` children; the
+          // serializer's `_hasMarkerChildren` check then walks them
+          // verbatim instead of synthesizing extra `*`s around the
+          // em — which would otherwise compound `***body***` into
+          // `****body****` and onward on every refresh.
+          if (p.type === "boldItalic") {
+            var biAbsStart = segOffset + match.start;
+            var biAbsEnd = segOffset + match.end;
+            var biActive =
+              ancestorActive ||
+              (caretOffset >= biAbsStart && caretOffset <= biAbsEnd);
+            var biStrong = document.createElement("strong");
+            var biEm = document.createElement("em");
+            if (biActive) {
+              biStrong.classList.add("leaf-source-active");
+              biEm.classList.add("leaf-source-active");
+            }
+            // strong: opening `**` (chars 0–2 of the `***` delim).
+            appendMarker(
+              biStrong,
+              segText.slice(match.start, match.start + 2),
+              segOffset + match.start
+            );
+            biStrong.appendChild(biEm);
+            // em: opening `*` (3rd char of `***`).
+            appendMarker(
+              biEm,
+              segText.slice(match.start + 2, match.start + 3),
+              segOffset + match.start + 2
+            );
+            // Body recursed into em.
+            appendSegment(
+              biEm,
+              segText.slice(match.start + 3, match.end - 3),
+              segOffset + match.start + 3,
+              biActive
+            );
+            // em: closing `*`.
+            appendMarker(
+              biEm,
+              segText.slice(match.end - 3, match.end - 2),
+              segOffset + match.end - 3
+            );
+            // strong: closing `**`.
+            appendMarker(
+              biStrong,
+              segText.slice(match.end - 2, match.end),
+              segOffset + match.end - 2
+            );
+            host.appendChild(biStrong);
+            pos = match.end;
+            continue;
+          }
+
           var wrapper;
           var bodyHost;
-          var p = match.pattern;
-          if (p.type === "boldItalic") {
-            wrapper = document.createElement("strong");
-            bodyHost = document.createElement("em");
-          } else if (p.type === "link") {
+          if (p.type === "link") {
             wrapper = document.createElement("a");
             wrapper.setAttribute("href", match.href || "");
             bodyHost = wrapper;
