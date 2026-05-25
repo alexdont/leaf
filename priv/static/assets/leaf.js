@@ -4607,21 +4607,18 @@
       // ("createLink")`) or any other inline element that doesn't
       // round-trip through plain text — `_serializeBlockInline`
       // re-emits the markdown form (`[text](url)`, `**bold**`, etc.).
-      // The block's own marker spans (`.leaf-source-marker`) are
-      // filtered out by the same serializer so already-built source-
-      // mode blocks don't double their markers.
-      var origTag = this._sourceBlock.getAttribute("data-leaf-source") || "p";
-      var blockPrefix = this._blockSourcePrefix(origTag);
+      // For source-mode blocks the block-prefix marker (`#`, `# `,
+      // `## `, …) lives in a `<span class="leaf-source-marker">`
+      // child whose text content IS the marker; walking it emits the
+      // prefix exactly once, which is also why we don't prepend
+      // `_blockSourcePrefix` here — that'd double the `#`s.
       var trace = this._serializeBlockInline(
         this._sourceBlock,
         range.startContainer,
         range.startOffset
       );
-      // The serializer doesn't re-emit the heading prefix `# ` — the
-      // `.leaf-source-marker` containing it was skipped — so prepend
-      // it based on the `data-leaf-source` tag.
-      var sourceText = blockPrefix + trace.source;
-      var cursorOffset = blockPrefix.length + trace.cursorOffset;
+      var sourceText = trace.source;
+      var cursorOffset = trace.cursorOffset;
       var scan = this._scanSource(sourceText);
 
       // Walk every enclosing inline match (nesting-aware) so the active
