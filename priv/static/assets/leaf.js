@@ -2782,21 +2782,83 @@
     // Comparing client rects sidesteps both problems and naturally handles
     // multi-line wrapping.
     _isCursorOnFirstLineOfBlock: function (range, block) {
+      // Structural fast path: cursor at character-offset 0 of the
+      // block is always on the first line. Catches the `<p><br></p>`
+      // filler case where the collapsed range returns a zero rect.
+      if (this._cursorTextOffsetInBlock(range, block) === 0) return true;
+      // Single-line block fast path: if the block is no taller than
+      // roughly one line, every cursor position is on its only line.
+      // Saves us from rect-math fragility in the most common case
+      // (a heading or short paragraph next to an HR).
+      var lineHeight =
+        parseFloat(getComputedStyle(block).lineHeight) || 20;
+      if (block.getBoundingClientRect().height < lineHeight * 1.6) {
+        return true;
+      }
       var caretRect = this._caretRect(range);
       if (!caretRect) return false;
       var blockRect = block.getBoundingClientRect();
-      var lineHeight =
-        parseFloat(getComputedStyle(block).lineHeight) || 20;
       return caretRect.top - blockRect.top < lineHeight * 0.6;
     },
 
     _isCursorOnLastLineOfBlock: function (range, block) {
+      // Symmetric to `_isCursorOnFirstLineOfBlock`: cursor-at-end and
+      // single-line-block fast paths first, rect math as the multi-
+      // line fallback.
+      var totalText = (block.textContent || "").length;
+      if (this._cursorTextOffsetInBlock(range, block) === totalText) {
+        return true;
+      }
+      var lineHeight =
+        parseFloat(getComputedStyle(block).lineHeight) || 20;
+      if (block.getBoundingClientRect().height < lineHeight * 1.6) {
+        return true;
+      }
       var caretRect = this._caretRect(range);
       if (!caretRect) return false;
       var blockRect = block.getBoundingClientRect();
-      var lineHeight =
-        parseFloat(getComputedStyle(block).lineHeight) || 20;
       return blockRect.bottom - caretRect.bottom < lineHeight * 0.6;
+    },
+
+    // Count text characters between the start of `block` and the
+    // collapsed `range`'s start position. Element-offset cursors map
+    // to the position right before the indexed child. Returns -1 if
+    // the range start isn't inside `block`.
+    _cursorTextOffsetInBlock: function (range, block) {
+      if (!block.contains(range.startContainer) && range.startContainer !== block) {
+        return -1;
+      }
+      var offset = 0;
+      var target = range.startContainer;
+      var targetOffset = range.startOffset;
+      var found = false;
+      function walk(node) {
+        if (found) return;
+        if (node.nodeType === Node.TEXT_NODE) {
+          if (node === target) {
+            offset += targetOffset;
+            found = true;
+          } else {
+            offset += node.textContent.length;
+          }
+          return;
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+        var children = node.childNodes;
+        for (var i = 0; i < children.length; i++) {
+          if (node === target && targetOffset === i) {
+            found = true;
+            return;
+          }
+          walk(children[i]);
+          if (found) return;
+        }
+        if (node === target && targetOffset === children.length) {
+          found = true;
+        }
+      }
+      walk(block);
+      return found ? offset : -1;
     },
 
     // A collapsed range often returns a zero-sized rect — especially in
