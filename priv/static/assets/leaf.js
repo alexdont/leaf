@@ -809,6 +809,10 @@
       this._debounceTimer = null;
       this._markdownDebounceTimer = null;
       this._htmlDebounceTimer = null;
+      // Hybrid source-block engine state: the block currently swapped
+      // to its markdown-source `<p data-leaf-source="...">` form. Null
+      // when the cursor isn't inside an editable block.
+      this._sourceBlock = null;
 
       this._visualEl = this.el.querySelector("[data-editor-visual]");
       this._visualWrapper = this.el.querySelector("[data-visual-wrapper]");
@@ -1215,13 +1219,15 @@
     _onVisualInput: function () {
       if (this._mode !== "visual" && this._mode !== "hybrid") return;
       this._dismissLinkPopover();
-      if (this._mode === "hybrid" && !this._syntaxMutating) {
-        this._maybeUnwrapTamperedFormatting();
-        this._maybeAutoFormat();
-        this._maybeAutoFormatHeading();
-        this._maybeAdjustHeadingLevel();
-        this._maybeAutoFormatHr();
-        this._maybeAutoFormatList();
+      // Hybrid mode: re-scan the open source block on every keystroke so
+      // the block visually retags itself the moment the user finishes a
+      // marker (`# ` → h1, `**bold**` → bold body, etc.) without waiting
+      // for the cursor to leave. The full render-to-HTML still happens
+      // on cursor-leave (`_exitSourceMode`); this is just a live
+      // re-tagging of `data-leaf-source` and a rebuild of the marker
+      // span / body-text split inside the block.
+      if (this._mode === "hybrid") {
+        this._refreshSourceBlock();
       }
       this._debouncedPushVisualChange();
       this._updateCounts();
@@ -1615,12 +1621,12 @@
       var self = this;
 
       if (from === "visual" || from === "hybrid") {
-        // Visual / hybrid both render into the same contenteditable.
-        // Decoration spans in hybrid are stripped by htmlToMarkdown via
-        // their `leaf-syntax-decoration` class, so the markdown branch
-        // round-trips cleanly. The html branch keeps decoration spans —
-        // strip them before handing to the html textarea so they don't
-        // leak into raw-HTML editing.
+        // Re-render any open source-mode block before serializing — the
+        // outgoing markdown / html / visual representations all expect
+        // the rendered form, not the literal-source `<p data-leaf-source>`
+        // intermediate. Cheap no-op when no block is open.
+        if (from === "hybrid") this._exitAllSourceMode();
+
         var visualHtml = this._visualEl ? this._visualEl.innerHTML : "";
 
         if (to === "markdown") {
@@ -1631,12 +1637,6 @@
           if (htmlTa) {
             htmlTa.value = this._stripDecorationSpans(visualHtml);
           }
-        } else if (from === "hybrid" && to === "visual") {
-          // Same contenteditable, but visual mode shouldn't show the
-          // hybrid cursor-anchoring `**` / `*` / `~~` / `||` / `# `
-          // decoration spans. Strip them in-place so the user sees the
-          // rendered formatting only.
-          this._stripDecorationSpansFromVisualEl();
         }
 
       } else if (from === "markdown") {
@@ -1910,21 +1910,16 @@
             self._visualEl.contains(sel.anchorNode)
           ) {
             self._updateToolbarState();
-            self._updateSyntaxDecorations();
-            self._updateHeadingDecoration();
-            self._maybeRestoreHrFromSource();
+            self._updateSourceBlock();
           } else if (document.activeElement !== self._visualEl) {
-            // Cursor is outside the editor AND focus is elsewhere — user
-            // genuinely left. Clear. If the cursor is transiently outside
-            // (e.g., right after a toolbar click) but focus is still on the
-            // editor, leave decorations alone so they survive long enough
-            // for the deferred refresh to take over.
-            self._clearSyntaxDecoration();
-            self._clearHeadingDecoration();
+            // Cursor genuinely left the editor — re-render any open source
+            // block so the user sees the rendered form. If focus is still
+            // on the editor (e.g., right after a toolbar click), leave the
+            // source block alone so it survives until focus actually moves.
+            self._exitAllSourceMode();
           }
         } else {
-          self._clearSyntaxDecoration();
-          self._clearHeadingDecoration();
+          self._exitAllSourceMode();
         }
       });
 
@@ -3700,6 +3695,581 @@
         return "||";
       }
       return null;
+    },
+
+    // -- Hybrid source-block engine --
+    //
+    // Replaces the old decoration-span approach. The model now is:
+    //   - The DOM stores rendered HTML for every block EXCEPT the one
+    //     currently containing the cursor (in hybrid mode).
+    //   - The cursor's block carries its markdown source as literal text
+    //     inside a `<p data-leaf-source="origTag">` wrapper. The user
+    //     edits the source freely; broken syntax (`#$ header`, half-
+    //     stripped `*test**`) stays as text and round-trips through
+    //     `htmlToMarkdown` as a plain `<p>`.
+    //   - On cursor-leave, the source text is parsed client-side and the
+    //     block is swapped back to its rendered form.
+    //
+    // Only one block at a time is in source mode (`this._sourceBlock`).
+    // Called from selectionchange.
+
+    // Editable blocks: paragraphs and headings carry text the user can
+    // edit as markdown source. Lists / blockquotes / pre / table cells
+    // are deferred for now and stay in rendered form even when the
+    // cursor is inside them.
+    _isSourceModeBlock: function (block) {
+      if (!block || !block.tagName) return false;
+      var tag = block.tagName.toLowerCase();
+      return (
+        tag === "p" || tag === "h1" || tag === "h2" || tag === "h3" ||
+        tag === "h4" || tag === "h5" || tag === "h6"
+      );
+    },
+
+    _updateSourceBlock: function () {
+      if (this._mode !== "hybrid") {
+        this._exitAllSourceMode();
+        return;
+      }
+      if (this._syntaxMutating) return;
+
+      var sel = window.getSelection();
+      if (!sel.rangeCount) {
+        this._exitAllSourceMode();
+        return;
+      }
+      var anchor = sel.anchorNode;
+      if (!anchor || !this._visualEl.contains(anchor)) return;
+
+      var block = this._getCurrentBlock();
+      // Cursor in the same block we already opened — no-op.
+      if (block && block === this._sourceBlock) return;
+
+      // Cursor moved to a different block; close out the old one first.
+      if (this._sourceBlock && this._sourceBlock.isConnected) {
+        this._exitSourceMode(this._sourceBlock);
+      }
+      this._sourceBlock = null;
+
+      if (block && this._isSourceModeBlock(block)) {
+        var newBlock = this._enterSourceMode(block);
+        if (newBlock) this._sourceBlock = newBlock;
+      }
+    },
+
+    _exitAllSourceMode: function () {
+      if (this._sourceBlock && this._sourceBlock.isConnected) {
+        this._exitSourceMode(this._sourceBlock);
+      }
+      this._sourceBlock = null;
+    },
+
+    // Convert `block` (rendered HTML) → `<p data-leaf-source="origTag">`
+    // containing its markdown source as plain text. Preserves the
+    // cursor's logical position by walking the block, accumulating
+    // source text, and recording the source-offset when we pass the
+    // cursor node.
+    _enterSourceMode: function (block) {
+      if (this._syntaxMutating) return null;
+      var sel = window.getSelection();
+      if (!sel.rangeCount) return null;
+      var range = sel.getRangeAt(0);
+
+      var origTag = block.tagName.toLowerCase();
+      var blockPrefix = this._blockSourcePrefix(origTag);
+      var trace = this._serializeBlockInline(
+        block,
+        range.startContainer,
+        range.startOffset
+      );
+
+      // Combine block prefix + inline source; shift marker ranges by
+      // the prefix length and add the prefix itself as a marker range.
+      var sourceText = blockPrefix + trace.source;
+      var caretOffset = blockPrefix.length + trace.cursorOffset;
+      var allMarkers = [];
+      if (blockPrefix.length > 0) {
+        allMarkers.push([0, blockPrefix.length]);
+      }
+      for (var i = 0; i < trace.markers.length; i++) {
+        var m = trace.markers[i];
+        allMarkers.push([m[0] + blockPrefix.length, m[1] + blockPrefix.length]);
+      }
+
+      var sourceBlock = document.createElement("p");
+      sourceBlock.setAttribute("data-leaf-source", origTag);
+
+      var caretTarget = null;
+      if (sourceText.length === 0) {
+        sourceBlock.innerHTML = "<br>";
+      } else {
+        // Build the source DOM as alternating plain-text and marker
+        // spans so CSS can fade just the markers while the body text
+        // inherits the block's heading / paragraph styling.
+        caretTarget = this._buildSourceFragment(
+          sourceBlock,
+          sourceText,
+          allMarkers,
+          caretOffset
+        );
+      }
+
+      this._syntaxMutating = true;
+      try {
+        block.parentNode.replaceChild(sourceBlock, block);
+
+        var newRange = document.createRange();
+        if (caretTarget && caretTarget.node) {
+          newRange.setStart(caretTarget.node, caretTarget.offset);
+        } else if (
+          sourceBlock.firstChild &&
+          sourceBlock.firstChild.nodeType === Node.TEXT_NODE
+        ) {
+          var clamped = Math.max(
+            0,
+            Math.min(caretOffset, sourceBlock.firstChild.textContent.length)
+          );
+          newRange.setStart(sourceBlock.firstChild, clamped);
+        } else {
+          newRange.setStart(sourceBlock, 0);
+        }
+        newRange.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(newRange);
+      } finally {
+        this._syntaxMutating = false;
+      }
+
+      return sourceBlock;
+    },
+
+    // Build the children of a source block from a flat source string
+    // plus marker ranges. Plain runs become text nodes; marker runs
+    // become `<span class="leaf-source-marker">` so CSS can fade them.
+    // Returns a `{ node, offset }` pointing at the DOM position that
+    // corresponds to `caretOffset` in the source string.
+    _buildSourceFragment: function (parent, sourceText, markers, caretOffset) {
+      var caretTarget = null;
+
+      function appendRun(text, isMarker) {
+        if (text.length === 0) return null;
+        var node;
+        if (isMarker) {
+          var span = document.createElement("span");
+          span.className = "leaf-source-marker";
+          span.appendChild(document.createTextNode(text));
+          parent.appendChild(span);
+          node = span.firstChild;
+        } else {
+          node = document.createTextNode(text);
+          parent.appendChild(node);
+        }
+        return node;
+      }
+
+      var sortedMarkers = markers.slice().sort(function (a, b) {
+        return a[0] - b[0];
+      });
+      var pos = 0;
+      for (var i = 0; i < sortedMarkers.length; i++) {
+        var m = sortedMarkers[i];
+        if (m[0] > pos) {
+          var run = sourceText.slice(pos, m[0]);
+          var node = appendRun(run, false);
+          if (
+            caretTarget === null &&
+            caretOffset >= pos &&
+            caretOffset <= m[0]
+          ) {
+            caretTarget = { node: node, offset: caretOffset - pos };
+          }
+        }
+        var markerRun = sourceText.slice(m[0], m[1]);
+        var markerNode = appendRun(markerRun, true);
+        if (
+          caretTarget === null &&
+          caretOffset >= m[0] &&
+          caretOffset <= m[1]
+        ) {
+          caretTarget = { node: markerNode, offset: caretOffset - m[0] };
+        }
+        pos = m[1];
+      }
+      if (pos < sourceText.length) {
+        var tailRun = sourceText.slice(pos);
+        var tailNode = appendRun(tailRun, false);
+        if (
+          caretTarget === null &&
+          caretOffset >= pos &&
+          caretOffset <= sourceText.length
+        ) {
+          caretTarget = { node: tailNode, offset: caretOffset - pos };
+        }
+      }
+
+      // Cursor past the end of the source (no run after the last marker
+      // contained it): fall back to the last node's end.
+      if (caretTarget === null && parent.lastChild) {
+        var last = parent.lastChild;
+        var textNode = last.nodeType === Node.TEXT_NODE ? last : last.firstChild;
+        if (textNode && textNode.nodeType === Node.TEXT_NODE) {
+          caretTarget = { node: textNode, offset: textNode.textContent.length };
+        }
+      }
+
+      return caretTarget;
+    },
+
+    _exitSourceMode: function (sourceBlock) {
+      if (!sourceBlock || !sourceBlock.parentNode) return;
+      if (this._syntaxMutating) return;
+
+      var sourceText = sourceBlock.textContent || "";
+      // Skip the placeholder `<br>` filler ZWSP that we'd left behind for
+      // a never-touched empty source block.
+      sourceText = sourceText.replace(/​/g, "");
+
+      var rendered = this._renderBlockFromSource(sourceText);
+
+      this._syntaxMutating = true;
+      try {
+        sourceBlock.parentNode.replaceChild(rendered, sourceBlock);
+      } finally {
+        this._syntaxMutating = false;
+      }
+    },
+
+    // Live re-evaluation of the currently-open source block. Called on
+    // every input so the block's `data-leaf-source` attribute (used by
+    // CSS to apply heading sizes etc.) and its marker-span layout track
+    // the source text as the user types. Preserves the cursor by
+    // recomputing its text-offset in the block before rebuilding.
+    _refreshSourceBlock: function () {
+      if (this._syntaxMutating) return;
+      if (!this._sourceBlock || !this._sourceBlock.isConnected) return;
+
+      var sel = window.getSelection();
+      if (!sel.rangeCount) return;
+      var range = sel.getRangeAt(0);
+      if (!this._sourceBlock.contains(range.startContainer)) return;
+
+      var cursorOffset = this._textOffsetInBlock(
+        this._sourceBlock,
+        range.startContainer,
+        range.startOffset
+      );
+      var sourceText = this._sourceBlock.textContent || "";
+      var scan = this._scanSource(sourceText);
+
+      this._syntaxMutating = true;
+      try {
+        this._sourceBlock.setAttribute("data-leaf-source", scan.kind);
+        while (this._sourceBlock.firstChild) {
+          this._sourceBlock.removeChild(this._sourceBlock.firstChild);
+        }
+        if (sourceText.length === 0) {
+          this._sourceBlock.innerHTML = "<br>";
+        } else {
+          var caretTarget = this._buildSourceFragment(
+            this._sourceBlock,
+            sourceText,
+            scan.markers,
+            cursorOffset
+          );
+          if (caretTarget && caretTarget.node) {
+            var newRange = document.createRange();
+            newRange.setStart(caretTarget.node, caretTarget.offset);
+            newRange.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(newRange);
+          }
+        }
+      } finally {
+        this._syntaxMutating = false;
+      }
+    },
+
+    // Compute the character offset within a block element that
+    // corresponds to (cursorNode, cursorOffset). Counts text characters
+    // depth-first; element-offset cursors map to the position right
+    // before the indexed child.
+    _textOffsetInBlock: function (block, cursorNode, cursorOffset) {
+      var offset = 0;
+      var found = false;
+
+      function walk(node) {
+        if (found) return;
+        if (node.nodeType === Node.TEXT_NODE) {
+          if (node === cursorNode) {
+            offset += cursorOffset;
+            found = true;
+          } else {
+            offset += node.textContent.length;
+          }
+          return;
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+        var children = node.childNodes;
+        for (var i = 0; i < children.length; i++) {
+          if (node === cursorNode && cursorOffset === i) {
+            found = true;
+            return;
+          }
+          walk(children[i]);
+          if (found) return;
+        }
+        if (node === cursorNode && cursorOffset === children.length) {
+          found = true;
+        }
+      }
+
+      walk(block);
+      return offset;
+    },
+
+    // Scan a source string and return `{ kind, markers }`. `kind` is the
+    // block-level tag ("p", "h1"–"h6"); `markers` is an array of
+    // `[start, end)` ranges marking the source-text positions that
+    // should be rendered as faded markers (block prefix + balanced
+    // inline delimiters).
+    _scanSource: function (text) {
+      // Normalize NBSP → space first. Chrome converts the typed trailing
+      // space after `## ` to U+00A0 inside the contenteditable; the
+      // heading regex below uses a literal space, so without the
+      // normalization the prefix only matches until the user happens
+      // to type a non-space character that flips NBSP back.
+      text = text.replace(/ /g, " ");
+      var kind = "p";
+      var markers = [];
+      var inlineText = text;
+      var inlineShift = 0;
+
+      // Detect leading `#`s (1-6, not followed by a 7th) optionally
+      // followed by a single space. We accept `##` *without* a trailing
+      // space so the block retags to h2 the moment the second `#` lands,
+      // not after the user types the space. The negative lookahead
+      // `(?!#)` makes the count exact — a 7-hash prefix leaves the
+      // block as a plain paragraph.
+      var headingMatch = text.match(/^(#{1,6})(?!#)( ?)/);
+      if (headingMatch) {
+        kind = "h" + headingMatch[1].length;
+        var prefixLen = headingMatch[0].length;
+        markers.push([0, prefixLen]);
+        inlineText = text.slice(prefixLen);
+        inlineShift = prefixLen;
+      }
+
+      var inlineMarkers = this._scanInlineMarkers(inlineText);
+      for (var i = 0; i < inlineMarkers.length; i++) {
+        markers.push([
+          inlineMarkers[i][0] + inlineShift,
+          inlineMarkers[i][1] + inlineShift
+        ]);
+      }
+
+      return { kind: kind, markers: markers };
+    },
+
+    // Find every balanced inline-delimiter pair (`**bold**`, `*it*`,
+    // `~~strike~~`, `||spoiler||`, `` `code` ``) inside `text`. Returns
+    // marker-only ranges (the delimiter chars at both ends; the body
+    // is left as plain text). Reuses the existing `_autoFormatPatterns`
+    // so lookbehind / lookahead rules stay consistent with the renderer.
+    _scanInlineMarkers: function (text) {
+      var markers = [];
+      var patterns = this._autoFormatPatterns;
+      for (var i = 0; i < patterns.length; i++) {
+        var p = patterns[i];
+        var delim;
+        if (p.type === "boldItalic") {
+          delim = "***";
+        } else {
+          delim = p.delim;
+        }
+        if (!delim) continue;
+        var flags = p.regexAny.flags;
+        if (flags.indexOf("g") === -1) flags += "g";
+        var re = new RegExp(p.regexAny.source, flags);
+        var m;
+        while ((m = re.exec(text)) !== null) {
+          if (m[0].length === 0) {
+            re.lastIndex++;
+            continue;
+          }
+          var start = m.index;
+          var end = start + m[0].length;
+          markers.push([start, start + delim.length]);
+          markers.push([end - delim.length, end]);
+        }
+      }
+      return markers;
+    },
+
+    // Markdown prefix for a block-level tag — heading hashes, etc. Empty
+    // for paragraphs since they have no leading marker.
+    _blockSourcePrefix: function (tag) {
+      if (tag === "h1") return "# ";
+      if (tag === "h2") return "## ";
+      if (tag === "h3") return "### ";
+      if (tag === "h4") return "#### ";
+      if (tag === "h5") return "##### ";
+      if (tag === "h6") return "###### ";
+      return "";
+    },
+
+    // Walk a block's children depth-first, emitting markdown source for
+    // inline content (text, `**bold**`, `*italic*`, `~~strike~~`,
+    // `` `code` ``, `||spoiler||`, `[link](url)`, soft-break `<br>` as
+    // `\n`). Tracks a cursor location: when we pass `cursorNode` at
+    // `cursorOffset`, record the corresponding source-text offset.
+    // Returns `{ source, cursorOffset }`. cursorOffset is the source
+    // offset (or `source.length` if the cursor wasn't found).
+    _serializeBlockInline: function (block, cursorNode, cursorOffset) {
+      var source = "";
+      var markers = [];
+      var cursorAt = -1;
+      var self = this;
+
+      function noteCursor(absOffset) {
+        if (cursorAt < 0) cursorAt = absOffset;
+      }
+
+      function pushMarker(text) {
+        var start = source.length;
+        source += text;
+        markers.push([start, source.length]);
+      }
+
+      function walk(node) {
+        var isElementCursor =
+          node === cursorNode && node.nodeType === Node.ELEMENT_NODE;
+        var children = node.childNodes;
+        for (var i = 0; i < children.length; i++) {
+          // Element-offset cursor lives BEFORE the child at this index.
+          // Record source.length right before we serialize that child.
+          if (isElementCursor && cursorOffset === i) {
+            noteCursor(source.length);
+          }
+          var c = children[i];
+
+          if (c.nodeType === Node.TEXT_NODE) {
+            if (c === cursorNode) {
+              noteCursor(source.length + cursorOffset);
+            }
+            // Strip cursor-anchoring ZWSPs / NBSPs the same way the old
+            // serializer did.
+            source += c.textContent
+              .replace(/​/g, "")
+              .replace(/ /g, " ");
+            continue;
+          }
+
+          if (c.nodeType !== Node.ELEMENT_NODE) continue;
+
+          var tag = c.tagName.toLowerCase();
+
+          // Skip decoration-span debris from any old DOM state.
+          if (
+            c.classList &&
+            c.classList.contains("leaf-syntax-decoration")
+          ) {
+            continue;
+          }
+
+          if (tag === "br") {
+            // A solo `<br>` is the layout placeholder for an empty
+            // block; emitting `\n` here would seed the source with a
+            // stray newline and break round-tripping. Skip it. Real
+            // soft-break `<br>`s inside non-empty paragraphs still
+            // emit `\n` so multi-line content survives.
+            var isPlaceholder =
+              node === block && children.length === 1;
+            if (isPlaceholder) {
+              continue;
+            }
+            if (
+              c.hasAttribute &&
+              c.hasAttribute("data-leaf-filler")
+            ) {
+              continue;
+            }
+            source += "\n";
+            continue;
+          }
+
+          if (tag === "a") {
+            var href = c.getAttribute("href") || "";
+            pushMarker("[");
+            walk(c);
+            pushMarker("](" + href + ")");
+            continue;
+          }
+
+          var delim = self._delimiterFor(c);
+          if (delim) {
+            pushMarker(delim);
+            walk(c);
+            pushMarker(delim);
+            continue;
+          }
+
+          // Unknown inline tag — recurse into it without wrapping.
+          walk(c);
+        }
+
+        // Element-offset cursor lands at the END (children.length).
+        if (isElementCursor && cursorOffset === children.length) {
+          noteCursor(source.length);
+        }
+      }
+
+      walk(block);
+      if (cursorAt < 0) cursorAt = source.length;
+      return {
+        source: source,
+        markers: markers,
+        cursorOffset: cursorAt
+      };
+    },
+
+    // Parse a markdown source line back into a rendered block element.
+    // Detects leading `#{1,6} ` for headings, `---` for HR, otherwise
+    // returns a `<p>` with inline markdown parsed via the existing
+    // `_buildFormattedFragment`. Broken syntax (no closing delim, weird
+    // prefix like `#$ `) just stays as plain text inside a `<p>` — no
+    // healing.
+    _renderBlockFromSource: function (sourceText) {
+      // Normalize NBSP → regular space first. Chrome auto-converts the
+      // typed trailing space inside a contenteditable to U+00A0, which
+      // otherwise breaks the heading regex (the literal ` ` doesn't
+      // match NBSP) and drops the rendered block back to a plain `<p>`.
+      var text = sourceText.replace(/ /g, " ");
+      var tagName = "p";
+
+      // Heading: leading `#`s (1-6, no 7th) optionally followed by a
+      // single space. Matches the same `_scanSource` regex so the
+      // live-edit display and the rendered form agree — typing `##h`
+      // still exits to `<h2>h</h2>`, not `<p>##h</p>`.
+      var headingMatch = text.match(/^(#{1,6})(?!#) ?(.*)$/);
+      if (headingMatch) {
+        tagName = "h" + headingMatch[1].length;
+        text = headingMatch[2];
+      }
+
+      // Horizontal rule (only when the source block is *exactly* the
+      // dashes). Otherwise treat as plain text.
+      if (sourceText.match(/^-{3,}$/)) {
+        return document.createElement("hr");
+      }
+
+      var block = document.createElement(tagName);
+      var nodes = this._buildFormattedFragment(text);
+      for (var i = 0; i < nodes.length; i++) block.appendChild(nodes[i]);
+
+      if (!block.firstChild) {
+        block.innerHTML = "<br>";
+      }
+      return block;
     },
 
     _addDelimitersTo: function (el) {

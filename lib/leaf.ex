@@ -1190,6 +1190,56 @@ defmodule Leaf do
       transform: translateY(-50%);
     }
 
+    /* Hybrid source mode: a block whose cursor is inside it gets swapped
+       for a `<p data-leaf-source="origTag">` carrying its markdown source
+       as literal text. Markers (`#`, `**`, `*`, etc.) are wrapped in
+       `<span class="leaf-source-marker">` so they can be faded; the
+       block itself inherits the visual weight of its original tag so a
+       heading still looks like a heading while you're editing the
+       source. */
+    .content-editor-visual [data-leaf-source] {
+      /* Inline-block keeps the source block on a single line for inline
+         tags but still flows like a paragraph in the editor. */
+    }
+    .content-editor-visual [data-leaf-source="h1"] {
+      font-size: 2em;
+      font-weight: 700;
+      line-height: 1.2;
+      margin: 0.67em 0;
+    }
+    .content-editor-visual [data-leaf-source="h2"] {
+      font-size: 1.5em;
+      font-weight: 700;
+      line-height: 1.25;
+      margin: 0.83em 0;
+    }
+    .content-editor-visual [data-leaf-source="h3"] {
+      font-size: 1.25em;
+      font-weight: 700;
+      line-height: 1.3;
+      margin: 1em 0;
+    }
+    .content-editor-visual [data-leaf-source="h4"] {
+      font-size: 1em;
+      font-weight: 700;
+      line-height: 1.35;
+      margin: 1.33em 0;
+    }
+    .content-editor-visual [data-leaf-source="h5"] {
+      font-size: 0.85em;
+      font-weight: 700;
+      margin: 1.67em 0;
+    }
+    .content-editor-visual [data-leaf-source="h6"] {
+      font-size: 0.75em;
+      font-weight: 700;
+      margin: 2.33em 0;
+    }
+    .content-editor-visual .leaf-source-marker {
+      opacity: 0.4;
+      font-weight: inherit;
+    }
+
     """
   end
 
