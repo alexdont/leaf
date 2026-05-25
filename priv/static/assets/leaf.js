@@ -1238,6 +1238,28 @@
 
       var mod = e.ctrlKey || e.metaKey;
 
+      // Hybrid source-mode Backspace / Delete: operate on the block's
+      // markdown source string directly instead of trusting Chrome's
+      // contenteditable deletion. Chrome's Backspace at the boundary
+      // between a `<strong>` (or other inline) wrapper and adjacent
+      // text eats a char OUT of the wrapper's hidden marker span
+      // (the closing `**`), which silently breaks the match — even
+      // though the user expected to delete a normal text char like a
+      // space. Source-string deletion is predictable: take one char
+      // off either side of the cursor's text-offset, rebuild.
+      if (
+        this._mode === "hybrid" &&
+        !mod &&
+        (e.key === "Backspace" || e.key === "Delete") &&
+        this._sourceBlock &&
+        this._sourceBlock.isConnected
+      ) {
+        if (this._maybeHandleSourceDelete(e.key === "Backspace")) {
+          e.preventDefault();
+          return;
+        }
+      }
+
       // Hybrid: if the cursor is logically past the bolded body (inside the
       // trailing decoration block, at the wrapper end, etc.) and the user
       // is about to insert a character, intercept and insert the char
@@ -3763,6 +3785,84 @@
         var newBlock = this._enterSourceMode(block);
         if (newBlock) this._sourceBlock = newBlock;
       }
+    },
+
+    // Source-mode Backspace / Delete: delete one char of the block's
+    // source string at the cursor's text-offset, then let
+    // `_refreshSourceBlock` rebuild the marker / wrapper structure from
+    // the new source. Returns true if it consumed the keystroke.
+    // Non-collapsed selections fall through so the browser's default
+    // selection delete still works (covers most click+drag delete).
+    _maybeHandleSourceDelete: function (backspace) {
+      var sel = window.getSelection();
+      if (!sel.rangeCount) return false;
+      var range = sel.getRangeAt(0);
+      if (!range.collapsed) return false;
+      if (!this._sourceBlock.contains(range.startContainer)) return false;
+
+      var cursorOffset = this._textOffsetInBlock(
+        this._sourceBlock,
+        range.startContainer,
+        range.startOffset
+      );
+      var sourceText = this._sourceBlock.textContent || "";
+
+      var newSource;
+      var newCursor;
+      if (backspace) {
+        if (cursorOffset <= 0) return false;
+        newSource =
+          sourceText.slice(0, cursorOffset - 1) +
+          sourceText.slice(cursorOffset);
+        newCursor = cursorOffset - 1;
+      } else {
+        if (cursorOffset >= sourceText.length) return false;
+        newSource =
+          sourceText.slice(0, cursorOffset) +
+          sourceText.slice(cursorOffset + 1);
+        newCursor = cursorOffset;
+      }
+
+      this._syntaxMutating = true;
+      try {
+        while (this._sourceBlock.firstChild) {
+          this._sourceBlock.removeChild(this._sourceBlock.firstChild);
+        }
+        if (newSource.length === 0) {
+          this._sourceBlock.innerHTML = "<br>";
+        } else {
+          this._sourceBlock.appendChild(document.createTextNode(newSource));
+        }
+        var newRange = document.createRange();
+        if (
+          this._sourceBlock.firstChild &&
+          this._sourceBlock.firstChild.nodeType === Node.TEXT_NODE
+        ) {
+          var clamped = Math.max(
+            0,
+            Math.min(newCursor, this._sourceBlock.firstChild.textContent.length)
+          );
+          newRange.setStart(this._sourceBlock.firstChild, clamped);
+        } else {
+          newRange.setStart(this._sourceBlock, 0);
+        }
+        newRange.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(newRange);
+      } finally {
+        this._syntaxMutating = false;
+      }
+
+      // Force a rebuild — the manual mutation above didn't fire an input
+      // event, so the dedupe key isn't naturally invalidated. Also fire
+      // the same pushVisualChange / count-update path `_onVisualInput`
+      // would have triggered.
+      this._lastSourceStateKey = null;
+      this._activeMatchKey = null;
+      this._refreshSourceBlock();
+      this._debouncedPushVisualChange();
+      this._updateCounts();
+      return true;
     },
 
     _exitAllSourceMode: function () {
