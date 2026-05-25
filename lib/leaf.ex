@@ -1235,7 +1235,30 @@ defmodule Leaf do
       font-weight: 700;
       margin: 2.33em 0;
     }
-    .content-editor-visual .leaf-source-marker {
+    /* Markers come in two flavors:
+       1. Block prefix (heading `# `, etc.) — direct child of the source
+          block. Always visible while the block is in source mode, just
+          faded so the user can see what they typed.
+       2. Inline markers (`**`, `*`, `~~`, `||`, `` ` ``) — children of
+          the formatted element (`<strong>`, `<em>`, `<del>`, `<code>`,
+          `.leaf-spoiler`). Hidden by default so an inactive inline
+          match looks exactly like its rendered form; revealed (still
+          faded) when the wrapper carries `.leaf-source-active`, i.e.
+          the cursor's inside the match. */
+    .content-editor-visual [data-leaf-source] > .leaf-source-marker {
+      opacity: 0.4;
+      font-weight: inherit;
+    }
+    .content-editor-visual [data-leaf-source] strong .leaf-source-marker,
+    .content-editor-visual [data-leaf-source] em .leaf-source-marker,
+    .content-editor-visual [data-leaf-source] del .leaf-source-marker,
+    .content-editor-visual [data-leaf-source] s .leaf-source-marker,
+    .content-editor-visual [data-leaf-source] code .leaf-source-marker,
+    .content-editor-visual [data-leaf-source] .leaf-spoiler .leaf-source-marker {
+      display: none;
+    }
+    .content-editor-visual [data-leaf-source] .leaf-source-active > .leaf-source-marker {
+      display: inline;
       opacity: 0.4;
       font-weight: inherit;
     }

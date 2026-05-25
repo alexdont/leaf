@@ -3742,14 +3742,22 @@
       if (!anchor || !this._visualEl.contains(anchor)) return;
 
       var block = this._getCurrentBlock();
-      // Cursor in the same block we already opened — no-op.
-      if (block && block === this._sourceBlock) return;
+      // Cursor in the same block we already opened — re-run the
+      // refresh so the active-inline-match toggle tracks the cursor
+      // as it moves between formatted runs (`**bold**`, `*italic*`, …)
+      // and plain text in the same paragraph.
+      if (block && block === this._sourceBlock) {
+        this._refreshSourceBlock();
+        return;
+      }
 
       // Cursor moved to a different block; close out the old one first.
       if (this._sourceBlock && this._sourceBlock.isConnected) {
         this._exitSourceMode(this._sourceBlock);
       }
       this._sourceBlock = null;
+      this._lastSourceStateKey = null;
+      this._activeMatchKey = null;
 
       if (block && this._isSourceModeBlock(block)) {
         var newBlock = this._enterSourceMode(block);
@@ -3762,6 +3770,8 @@
         this._exitSourceMode(this._sourceBlock);
       }
       this._sourceBlock = null;
+      this._lastSourceStateKey = null;
+      this._activeMatchKey = null;
     },
 
     // Convert `block` (rendered HTML) → `<p data-leaf-source="origTag">`
@@ -3783,45 +3793,30 @@
         range.startOffset
       );
 
-      // Combine block prefix + inline source; shift marker ranges by
-      // the prefix length and add the prefix itself as a marker range.
       var sourceText = blockPrefix + trace.source;
       var caretOffset = blockPrefix.length + trace.cursorOffset;
-      var allMarkers = [];
-      if (blockPrefix.length > 0) {
-        allMarkers.push([0, blockPrefix.length]);
-      }
-      for (var i = 0; i < trace.markers.length; i++) {
-        var m = trace.markers[i];
-        allMarkers.push([m[0] + blockPrefix.length, m[1] + blockPrefix.length]);
-      }
 
+      // Drop a `<p data-leaf-source>` with just the raw source text as
+      // a single text node; `_refreshSourceBlock` (called immediately
+      // below) does the hybrid active/inactive split based on the new
+      // cursor position.
       var sourceBlock = document.createElement("p");
       sourceBlock.setAttribute("data-leaf-source", origTag);
-
-      var caretTarget = null;
       if (sourceText.length === 0) {
         sourceBlock.innerHTML = "<br>";
       } else {
-        // Build the source DOM as alternating plain-text and marker
-        // spans so CSS can fade just the markers while the body text
-        // inherits the block's heading / paragraph styling.
-        caretTarget = this._buildSourceFragment(
-          sourceBlock,
-          sourceText,
-          allMarkers,
-          caretOffset
-        );
+        sourceBlock.appendChild(document.createTextNode(sourceText));
       }
 
       this._syntaxMutating = true;
       try {
         block.parentNode.replaceChild(sourceBlock, block);
 
+        // Park the cursor at the text-content offset; `_refreshSourceBlock`
+        // will then convert that to the correct DOM target after it
+        // rebuilds with marker spans + rendered inactive matches.
         var newRange = document.createRange();
-        if (caretTarget && caretTarget.node) {
-          newRange.setStart(caretTarget.node, caretTarget.offset);
-        } else if (
+        if (
           sourceBlock.firstChild &&
           sourceBlock.firstChild.nodeType === Node.TEXT_NODE
         ) {
@@ -3840,6 +3835,10 @@
         this._syntaxMutating = false;
       }
 
+      this._sourceBlock = sourceBlock;
+      this._lastSourceStateKey = null;
+      this._refreshSourceBlock();
+
       return sourceBlock;
     },
 
@@ -3848,72 +3847,160 @@
     // become `<span class="leaf-source-marker">` so CSS can fade them.
     // Returns a `{ node, offset }` pointing at the DOM position that
     // corresponds to `caretOffset` in the source string.
-    _buildSourceFragment: function (parent, sourceText, markers, caretOffset) {
+    // Build the source-block's children from a source string + scan
+    // info + the index of the "active" inline match (cursor is inside
+    // it). The DOM structure is identical for active and inactive
+    // inline matches: each match becomes its formatted element
+    // (`<strong>`, `<em>`, …) wrapping `<span class="leaf-source-marker">`
+    // opening marker + body text + closing marker. CSS keys on the
+    // `.leaf-source-active` class to fade-in the markers for the
+    // active match and hide them for the inactive ones — so the
+    // source text (including `**`) is always present in textContent,
+    // and the formatting (`<strong>`) is always present in the DOM.
+    // Returns the caret target inside the new DOM.
+    _buildSourceFragment: function (
+      parent,
+      sourceText,
+      scan,
+      activeIdx,
+      caretOffset
+    ) {
       var caretTarget = null;
 
-      function appendRun(text, isMarker) {
-        if (text.length === 0) return null;
-        var node;
-        if (isMarker) {
-          var span = document.createElement("span");
-          span.className = "leaf-source-marker";
-          span.appendChild(document.createTextNode(text));
-          parent.appendChild(span);
-          node = span.firstChild;
+      function noteCaret(node, offset) {
+        if (caretTarget === null) caretTarget = { node: node, offset: offset };
+      }
+
+      function appendPlain(host, text, sourceStart) {
+        if (text.length === 0) return;
+        var node = document.createTextNode(text);
+        host.appendChild(node);
+        if (
+          caretTarget === null &&
+          caretOffset >= sourceStart &&
+          caretOffset <= sourceStart + text.length
+        ) {
+          noteCaret(node, caretOffset - sourceStart);
+        }
+      }
+
+      function appendMarker(host, text, sourceStart) {
+        if (text.length === 0) return;
+        var span = document.createElement("span");
+        span.className = "leaf-source-marker";
+        var textNode = document.createTextNode(text);
+        span.appendChild(textNode);
+        host.appendChild(span);
+        if (
+          caretTarget === null &&
+          caretOffset >= sourceStart &&
+          caretOffset <= sourceStart + text.length
+        ) {
+          noteCaret(textNode, caretOffset - sourceStart);
+        }
+      }
+
+      // Block prefix (heading hashes + trailing space).
+      if (scan.blockPrefixLen > 0) {
+        appendMarker(parent, sourceText.slice(0, scan.blockPrefixLen), 0);
+      }
+
+      var pos = scan.blockPrefixLen;
+      var matches = scan.inlineMatches;
+      for (var i = 0; i < matches.length; i++) {
+        var match = matches[i];
+
+        // Plain text gap before the match.
+        if (match.start > pos) {
+          appendPlain(parent, sourceText.slice(pos, match.start), pos);
+        }
+
+        // Build the formatted wrapper. Markers ALWAYS live inside it;
+        // CSS shows/hides them based on `.leaf-source-active`.
+        var wrapper;
+        var bodyHost;
+        var p = match.pattern;
+        if (p.type === "boldItalic") {
+          wrapper = document.createElement("strong");
+          bodyHost = document.createElement("em");
+          wrapper.appendChild(bodyHost);
+        } else if (p.isSpoiler) {
+          wrapper = document.createElement("span");
+          wrapper.classList.add("leaf-spoiler");
+          bodyHost = wrapper;
         } else {
-          node = document.createTextNode(text);
-          parent.appendChild(node);
+          wrapper = document.createElement(p.tag);
+          bodyHost = wrapper;
         }
-        return node;
+        if (i === activeIdx) wrapper.classList.add("leaf-source-active");
+
+        // For `boldItalic` the opening / closing markers live on the
+        // outer `<strong>` so the marker spans are direct children of
+        // the `.leaf-source-active` wrapper that the CSS selector keys
+        // on. The body goes inside the inner `<em>`.
+        var openEnd = match.start + match.delim.length;
+        var closeStart = match.end - match.delim.length;
+        appendMarker(
+          wrapper,
+          sourceText.slice(match.start, openEnd),
+          match.start
+        );
+        // For non-boldItalic the body host IS the wrapper, so we
+        // need to keep marker children at the wrapper boundary. The
+        // body text goes between the two marker spans.
+        if (bodyHost === wrapper) {
+          appendPlain(
+            bodyHost,
+            sourceText.slice(openEnd, closeStart),
+            openEnd
+          );
+          appendMarker(
+            wrapper,
+            sourceText.slice(closeStart, match.end),
+            closeStart
+          );
+        } else {
+          // boldItalic: body sits inside the nested `<em>`. The
+          // outer `<strong>` carries the markers (so the CSS
+          // selector `.leaf-source-active > .leaf-source-marker`
+          // matches them). The `<em>` was already appended above
+          // before the opening marker — move it after the marker.
+          wrapper.appendChild(bodyHost);
+          appendPlain(
+            bodyHost,
+            sourceText.slice(openEnd, closeStart),
+            openEnd
+          );
+          appendMarker(
+            wrapper,
+            sourceText.slice(closeStart, match.end),
+            closeStart
+          );
+        }
+
+        parent.appendChild(wrapper);
+        pos = match.end;
       }
 
-      var sortedMarkers = markers.slice().sort(function (a, b) {
-        return a[0] - b[0];
-      });
-      var pos = 0;
-      for (var i = 0; i < sortedMarkers.length; i++) {
-        var m = sortedMarkers[i];
-        if (m[0] > pos) {
-          var run = sourceText.slice(pos, m[0]);
-          var node = appendRun(run, false);
-          if (
-            caretTarget === null &&
-            caretOffset >= pos &&
-            caretOffset <= m[0]
-          ) {
-            caretTarget = { node: node, offset: caretOffset - pos };
-          }
-        }
-        var markerRun = sourceText.slice(m[0], m[1]);
-        var markerNode = appendRun(markerRun, true);
-        if (
-          caretTarget === null &&
-          caretOffset >= m[0] &&
-          caretOffset <= m[1]
-        ) {
-          caretTarget = { node: markerNode, offset: caretOffset - m[0] };
-        }
-        pos = m[1];
-      }
+      // Trailing plain text after the last match.
       if (pos < sourceText.length) {
-        var tailRun = sourceText.slice(pos);
-        var tailNode = appendRun(tailRun, false);
-        if (
-          caretTarget === null &&
-          caretOffset >= pos &&
-          caretOffset <= sourceText.length
-        ) {
-          caretTarget = { node: tailNode, offset: caretOffset - pos };
-        }
+        appendPlain(parent, sourceText.slice(pos), pos);
       }
 
-      // Cursor past the end of the source (no run after the last marker
-      // contained it): fall back to the last node's end.
+      // Cursor past everything we placed (typically end of block).
       if (caretTarget === null && parent.lastChild) {
         var last = parent.lastChild;
-        var textNode = last.nodeType === Node.TEXT_NODE ? last : last.firstChild;
-        if (textNode && textNode.nodeType === Node.TEXT_NODE) {
-          caretTarget = { node: textNode, offset: textNode.textContent.length };
+        var textNode =
+          last.nodeType === Node.TEXT_NODE
+            ? last
+            : last.firstChild && last.firstChild.nodeType === Node.TEXT_NODE
+              ? last.firstChild
+              : null;
+        if (textNode) {
+          caretTarget = {
+            node: textNode,
+            offset: textNode.textContent.length
+          };
         }
       }
 
@@ -3940,10 +4027,16 @@
     },
 
     // Live re-evaluation of the currently-open source block. Called on
-    // every input so the block's `data-leaf-source` attribute (used by
-    // CSS to apply heading sizes etc.) and its marker-span layout track
-    // the source text as the user types. Preserves the cursor by
-    // recomputing its text-offset in the block before rebuilding.
+    // every input AND on cursor moves within the block, so the block:
+    //   1. Retags itself (`data-leaf-source="h2"` etc.) the instant the
+    //      leading `#`s change — heading styles update live.
+    //   2. Shows source markers (`**`, `*`, …) ONLY for the inline range
+    //      the cursor is currently inside; other inline ranges render
+    //      as their formatted element (`<strong>`, `<em>`, …) just
+    //      like they will after exit.
+    // Skips the rebuild when nothing user-visible would change (same
+    // text, same active range) so cursor moves within a single
+    // text-segment don't churn the DOM.
     _refreshSourceBlock: function () {
       if (this._syntaxMutating) return;
       if (!this._sourceBlock || !this._sourceBlock.isConnected) return;
@@ -3961,6 +4054,57 @@
       var sourceText = this._sourceBlock.textContent || "";
       var scan = this._scanSource(sourceText);
 
+      // Pick the active inline match: the one (if any) that contains
+      // the cursor. Strict `start <= cursor <= end` so a cursor at the
+      // exact boundary "sticks" to the match it just exited (less
+      // flicker) — moving one more char past the closing marker
+      // switches to the next neighbor.
+      var activeIdx = -1;
+      for (var i = 0; i < scan.inlineMatches.length; i++) {
+        var m = scan.inlineMatches[i];
+        if (cursorOffset >= m.start && cursorOffset <= m.end) {
+          activeIdx = i;
+          break;
+        }
+      }
+
+      // Symmetric-entry snap: when arrow-key navigation crosses INTO an
+      // inactive match, the browser skips over the hidden markers and
+      // lands the cursor exactly at the body boundary (body offset 0 from
+      // the left, or body's last offset from the right). That makes one
+      // keypress eat all `delim.length` `*` stops on that side. Detect
+      // this case (active match just changed AND cursor sits at a body
+      // boundary) and snap to JUST OUTSIDE the wrapper instead — the
+      // user sees the markers appear with the cursor still at the same
+      // visual spot, then each subsequent arrow press walks one `*`.
+      var activeKey =
+        activeIdx >= 0
+          ? scan.inlineMatches[activeIdx].start +
+            "-" +
+            scan.inlineMatches[activeIdx].end
+          : "";
+      if (activeIdx >= 0 && activeKey !== this._activeMatchKey) {
+        var enteredMatch = scan.inlineMatches[activeIdx];
+        var bs = enteredMatch.start + enteredMatch.delim.length;
+        var be = enteredMatch.end - enteredMatch.delim.length;
+        if (cursorOffset === bs) {
+          cursorOffset = enteredMatch.start;
+        } else if (cursorOffset === be) {
+          cursorOffset = enteredMatch.end;
+        }
+        // activeIdx STAYS — the match is still "near" the cursor and we
+        // want the markers to remain visible at the boundary so the
+        // user can navigate into them.
+      }
+      this._activeMatchKey = activeKey;
+
+      // Cheap dedupe: same kind + same active range + same source text
+      // means the DOM we'd build is identical to what's already there.
+      // Cursor moves within a single segment land here every time.
+      var stateKey = scan.kind + "|" + activeKey + "|" + sourceText;
+      if (stateKey === this._lastSourceStateKey) return;
+      this._lastSourceStateKey = stateKey;
+
       this._syntaxMutating = true;
       try {
         this._sourceBlock.setAttribute("data-leaf-source", scan.kind);
@@ -3973,7 +4117,8 @@
           var caretTarget = this._buildSourceFragment(
             this._sourceBlock,
             sourceText,
-            scan.markers,
+            scan,
+            activeIdx,
             cursorOffset
           );
           if (caretTarget && caretTarget.node) {
@@ -4040,9 +4185,7 @@
       // to type a non-space character that flips NBSP back.
       text = text.replace(/ /g, " ");
       var kind = "p";
-      var markers = [];
-      var inlineText = text;
-      var inlineShift = 0;
+      var blockPrefixLen = 0;
 
       // Detect leading `#`s (1-6, not followed by a 7th) optionally
       // followed by a single space. We accept `##` *without* a trailing
@@ -4053,39 +4196,35 @@
       var headingMatch = text.match(/^(#{1,6})(?!#)( ?)/);
       if (headingMatch) {
         kind = "h" + headingMatch[1].length;
-        var prefixLen = headingMatch[0].length;
-        markers.push([0, prefixLen]);
-        inlineText = text.slice(prefixLen);
-        inlineShift = prefixLen;
+        blockPrefixLen = headingMatch[0].length;
       }
 
-      var inlineMarkers = this._scanInlineMarkers(inlineText);
-      for (var i = 0; i < inlineMarkers.length; i++) {
-        markers.push([
-          inlineMarkers[i][0] + inlineShift,
-          inlineMarkers[i][1] + inlineShift
-        ]);
+      var inlineMatches = this._scanInlineMatches(text.slice(blockPrefixLen));
+      // Shift positions to absolute (within the block's full source).
+      for (var i = 0; i < inlineMatches.length; i++) {
+        inlineMatches[i].start += blockPrefixLen;
+        inlineMatches[i].end += blockPrefixLen;
       }
 
-      return { kind: kind, markers: markers };
+      return {
+        kind: kind,
+        blockPrefixLen: blockPrefixLen,
+        inlineMatches: inlineMatches
+      };
     },
 
-    // Find every balanced inline-delimiter pair (`**bold**`, `*it*`,
-    // `~~strike~~`, `||spoiler||`, `` `code` ``) inside `text`. Returns
-    // marker-only ranges (the delimiter chars at both ends; the body
-    // is left as plain text). Reuses the existing `_autoFormatPatterns`
-    // so lookbehind / lookahead rules stay consistent with the renderer.
-    _scanInlineMarkers: function (text) {
-      var markers = [];
+    // Find every balanced inline-delimiter match (`**bold**`, `*it*`,
+    // `~~strike~~`, `||spoiler||`, `` `code` ``, `***bi***`) inside
+    // `text`. Returns non-overlapping match records sorted by start
+    // position. Each record carries enough info (delim, pattern, body)
+    // to render the match either as source-with-markers (when active)
+    // or as the formatted element (when inactive).
+    _scanInlineMatches: function (text) {
+      var candidates = [];
       var patterns = this._autoFormatPatterns;
       for (var i = 0; i < patterns.length; i++) {
         var p = patterns[i];
-        var delim;
-        if (p.type === "boldItalic") {
-          delim = "***";
-        } else {
-          delim = p.delim;
-        }
+        var delim = p.type === "boldItalic" ? "***" : p.delim;
         if (!delim) continue;
         var flags = p.regexAny.flags;
         if (flags.indexOf("g") === -1) flags += "g";
@@ -4096,13 +4235,31 @@
             re.lastIndex++;
             continue;
           }
-          var start = m.index;
-          var end = start + m[0].length;
-          markers.push([start, start + delim.length]);
-          markers.push([end - delim.length, end]);
+          candidates.push({
+            start: m.index,
+            end: m.index + m[0].length,
+            delim: delim,
+            pattern: p,
+            body: m[1]
+          });
         }
       }
-      return markers;
+      // Sort by start, prefer longer delims at the same start so
+      // boldItalic (`***`) wins over strong (`**`).
+      candidates.sort(function (a, b) {
+        if (a.start !== b.start) return a.start - b.start;
+        return b.delim.length - a.delim.length;
+      });
+      // Drop overlapping matches (first-found wins).
+      var out = [];
+      var lastEnd = 0;
+      for (var k = 0; k < candidates.length; k++) {
+        if (candidates[k].start >= lastEnd) {
+          out.push(candidates[k]);
+          lastEnd = candidates[k].end;
+        }
+      }
+      return out;
     },
 
     // Markdown prefix for a block-level tag — heading hashes, etc. Empty
