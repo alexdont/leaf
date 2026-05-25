@@ -1193,8 +1193,15 @@ defmodule Leaf do
     """
   end
 
-  defp markdown_to_html(nil), do: ""
-  defp markdown_to_html(""), do: ""
+  # Empty content still emits a `<p><br></p>` paragraph so the
+  # contenteditable starts with the right block wrapper on first paint —
+  # without it, the user can click in and start typing before the JS
+  # hook's `mounted()` callback runs the same fixup, and their first
+  # characters end up as bare text inside the editor div (no `<p>`).
+  # That breaks the hybrid auto-format helpers (`_maybeAutoFormatHeading`
+  # & co.) which require the current block to be a `<p>`.
+  defp markdown_to_html(nil), do: "<p><br></p>"
+  defp markdown_to_html(""), do: "<p><br></p>"
 
   defp markdown_to_html(markdown) do
     case Earmark.as_html(markdown, breaks: true) do
