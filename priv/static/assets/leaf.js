@@ -3862,10 +3862,10 @@
       parent,
       sourceText,
       scan,
-      activeIdx,
       caretOffset
     ) {
       var caretTarget = null;
+      var self = this;
 
       function noteCaret(node, offset) {
         if (caretTarget === null) caretTarget = { node: node, offset: offset };
@@ -3905,87 +3905,92 @@
         appendMarker(parent, sourceText.slice(0, scan.blockPrefixLen), 0);
       }
 
-      var pos = scan.blockPrefixLen;
-      var matches = scan.inlineMatches;
-      for (var i = 0; i < matches.length; i++) {
-        var match = matches[i];
+      // Render the rest of the source text recursively so nested
+      // matches (e.g. `**bold**` inside `~~..~~`) build the right
+      // ancestor chain. A wrapper is "active" (markers shown) when
+      // the cursor is in its own range OR when any ancestor wrapper
+      // is active — that way a cursor anywhere inside `~~..~~` keeps
+      // both its `~~` markers AND the nested `**` markers visible,
+      // so arrow-key navigation can step through every delimiter
+      // char without the inner markers blinking out as the cursor
+      // crosses an outer marker boundary.
+      function appendSegment(host, segText, segOffset, ancestorActive) {
+        var matches = self._scanInlineMatches(segText);
+        var pos = 0;
+        for (var i = 0; i < matches.length; i++) {
+          var match = matches[i];
+          if (match.start > pos) {
+            appendPlain(host, segText.slice(pos, match.start), segOffset + pos);
+          }
 
-        // Plain text gap before the match.
-        if (match.start > pos) {
-          appendPlain(parent, sourceText.slice(pos, match.start), pos);
-        }
+          var wrapper;
+          var bodyHost;
+          var p = match.pattern;
+          if (p.type === "boldItalic") {
+            wrapper = document.createElement("strong");
+            bodyHost = document.createElement("em");
+          } else if (p.isSpoiler) {
+            wrapper = document.createElement("span");
+            wrapper.classList.add("leaf-spoiler");
+            bodyHost = wrapper;
+          } else {
+            wrapper = document.createElement(p.tag);
+            bodyHost = wrapper;
+          }
 
-        // Build the formatted wrapper. Markers ALWAYS live inside it;
-        // CSS shows/hides them based on `.leaf-source-active`.
-        var wrapper;
-        var bodyHost;
-        var p = match.pattern;
-        if (p.type === "boldItalic") {
-          wrapper = document.createElement("strong");
-          bodyHost = document.createElement("em");
-          wrapper.appendChild(bodyHost);
-        } else if (p.isSpoiler) {
-          wrapper = document.createElement("span");
-          wrapper.classList.add("leaf-spoiler");
-          bodyHost = wrapper;
-        } else {
-          wrapper = document.createElement(p.tag);
-          bodyHost = wrapper;
-        }
-        if (i === activeIdx) wrapper.classList.add("leaf-source-active");
+          var absStart = segOffset + match.start;
+          var absEnd = segOffset + match.end;
+          var isActive =
+            ancestorActive ||
+            (caretOffset >= absStart && caretOffset <= absEnd);
+          if (isActive) {
+            wrapper.classList.add("leaf-source-active");
+          }
 
-        // For `boldItalic` the opening / closing markers live on the
-        // outer `<strong>` so the marker spans are direct children of
-        // the `.leaf-source-active` wrapper that the CSS selector keys
-        // on. The body goes inside the inner `<em>`.
-        var openEnd = match.start + match.delim.length;
-        var closeStart = match.end - match.delim.length;
-        appendMarker(
-          wrapper,
-          sourceText.slice(match.start, openEnd),
-          match.start
-        );
-        // For non-boldItalic the body host IS the wrapper, so we
-        // need to keep marker children at the wrapper boundary. The
-        // body text goes between the two marker spans.
-        if (bodyHost === wrapper) {
-          appendPlain(
-            bodyHost,
-            sourceText.slice(openEnd, closeStart),
-            openEnd
-          );
+          var openEnd = match.start + match.delim.length;
+          var closeStart = match.end - match.delim.length;
+
+          // Opening marker — direct child of the outer wrapper so
+          // CSS `.leaf-source-active > .leaf-source-marker` matches.
           appendMarker(
             wrapper,
-            sourceText.slice(closeStart, match.end),
-            closeStart
+            segText.slice(match.start, openEnd),
+            segOffset + match.start
           );
-        } else {
-          // boldItalic: body sits inside the nested `<em>`. The
-          // outer `<strong>` carries the markers (so the CSS
-          // selector `.leaf-source-active > .leaf-source-marker`
-          // matches them). The `<em>` was already appended above
-          // before the opening marker — move it after the marker.
-          wrapper.appendChild(bodyHost);
-          appendPlain(
+
+          // Body — recurse so a nested match like `~~**bold**~~`
+          // builds the `<strong>` (and its markers) inside the
+          // outer `<del>`. Pass `isActive` so descendants light up
+          // alongside their active ancestor.
+          if (bodyHost !== wrapper) wrapper.appendChild(bodyHost);
+          appendSegment(
             bodyHost,
-            sourceText.slice(openEnd, closeStart),
-            openEnd
+            segText.slice(openEnd, closeStart),
+            segOffset + openEnd,
+            isActive
           );
+
+          // Closing marker.
           appendMarker(
             wrapper,
-            sourceText.slice(closeStart, match.end),
-            closeStart
+            segText.slice(closeStart, match.end),
+            segOffset + closeStart
           );
+
+          host.appendChild(wrapper);
+          pos = match.end;
         }
-
-        parent.appendChild(wrapper);
-        pos = match.end;
+        if (pos < segText.length) {
+          appendPlain(host, segText.slice(pos), segOffset + pos);
+        }
       }
 
-      // Trailing plain text after the last match.
-      if (pos < sourceText.length) {
-        appendPlain(parent, sourceText.slice(pos), pos);
-      }
+      appendSegment(
+        parent,
+        sourceText.slice(scan.blockPrefixLen),
+        scan.blockPrefixLen,
+        false
+      );
 
       // Cursor past everything we placed (typically end of block).
       if (caretTarget === null && parent.lastChild) {
@@ -4054,51 +4059,41 @@
       var sourceText = this._sourceBlock.textContent || "";
       var scan = this._scanSource(sourceText);
 
-      // Pick the active inline match: the one (if any) that contains
-      // the cursor. Strict `start <= cursor <= end` so a cursor at the
-      // exact boundary "sticks" to the match it just exited (less
-      // flicker) — moving one more char past the closing marker
-      // switches to the next neighbor.
-      var activeIdx = -1;
-      for (var i = 0; i < scan.inlineMatches.length; i++) {
-        var m = scan.inlineMatches[i];
-        if (cursorOffset >= m.start && cursorOffset <= m.end) {
-          activeIdx = i;
-          break;
-        }
-      }
+      // Walk every enclosing inline match (nesting-aware) so the active
+      // path can drive both the marker reveal and the cursor-snap on
+      // arrow-key entry.
+      var activePath = this._findActiveInlinePath(
+        sourceText.slice(scan.blockPrefixLen),
+        scan.blockPrefixLen,
+        cursorOffset
+      );
 
-      // Symmetric-entry snap: when arrow-key navigation crosses INTO an
-      // inactive match, the browser skips over the hidden markers and
-      // lands the cursor exactly at the body boundary (body offset 0 from
-      // the left, or body's last offset from the right). That makes one
-      // keypress eat all `delim.length` `*` stops on that side. Detect
-      // this case (active match just changed AND cursor sits at a body
-      // boundary) and snap to JUST OUTSIDE the wrapper instead — the
-      // user sees the markers appear with the cursor still at the same
-      // visual spot, then each subsequent arrow press walks one `*`.
-      var activeKey =
-        activeIdx >= 0
-          ? scan.inlineMatches[activeIdx].start +
-            "-" +
-            scan.inlineMatches[activeIdx].end
-          : "";
-      if (activeIdx >= 0 && activeKey !== this._activeMatchKey) {
-        var enteredMatch = scan.inlineMatches[activeIdx];
-        var bs = enteredMatch.start + enteredMatch.delim.length;
-        var be = enteredMatch.end - enteredMatch.delim.length;
+      // Symmetric-entry snap: when arrow-key navigation crosses into an
+      // inactive nest of matches the browser skips over every hidden
+      // marker layer and lands the cursor exactly at the INNERMOST
+      // body boundary. One keypress eats every `*` / `~~` stop. Detect
+      // it (active group just changed AND cursor sits at innermost
+      // body boundary) and snap to JUST OUTSIDE the OUTERMOST wrapper.
+      // Active groups are keyed by their outermost match — every
+      // wrapper nested inside an active outermost is rendered active
+      // too (so a cursor anywhere in `~~..~~` shows both `~~` and the
+      // inner `**`), which means cursor moves within the same group
+      // don't churn the DOM.
+      var outermost = activePath.length > 0 ? activePath[0] : null;
+      var activeKey = outermost ? outermost.start + "-" + outermost.end : "";
+      if (activePath.length > 0 && activeKey !== this._activeMatchKey) {
+        var innermost = activePath[activePath.length - 1];
+        var bs = innermost.start + innermost.delim.length;
+        var be = innermost.end - innermost.delim.length;
         if (cursorOffset === bs) {
-          cursorOffset = enteredMatch.start;
+          cursorOffset = outermost.start;
         } else if (cursorOffset === be) {
-          cursorOffset = enteredMatch.end;
+          cursorOffset = outermost.end;
         }
-        // activeIdx STAYS — the match is still "near" the cursor and we
-        // want the markers to remain visible at the boundary so the
-        // user can navigate into them.
       }
       this._activeMatchKey = activeKey;
 
-      // Cheap dedupe: same kind + same active range + same source text
+      // Cheap dedupe: same kind + same active path + same source text
       // means the DOM we'd build is identical to what's already there.
       // Cursor moves within a single segment land here every time.
       var stateKey = scan.kind + "|" + activeKey + "|" + sourceText;
@@ -4118,7 +4113,6 @@
             this._sourceBlock,
             sourceText,
             scan,
-            activeIdx,
             cursorOffset
           );
           if (caretTarget && caretTarget.node) {
@@ -4211,6 +4205,42 @@
         blockPrefixLen: blockPrefixLen,
         inlineMatches: inlineMatches
       };
+    },
+
+    // Walk the inline-match tree the cursor sits in, outermost-first.
+    // For nesting like `~~**bold**~~` with the cursor on "bold" this
+    // returns [{del…}, {strong…}] so callers can build the active key,
+    // snap to the outermost boundary on arrow-key entry, etc. Each
+    // path entry carries absolute `start`/`end` positions (inside the
+    // full source string) plus `delim` and `pattern` from the scan.
+    _findActiveInlinePath: function (text, startOffset, caretOffset) {
+      var path = [];
+      var self = this;
+      function recurse(segText, segOffset) {
+        var matches = self._scanInlineMatches(segText);
+        for (var i = 0; i < matches.length; i++) {
+          var m = matches[i];
+          var absStart = segOffset + m.start;
+          var absEnd = segOffset + m.end;
+          if (caretOffset >= absStart && caretOffset <= absEnd) {
+            path.push({
+              start: absStart,
+              end: absEnd,
+              delim: m.delim,
+              pattern: m.pattern
+            });
+            var bodyStart = segOffset + m.start + m.delim.length;
+            var bodyText = segText.slice(
+              m.start + m.delim.length,
+              m.end - m.delim.length
+            );
+            recurse(bodyText, bodyStart);
+            return;
+          }
+        }
+      }
+      recurse(text, startOffset);
+      return path;
     },
 
     // Find every balanced inline-delimiter match (`**bold**`, `*it*`,
