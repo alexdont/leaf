@@ -2401,6 +2401,17 @@
         tag: "code",
         delim: "`",
       },
+      {
+        // Link: `[text](url)`. Asymmetric — opening marker is just `[`
+        // (1 char), closing marker is `](url)` (variable length).
+        // `delim` is left unset so the symmetric-delim code paths skip
+        // this pattern; the dedicated link branches in
+        // `_scanInlineMatches`, `_buildSourceFragment`, and
+        // `_buildFormattedFragment` populate `<a href="...">` instead.
+        regexAt: /\[([^\]\n]+?)\]\(([^)\s\n]+)\)$/,
+        regexAny: /\[([^\]\n]+?)\]\(([^)\s\n]+)\)/,
+        type: "link",
+      },
     ],
 
     _hasUnclosedOuterDelim: function (textBeforeMatch, currentPattern) {
@@ -2463,7 +2474,13 @@
       var afterText = text.slice(earliest.index + earliest[0].length);
       var innerText = earliest[1];
 
-      var wrapper = this._createAutoFormatWrapper(earliestPattern);
+      var wrapper;
+      if (earliestPattern.type === "link") {
+        wrapper = document.createElement("a");
+        wrapper.setAttribute("href", earliest[2] || "");
+      } else {
+        wrapper = this._createAutoFormatWrapper(earliestPattern);
+      }
       var innerHost =
         earliestPattern.type === "boldItalic" ? wrapper.firstChild : wrapper;
       var innerNodes = this._buildFormattedFragment(innerText);
@@ -3818,6 +3835,25 @@
       return null;
     },
 
+    // True when `el` has at least one direct child carrying the
+    // `.leaf-source-marker` class — i.e. it's a wrapper built by
+    // `_buildSourceFragment` whose marker text is already in the DOM
+    // and shouldn't be synthesized again by the inline serializer.
+    _hasMarkerChildren: function (el) {
+      if (!el || !el.childNodes) return false;
+      for (var i = 0; i < el.childNodes.length; i++) {
+        var c = el.childNodes[i];
+        if (
+          c.nodeType === Node.ELEMENT_NODE &&
+          c.classList &&
+          c.classList.contains("leaf-source-marker")
+        ) {
+          return true;
+        }
+      }
+      return false;
+    },
+
     // -- Hybrid source-block engine --
     //
     // Replaces the old decoration-span approach. The model now is:
@@ -4202,6 +4238,10 @@
           if (p.type === "boldItalic") {
             wrapper = document.createElement("strong");
             bodyHost = document.createElement("em");
+          } else if (p.type === "link") {
+            wrapper = document.createElement("a");
+            wrapper.setAttribute("href", match.href || "");
+            bodyHost = wrapper;
           } else if (p.isSpoiler) {
             wrapper = document.createElement("span");
             wrapper.classList.add("leaf-spoiler");
@@ -4220,8 +4260,10 @@
             wrapper.classList.add("leaf-source-active");
           }
 
-          var openEnd = match.start + match.delim.length;
-          var closeStart = match.end - match.delim.length;
+          var openLen = match.openLen != null ? match.openLen : match.delim.length;
+          var closeLen = match.closeLen != null ? match.closeLen : match.delim.length;
+          var openEnd = match.start + openLen;
+          var closeStart = match.end - closeLen;
 
           // Opening marker — direct child of the outer wrapper so
           // CSS `.leaf-source-active > .leaf-source-marker` matches.
@@ -4324,12 +4366,26 @@
       var range = sel.getRangeAt(0);
       if (!this._sourceBlock.contains(range.startContainer)) return;
 
-      var cursorOffset = this._textOffsetInBlock(
+      // Derive source from a DOM walk rather than `textContent`. The
+      // contenteditable can hold an `<a>` (from `execCommand
+      // ("createLink")`) or any other inline element that doesn't
+      // round-trip through plain text — `_serializeBlockInline`
+      // re-emits the markdown form (`[text](url)`, `**bold**`, etc.).
+      // The block's own marker spans (`.leaf-source-marker`) are
+      // filtered out by the same serializer so already-built source-
+      // mode blocks don't double their markers.
+      var origTag = this._sourceBlock.getAttribute("data-leaf-source") || "p";
+      var blockPrefix = this._blockSourcePrefix(origTag);
+      var trace = this._serializeBlockInline(
         this._sourceBlock,
         range.startContainer,
         range.startOffset
       );
-      var sourceText = this._sourceBlock.textContent || "";
+      // The serializer doesn't re-emit the heading prefix `# ` — the
+      // `.leaf-source-marker` containing it was skipped — so prepend
+      // it based on the `data-leaf-source` tag.
+      var sourceText = blockPrefix + trace.source;
+      var cursorOffset = blockPrefix.length + trace.cursorOffset;
       var scan = this._scanSource(sourceText);
 
       // Walk every enclosing inline match (nesting-aware) so the active
@@ -4356,8 +4412,14 @@
       var activeKey = outermost ? outermost.start + "-" + outermost.end : "";
       if (activePath.length > 0 && activeKey !== this._activeMatchKey) {
         var innermost = activePath[activePath.length - 1];
-        var bs = innermost.start + innermost.delim.length;
-        var be = innermost.end - innermost.delim.length;
+        var innerOpen = innermost.openLen != null
+          ? innermost.openLen
+          : innermost.delim.length;
+        var innerClose = innermost.closeLen != null
+          ? innermost.closeLen
+          : innermost.delim.length;
+        var bs = innermost.start + innerOpen;
+        var be = innermost.end - innerClose;
         if (cursorOffset === bs) {
           cursorOffset = outermost.start;
         } else if (cursorOffset === be) {
@@ -4496,16 +4558,20 @@
           var absStart = segOffset + m.start;
           var absEnd = segOffset + m.end;
           if (caretOffset >= absStart && caretOffset <= absEnd) {
+            var openLen = m.openLen != null ? m.openLen : m.delim.length;
+            var closeLen = m.closeLen != null ? m.closeLen : m.delim.length;
             path.push({
               start: absStart,
               end: absEnd,
               delim: m.delim,
+              openLen: openLen,
+              closeLen: closeLen,
               pattern: m.pattern
             });
-            var bodyStart = segOffset + m.start + m.delim.length;
+            var bodyStart = segOffset + m.start + openLen;
             var bodyText = segText.slice(
-              m.start + m.delim.length,
-              m.end - m.delim.length
+              m.start + openLen,
+              m.end - closeLen
             );
             recurse(bodyText, bodyStart);
             return;
@@ -4527,6 +4593,31 @@
       var patterns = this._autoFormatPatterns;
       for (var i = 0; i < patterns.length; i++) {
         var p = patterns[i];
+        if (p.type === "link") {
+          // Asymmetric — opening is `[` (1 char), closing is `](url)`.
+          var lFlags = p.regexAny.flags;
+          if (lFlags.indexOf("g") === -1) lFlags += "g";
+          var lre = new RegExp(p.regexAny.source, lFlags);
+          var lm;
+          while ((lm = lre.exec(text)) !== null) {
+            if (lm[0].length === 0) {
+              lre.lastIndex++;
+              continue;
+            }
+            var closeLen = lm[0].length - 1 - lm[1].length; // ](url)
+            candidates.push({
+              start: lm.index,
+              end: lm.index + lm[0].length,
+              delim: "[",
+              openLen: 1,
+              closeLen: closeLen,
+              pattern: p,
+              body: lm[1],
+              href: lm[2]
+            });
+          }
+          continue;
+        }
         var delim = p.type === "boldItalic" ? "***" : p.delim;
         if (!delim) continue;
         var flags = p.regexAny.flags;
@@ -4542,6 +4633,8 @@
             start: m.index,
             end: m.index + m[0].length,
             delim: delim,
+            openLen: delim.length,
+            closeLen: delim.length,
             pattern: p,
             body: m[1]
           });
@@ -4616,11 +4709,16 @@
             if (c === cursorNode) {
               noteCursor(source.length + cursorOffset);
             }
-            // Strip cursor-anchoring ZWSPs / NBSPs the same way the old
-            // serializer did.
+            // Strip cursor-anchoring ZWSPs but preserve NBSPs verbatim —
+            // `_refreshSourceBlock` rebuilds text nodes from this source
+            // and Chrome needs NBSPs (not regular spaces) at trailing
+            // positions, otherwise the trailing space collapses and the
+            // next keystroke lands at the wrong offset (effectively
+            // eating the space). `_scanSource` normalizes NBSP→space
+            // for heading detection, and `_renderBlockFromSource` does
+            // the same on exit, so the markdown output stays clean.
             source += c.textContent
-              .replace(/​/g, "")
-              .replace(/ /g, " ");
+              .replace(/​/g, "");
             continue;
           }
 
@@ -4659,17 +4757,31 @@
 
           if (tag === "a") {
             var href = c.getAttribute("href") || "";
-            pushMarker("[");
-            walk(c);
-            pushMarker("](" + href + ")");
+            // If the `<a>` already carries source-mode marker spans
+            // (built by `_buildSourceFragment`), walking will emit
+            // their text directly — synthesizing extra `[` / `](url)`
+            // via pushMarker would double up. Bare `<a>` (Earmark, or
+            // `execCommand("createLink")`) has no marker children, so
+            // we synthesize them.
+            if (self._hasMarkerChildren(c)) {
+              walk(c);
+            } else {
+              pushMarker("[");
+              walk(c);
+              pushMarker("](" + href + ")");
+            }
             continue;
           }
 
           var delim = self._delimiterFor(c);
           if (delim) {
-            pushMarker(delim);
-            walk(c);
-            pushMarker(delim);
+            if (self._hasMarkerChildren(c)) {
+              walk(c);
+            } else {
+              pushMarker(delim);
+              walk(c);
+              pushMarker(delim);
+            }
             continue;
           }
 
@@ -5778,6 +5890,20 @@
         }
 
         if (anchor) {
+          // Link popover is a visual-mode affordance only. In hybrid
+          // mode the user edits links via the markdown source (cursor
+          // entering the paragraph swaps it to source-mode, exposing
+          // `[text](url)`). We still `preventDefault` so a click on
+          // the `<a>` doesn't navigate away — the click is only
+          // meant to move the caret into the link for editing.
+          if (self._mode !== "visual") {
+            if (!e.metaKey && !e.ctrlKey) {
+              e.preventDefault();
+            }
+            self._dismissLinkPopover();
+            self._dismissImagePopover();
+            return;
+          }
           e.preventDefault();
           self._dismissImagePopover();
           self._showLinkPopover(anchor);

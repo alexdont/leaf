@@ -1235,6 +1235,16 @@ defmodule Leaf do
       font-weight: 700;
       margin: 2.33em 0;
     }
+    /* Anchor styling — Tailwind preflight resets `<a>` to inherit
+       color and text-decoration, so without this rule a rendered link
+       inside the editor would look identical to surrounding plain
+       text. Use the framework's primary color via `currentColor` so
+       the link still adapts to the active theme. */
+    .content-editor-visual a {
+      color: #2563eb;
+      text-decoration: underline;
+      cursor: pointer;
+    }
     /* Markers come in two flavors:
        1. Block prefix (heading `# `, etc.) — direct child of the source
           block. Always visible while the block is in source mode, just
@@ -1254,6 +1264,7 @@ defmodule Leaf do
     .content-editor-visual [data-leaf-source] del .leaf-source-marker,
     .content-editor-visual [data-leaf-source] s .leaf-source-marker,
     .content-editor-visual [data-leaf-source] code .leaf-source-marker,
+    .content-editor-visual [data-leaf-source] a .leaf-source-marker,
     .content-editor-visual [data-leaf-source] .leaf-spoiler .leaf-source-marker {
       display: none;
     }
