@@ -1573,17 +1573,46 @@
         }
 
         var block = this._getCurrentBlock();
+        // Blockquote: Enter exits the quote entirely (inserts a fresh
+        // `<p>` after the `<blockquote>` and moves the caret there).
+        // Shift+Enter (handled further down in the soft-break branch)
+        // continues the quote with a `<br>`. This matches the standard
+        // Markdown-editor UX where regular Enter is "I'm done quoting".
         if (
           block &&
           block.tagName &&
           block.tagName.toLowerCase() === "blockquote"
         ) {
-          var text = block.textContent.trim();
-          if (text === "") {
-            e.preventDefault();
-            document.execCommand("formatBlock", false, "p");
-            return;
+          e.preventDefault();
+          var bqAfter = document.createElement("p");
+          bqAfter.appendChild(document.createElement("br"));
+          if (block.parentNode) {
+            block.parentNode.insertBefore(bqAfter, block.nextSibling);
           }
+          // If the user pressed Enter on an empty trailing paragraph
+          // inside the blockquote, drop that trailing paragraph too —
+          // otherwise we'd leave an empty `<p>` behind in the quote.
+          var bqLastChild = block.lastElementChild;
+          if (
+            bqLastChild &&
+            bqLastChild.tagName &&
+            bqLastChild.tagName.toLowerCase() === "p" &&
+            (bqLastChild.textContent || "").replace(/[​ ]/g, "").trim() === ""
+          ) {
+            block.removeChild(bqLastChild);
+          }
+          if (!block.firstChild) {
+            // Empty blockquote — drop it entirely.
+            block.parentNode.removeChild(block);
+          }
+          var bqRange = document.createRange();
+          bqRange.setStart(bqAfter, 0);
+          bqRange.collapse(true);
+          var bqSel = window.getSelection();
+          bqSel.removeAllRanges();
+          bqSel.addRange(bqRange);
+          this._visualEl.dispatchEvent(new Event("input", { bubbles: true }));
+          return;
         }
 
         // Enter inside an `<li>`: Chrome's default usually splits the
