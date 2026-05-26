@@ -1233,6 +1233,11 @@
         // the user sees the proper bullet / number with normal styling
         // instead of a faded source marker.
         this._maybeAutoFormatList();
+        // Blockquote auto-format snaps `> ` at the start of a paragraph
+        // into a real `<blockquote><p>…</p></blockquote>`, mirroring the
+        // list auto-format. Consecutive blockquote lines merge into the
+        // same `<blockquote>`.
+        this._maybeAutoFormatBlockquote();
       }
       this._debouncedPushVisualChange();
       this._updateCounts();
@@ -1573,46 +1578,62 @@
         }
 
         var block = this._getCurrentBlock();
-        // Blockquote: Enter exits the quote entirely (inserts a fresh
-        // `<p>` after the `<blockquote>` and moves the caret there).
-        // Shift+Enter (handled further down in the soft-break branch)
-        // continues the quote with a `<br>`. This matches the standard
-        // Markdown-editor UX where regular Enter is "I'm done quoting".
+        // Blockquote: same two-step UX as lists. Enter on a non-empty
+        // line splits inside the `<blockquote>` (browser default does
+        // this — we don't intercept); Enter on an EMPTY line at the
+        // end of the quote exits the quote, with a fresh `<p>` placed
+        // after the `<blockquote>`. Shift+Enter (further down) always
+        // inserts a `<br>` soft break, regardless of emptiness.
+        var bqQuote = null;
         if (
           block &&
           block.tagName &&
           block.tagName.toLowerCase() === "blockquote"
         ) {
-          e.preventDefault();
-          var bqAfter = document.createElement("p");
-          bqAfter.appendChild(document.createElement("br"));
-          if (block.parentNode) {
-            block.parentNode.insertBefore(bqAfter, block.nextSibling);
+          bqQuote = block;
+        } else if (
+          block &&
+          block.parentNode &&
+          block.parentNode.tagName &&
+          block.parentNode.tagName.toLowerCase() === "blockquote"
+        ) {
+          bqQuote = block.parentNode;
+        }
+        if (bqQuote) {
+          var bqInnerBlock = bqQuote === block ? bqQuote : block;
+          var bqInnerEmpty =
+            (bqInnerBlock.textContent || "")
+              .replace(/[​ ]/g, "")
+              .trim() === "";
+          if (bqInnerEmpty) {
+            e.preventDefault();
+            var bqAfter = document.createElement("p");
+            bqAfter.appendChild(document.createElement("br"));
+            if (bqQuote.parentNode) {
+              bqQuote.parentNode.insertBefore(bqAfter, bqQuote.nextSibling);
+            }
+            // Drop the empty inner block (or the whole blockquote if
+            // that was the only thing left in it).
+            if (bqInnerBlock !== bqQuote && bqInnerBlock.parentNode) {
+              bqInnerBlock.parentNode.removeChild(bqInnerBlock);
+            }
+            if (!bqQuote.firstChild) {
+              bqQuote.parentNode.removeChild(bqQuote);
+            }
+            var bqRange = document.createRange();
+            bqRange.setStart(bqAfter, 0);
+            bqRange.collapse(true);
+            var bqSel = window.getSelection();
+            bqSel.removeAllRanges();
+            bqSel.addRange(bqRange);
+            this._visualEl.dispatchEvent(
+              new Event("input", { bubbles: true })
+            );
+            return;
           }
-          // If the user pressed Enter on an empty trailing paragraph
-          // inside the blockquote, drop that trailing paragraph too —
-          // otherwise we'd leave an empty `<p>` behind in the quote.
-          var bqLastChild = block.lastElementChild;
-          if (
-            bqLastChild &&
-            bqLastChild.tagName &&
-            bqLastChild.tagName.toLowerCase() === "p" &&
-            (bqLastChild.textContent || "").replace(/[​ ]/g, "").trim() === ""
-          ) {
-            block.removeChild(bqLastChild);
-          }
-          if (!block.firstChild) {
-            // Empty blockquote — drop it entirely.
-            block.parentNode.removeChild(block);
-          }
-          var bqRange = document.createRange();
-          bqRange.setStart(bqAfter, 0);
-          bqRange.collapse(true);
-          var bqSel = window.getSelection();
-          bqSel.removeAllRanges();
-          bqSel.addRange(bqRange);
-          this._visualEl.dispatchEvent(new Event("input", { bubbles: true }));
-          return;
+          // Non-empty line in the blockquote — let the browser's
+          // default Enter split the line into a new `<p>` inside the
+          // quote, matching list-item continuation behavior.
         }
 
         // Enter inside an `<li>`: Chrome's default usually splits the
@@ -2953,6 +2974,87 @@
       }
     },
 
+    // Typing `> ` at the start of a paragraph swaps the `<p>` for a
+    // `<blockquote><p>…</p></blockquote>`. Mirrors `_maybeAutoFormatList`
+    // — strip the marker prefix, drop the cursor at the start of the
+    // new inner `<p>`. Consecutive blockquote paragraphs merge into a
+    // single `<blockquote>` instead of producing one wrapper per line.
+    _maybeAutoFormatBlockquote: function () {
+      if (this._syntaxMutating) return;
+      var sel = window.getSelection();
+      if (!sel.rangeCount) return;
+      var range = sel.getRangeAt(0);
+      if (!range.collapsed) return;
+
+      var block = this._getCurrentBlock();
+      if (!block || !block.tagName) return;
+      if (block.tagName.toLowerCase() !== "p") return;
+      if (block.hasAttribute("data-leaf-hr-source")) return;
+      // Don't recurse: skip if the `<p>` is already inside a blockquote.
+      if (
+        block.parentNode &&
+        block.parentNode.tagName &&
+        block.parentNode.tagName.toLowerCase() === "blockquote"
+      ) {
+        return;
+      }
+
+      var text = block.textContent.replace(/ /g, " ");
+      var bm = text.match(/^> /);
+      if (!bm) return;
+
+      var parent = block.parentNode;
+      if (!parent) return;
+
+      this._syntaxMutating = true;
+      try {
+        var inner = document.createElement("p");
+        while (block.firstChild) inner.appendChild(block.firstChild);
+        this._trimLeadingTextChars(inner, 2);
+        if (
+          !inner.firstChild ||
+          (inner.childNodes.length === 1 &&
+            inner.firstChild.nodeType === Node.TEXT_NODE &&
+            inner.firstChild.textContent === "")
+        ) {
+          inner.innerHTML = "<br>";
+        }
+
+        // Unlike lists, blockquotes are multi-line by default (Enter
+        // inside an existing `<blockquote>` adds a new `<p>` to the
+        // same quote), so we always create a fresh `<blockquote>` for
+        // a typed `> ` — merging into the previous quote would undo
+        // an explicit "Enter-on-empty-line exits" the user just did.
+        var quote = document.createElement("blockquote");
+        quote.appendChild(inner);
+        parent.insertBefore(quote, block);
+        parent.removeChild(block);
+
+        if (this._sourceBlock === block) {
+          this._sourceBlock = null;
+          this._lastSourceStateKey = null;
+          this._activeMatchKey = null;
+        }
+
+        var caret = document.createRange();
+        var firstText = this._firstTextDescendant(inner);
+        if (firstText) {
+          caret.setStart(firstText, 0);
+        } else {
+          caret.setStart(inner, 0);
+        }
+        caret.collapse(true);
+        try {
+          sel.removeAllRanges();
+          sel.addRange(caret);
+        } catch (_e) {
+          /* range invalidated mid-frame — skip */
+        }
+      } finally {
+        this._syntaxMutating = false;
+      }
+    },
+
     // Detect an Arrow Down/Up keystroke about to cross an `<hr>`
     // boundary. If the next/previous block sibling is an `<hr>`, swap
     // it to source-edit mode and place the cursor inside; the
@@ -4238,6 +4340,48 @@
       if (!parent) return false;
 
       var isLi = oldBlock.tagName.toLowerCase() === "li";
+
+      // Blockquote: empty `<p>` source block inside `<blockquote>` +
+      // Enter exits the quote. Mirrors the list-item UX — Enter on
+      // a non-empty line splits in place, Enter on an empty trailing
+      // line breaks out into a fresh `<p>` placed after the quote.
+      if (
+        sourceText.length === 0 &&
+        oldBlock.tagName.toLowerCase() === "p" &&
+        parent.tagName &&
+        parent.tagName.toLowerCase() === "blockquote"
+      ) {
+        var bqExitQuote = parent;
+        var bqExitGrandparent = bqExitQuote.parentNode;
+        if (bqExitGrandparent) {
+          this._syntaxMutating = true;
+          try {
+            var bqExitP = document.createElement("p");
+            bqExitP.appendChild(document.createElement("br"));
+            bqExitGrandparent.insertBefore(
+              bqExitP,
+              bqExitQuote.nextSibling
+            );
+            bqExitQuote.removeChild(oldBlock);
+            if (!bqExitQuote.firstChild) {
+              bqExitGrandparent.removeChild(bqExitQuote);
+            }
+            var bqExitRange = document.createRange();
+            bqExitRange.setStart(bqExitP, 0);
+            bqExitRange.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(bqExitRange);
+            this._sourceBlock = null;
+            this._lastSourceStateKey = null;
+            this._activeMatchKey = null;
+          } finally {
+            this._syntaxMutating = false;
+          }
+          this._debouncedPushVisualChange();
+          this._updateCounts();
+          return true;
+        }
+      }
 
       this._syntaxMutating = true;
       try {
