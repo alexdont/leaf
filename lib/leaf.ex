@@ -186,6 +186,7 @@ defmodule Leaf do
       id={@id}
       phx-hook="Leaf"
       class="min-w-0"
+      style="container-type: inline-size; container-name: leaf-editor;"
       data-leaf-mount-state="loading"
       data-editor-id={@id}
       data-mode={to_string(@mode)}
@@ -203,6 +204,7 @@ defmodule Leaf do
         phx-update="ignore"
         class="flex flex-wrap items-center gap-1 mb-2 p-2 bg-base-200 rounded-lg min-w-0"
         data-visual-toolbar
+        data-toolbar-preset={to_string(@preset)}
       >
         <%= unless @readonly do %>
           <div data-visual-toolbar-buttons class="contents">
@@ -340,7 +342,7 @@ defmodule Leaf do
                     <span class="text-base font-bold leading-none">&#8942;</span>
                   </button>
                   <ul
-                    class="hidden absolute top-full left-0 menu bg-base-200 rounded-box z-50 w-36 p-1 shadow-sm"
+                    class="hidden absolute top-full left-0 menu bg-base-200 rounded-box z-50 w-44 p-1 shadow-sm"
                     data-inline-more-menu
                   >
                     <li>
@@ -390,6 +392,91 @@ defmodule Leaf do
                         <span>{t("Spoiler")}</span>
                       </button>
                     </li>
+                    <li class="menu-title text-xs px-2 pt-1 hidden" data-compact-overflow="lists-title">
+                      {t("Lists")}
+                    </li>
+                    <li class="hidden" data-compact-overflow="list-bullet">
+                      <button type="button" data-toolbar-action="bulletList">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
+                          <path fill-rule="evenodd" d="M6 4.75A.75.75 0 016.75 4h10.5a.75.75 0 010 1.5H6.75A.75.75 0 016 4.75zM6 10a.75.75 0 01.75-.75h10.5a.75.75 0 010 1.5H6.75A.75.75 0 016 10zm0 5.25a.75.75 0 01.75-.75h10.5a.75.75 0 010 1.5H6.75a.75.75 0 01-.75-.75zM1.99 4.75a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1v-.01zM1.99 15.25a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1v-.01zM1.99 10a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1V10z" clip-rule="evenodd" />
+                        </svg>
+                        <span>{t("Bullet List")}</span>
+                      </button>
+                    </li>
+                    <li class="hidden" data-compact-overflow="list-ordered">
+                      <button type="button" data-toolbar-action="orderedList">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
+                          <path d="M3.0002 1.25C2.58599 1.25 2.2502 1.58579 2.2502 2C2.2502 2.41421 2.58599 2.75 3.0002 2.75H3.2502V5.25C3.2502 5.66421 3.58599 6 4.0002 6C4.41441 6 4.7502 5.66421 4.7502 5.25V2C4.7502 1.58579 4.41441 1.25 4.0002 1.25H3.0002Z" />
+                          <path d="M2.97049 8.65372C3.29513 8.55397 3.64067 8.5 4.0002 8.5C4.16835 8.5 4.33333 8.5118 4.49444 8.53453C4.49127 8.53922 4.48691 8.54312 4.48165 8.54575L2.41479 9.57918C2.1607 9.70622 2.0002 9.96592 2.0002 10.25V11.25C2.0002 11.6642 2.33599 12 2.7502 12H5.2502C5.66441 12 6.0002 11.6642 6.0002 11.25C6.0002 10.8358 5.66441 10.5 5.2502 10.5H3.92725L5.15247 9.88739C5.67202 9.62762 6.0002 9.09661 6.0002 8.51574C6.0002 7.86944 5.57097 7.18897 4.80714 7.06489C4.54401 7.02215 4.27442 7 4.0002 7C3.48967 7 2.99569 7.07676 2.52991 7.21988C2.13397 7.34154 1.91162 7.76115 2.03328 8.15709C2.15494 8.55303 2.57455 8.77538 2.97049 8.65372Z" />
+                          <path d="M7.75 3C7.33579 3 7 3.33579 7 3.75C7 4.16421 7.33579 4.5 7.75 4.5H17.25C17.6642 4.5 18 4.16421 18 3.75C18 3.33579 17.6642 3 17.25 3H7.75Z" />
+                          <path d="M7.75 9.25C7.33579 9.25 7 9.58579 7 10C7 10.4142 7.33579 10.75 7.75 10.75H17.25C17.6642 10.75 18 10.4142 18 10C18 9.58579 17.6642 9.25 17.25 9.25H7.75Z" />
+                          <path d="M7.75 15.5C7.33579 15.5 7 15.8358 7 16.25C7 16.6642 7.33579 17 7.75 17H17.25C17.6642 17 18 16.6642 18 16.25C18 15.8358 17.6642 15.5 17.25 15.5H7.75Z" />
+                          <path d="M2.625 13.875C2.21079 13.875 1.875 14.2108 1.875 14.625C1.875 15.0392 2.21079 15.375 2.625 15.375H4.125C4.19404 15.375 4.25 15.431 4.25 15.5C4.25 15.569 4.19404 15.625 4.125 15.625H3.5C3.08579 15.625 2.75 15.9608 2.75 16.375C2.75 16.7892 3.08579 17.125 3.5 17.125H4.125C4.19404 17.125 4.25 17.181 4.25 17.25C4.25 17.319 4.19404 17.375 4.125 17.375H2.625C2.21079 17.375 1.875 17.7108 1.875 18.125C1.875 18.5392 2.21079 18.875 2.625 18.875H4.125C5.02246 18.875 5.75 18.1475 5.75 17.25C5.75 16.9278 5.65625 16.6276 5.49454 16.375C5.65625 16.1224 5.75 15.8222 5.75 15.5C5.75 14.6025 5.02246 13.875 4.125 13.875H2.625Z" />
+                        </svg>
+                        <span>{t("Numbered List")}</span>
+                      </button>
+                    </li>
+                    <%= if @preset == :advanced do %>
+                      <li class="hidden" data-compact-overflow="list-indent">
+                        <button type="button" data-toolbar-action="indent">
+                          <span>{t("Increase Indent")}</span>
+                        </button>
+                      </li>
+                      <li class="hidden" data-compact-overflow="list-outdent">
+                        <button type="button" data-toolbar-action="outdent">
+                          <span>{t("Decrease Indent")}</span>
+                        </button>
+                      </li>
+                    <% end %>
+                    <li class="menu-title text-xs px-2 pt-1 hidden" data-compact-overflow="insert-title">
+                      {t("Insert")}
+                    </li>
+                    <li class="hidden" data-compact-overflow="insert-link">
+                      <button type="button" data-toolbar-action="link">
+                        <span>{t("Link")}</span>
+                      </button>
+                    </li>
+                    <li class="hidden" data-compact-overflow="insert-emoji">
+                      <button type="button" data-toolbar-action="emoji">
+                        <span>{t("Emoji")}</span>
+                      </button>
+                    </li>
+                    <%= if @preset == :advanced and :image in @toolbar do %>
+                      <li class="hidden" data-compact-overflow="insert-image">
+                        <button type="button" data-toolbar-action="insert-image">
+                          <span>{t("Image")}</span>
+                        </button>
+                      </li>
+                    <% end %>
+                    <%= if @preset == :advanced and :video in @toolbar do %>
+                      <li class="hidden" data-compact-overflow="insert-video">
+                        <button type="button" data-toolbar-action="insert-video">
+                          <span>{t("Video")}</span>
+                        </button>
+                      </li>
+                    <% end %>
+                    <%= if @preset == :advanced do %>
+                      <li class="hidden" data-compact-overflow="insert-table">
+                        <button type="button" data-toolbar-action="table">
+                          <span>{t("Table")}</span>
+                        </button>
+                      </li>
+                      <li class="hidden" data-compact-overflow="insert-blockquote">
+                        <button type="button" data-toolbar-action="blockquote">
+                          <span>{t("Blockquote")}</span>
+                        </button>
+                      </li>
+                      <li class="hidden" data-compact-overflow="insert-codeblock">
+                        <button type="button" data-toolbar-action="codeBlock">
+                          <span>{t("Code Block")}</span>
+                        </button>
+                      </li>
+                      <li class="hidden" data-compact-overflow="insert-hr">
+                        <button type="button" data-toolbar-action="horizontalRule">
+                          <span>{t("Horizontal Rule")}</span>
+                        </button>
+                      </li>
+                    <% end %>
                   </ul>
                 </div>
               <% else %>
@@ -415,13 +502,14 @@ defmodule Leaf do
               <% end %>
             </div>
 
-            <div class="divider divider-horizontal mx-0.5 h-6"></div>
+            <div class="divider divider-horizontal mx-0.5 h-6" data-toolbar-divider="lists"></div>
 
             <%!-- Lists --%>
-            <div class="flex items-center gap-0.5 mr-2">
+            <div class="flex items-center gap-0.5 mr-2" data-toolbar-section="lists">
               <button
                 type="button"
                 data-toolbar-action="bulletList"
+                data-toolbar-overflow="list-bullet"
                 class="btn btn-xs btn-ghost px-2"
                 title={t("Bullet List")}
               >
@@ -441,6 +529,7 @@ defmodule Leaf do
               <button
                 type="button"
                 data-toolbar-action="orderedList"
+                data-toolbar-overflow="list-ordered"
                 class="btn btn-xs btn-ghost px-2"
                 title={t("Numbered List")}
               >
@@ -461,6 +550,7 @@ defmodule Leaf do
               <%= if @preset == :advanced do %><button
                 type="button"
                 data-toolbar-action="indent"
+                data-toolbar-overflow="list-indent"
                 class="btn btn-xs btn-ghost px-2"
                 title={t("Increase Indent")}
               >
@@ -480,6 +570,7 @@ defmodule Leaf do
               <button
                 type="button"
                 data-toolbar-action="outdent"
+                data-toolbar-overflow="list-outdent"
                 class="btn btn-xs btn-ghost px-2"
                 title={t("Decrease Indent")}
               >
@@ -498,13 +589,14 @@ defmodule Leaf do
               </button><% end %>
             </div>
 
-            <div class="divider divider-horizontal mx-0.5 h-6"></div>
+            <div class="divider divider-horizontal mx-0.5 h-6" data-toolbar-divider="insert"></div>
 
             <%!-- Insert --%>
-            <div class="flex items-center gap-0.5 mr-2">
+            <div class="flex items-center gap-0.5 mr-2" data-toolbar-section="insert">
               <button
                 type="button"
                 data-toolbar-action="link"
+                data-toolbar-overflow="insert-link"
                 class="btn btn-xs btn-ghost px-2"
                 title={t("Insert Link")}
               >
@@ -521,6 +613,7 @@ defmodule Leaf do
               <button
                 type="button"
                 data-toolbar-action="emoji"
+                data-toolbar-overflow="insert-emoji"
                 class="btn btn-xs btn-ghost px-2"
                 title={t("Insert Emoji")}
               >
@@ -538,7 +631,7 @@ defmodule Leaf do
                 </svg>
               </button>
               <%= if @preset == :advanced and :image in @toolbar do %>
-                <div class="relative inline-flex" data-image-split-btn>
+                <div class="relative inline-flex" data-image-split-btn data-toolbar-overflow="insert-image">
                   <button
                     type="button"
                     data-toolbar-action="insert-image"
@@ -606,6 +699,7 @@ defmodule Leaf do
                 <button
                   type="button"
                   data-toolbar-action="insert-video"
+                  data-toolbar-overflow="insert-video"
                   class="btn btn-xs btn-ghost px-2"
                   title={t("Insert Video")}
                 >
@@ -620,7 +714,7 @@ defmodule Leaf do
                 </button>
               <% end %>
               <%= if @preset == :advanced do %><%!-- Table dropdown --%>
-              <div class="relative" data-table-dropdown>
+              <div class="relative" data-table-dropdown data-toolbar-overflow="insert-table">
                 <button
                   type="button"
                   class="btn btn-xs btn-ghost px-2"
@@ -689,7 +783,7 @@ defmodule Leaf do
                 </ul>
               </div>
               <%!-- More inserts --%>
-              <div class="relative" data-insert-more-dropdown>
+              <div class="relative" data-insert-more-dropdown data-toolbar-overflow="insert-more">
                 <button
                   type="button"
                   class="btn btn-xs btn-ghost px-1.5"
@@ -783,7 +877,7 @@ defmodule Leaf do
         <div class="flex-1"></div>
 
         <%!-- Mode Switcher --%>
-        <div class="flex items-center gap-0.5" data-mode-switcher>
+        <div class="flex items-center gap-0.5" data-mode-switcher="inline">
           <div class="divider divider-horizontal mx-0.5 h-6"></div>
           <button
             type="button"
@@ -844,9 +938,71 @@ defmodule Leaf do
           </button>
         </div>
 
+        <details class="relative hidden" data-mode-switcher-compact>
+          <summary
+            class="btn btn-xs btn-ghost px-2 cursor-pointer"
+            title={t("Editor mode")}
+            aria-label={t("Editor mode")}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              class="w-3.5 h-3.5"
+            >
+              <path
+                fill-rule="evenodd"
+                d="M4.25 2A2.25 2.25 0 0 0 2 4.25v11.5A2.25 2.25 0 0 0 4.25 18h11.5A2.25 2.25 0 0 0 18 15.75V4.25A2.25 2.25 0 0 0 15.75 2H4.25ZM5.5 6.25a.75.75 0 0 1 .75-.75h7.5a.75.75 0 0 1 0 1.5h-7.5a.75.75 0 0 1-.75-.75Zm0 3.75a.75.75 0 0 1 .75-.75h7.5a.75.75 0 0 1 0 1.5h-7.5A.75.75 0 0 1 5.5 10Zm.75 3.25a.75.75 0 0 0 0 1.5h4.5a.75.75 0 0 0 0-1.5h-4.5Z"
+                clip-rule="evenodd"
+              />
+            </svg>
+          </summary>
+          <ul
+            class="absolute top-full right-0 menu bg-base-200 rounded-box z-50 w-36 p-1 shadow-sm"
+            data-mode-menu
+          >
+            <li>
+              <button
+                type="button"
+                data-mode-tab="hybrid"
+                class={(@mode == :hybrid && "btn-active") || "btn-ghost"}
+              >
+                <span>{t("Hybrid")}</span>
+              </button>
+            </li>
+            <li>
+              <button
+                type="button"
+                data-mode-tab="visual"
+                class={(@mode == :visual && "btn-active") || "btn-ghost"}
+              >
+                <span>{t("Visual")}</span>
+              </button>
+            </li>
+            <li>
+              <button
+                type="button"
+                data-mode-tab="markdown"
+                class={(@mode == :markdown && "btn-active") || "btn-ghost"}
+              >
+                <span>{t("Markdown")}</span>
+              </button>
+            </li>
+            <li>
+              <button
+                type="button"
+                data-mode-tab="html"
+                class={(@mode == :html && "btn-active") || "btn-ghost"}
+              >
+                <span>{t("HTML")}</span>
+              </button>
+            </li>
+          </ul>
+        </details>
+
         <%!-- Fullscreen toggle (advanced preset only) --%>
         <%= if @preset == :advanced do %>
-          <div class="flex items-center gap-0.5">
+          <div class="flex items-center gap-0.5" data-toolbar-section="fullscreen">
             <div class="divider divider-horizontal mx-0.5 h-6"></div>
             <button
               type="button"
@@ -916,6 +1072,9 @@ defmodule Leaf do
             data-editor-visual
             phx-update="ignore"
             contenteditable={if @readonly, do: "false", else: "true"}
+            autocapitalize="sentences"
+            autocorrect="on"
+            spellcheck="true"
             class={[
               "content-editor-visual",
               "overflow-auto p-4 pl-10",
@@ -1153,6 +1312,179 @@ defmodule Leaf do
     [data-visual-toolbar] [data-insert-more-dropdown] {
       display: inline-flex;
       align-items: center;
+    }
+    [data-mode-switcher-compact] > summary {
+      list-style: none;
+    }
+    [data-mode-switcher-compact] > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    /* Touch-specific tweaks. These are about finger ergonomics
+       regardless of viewport size — image resize handles, hover-only
+       drag handle. (Size-based responsive layout is below in
+       `@container`.) */
+    @media (pointer: coarse) {
+      .leaf-resize-handle {
+        width: 24px !important;
+        height: 24px !important;
+      }
+      .leaf-drag-handle {
+        display: none !important;
+      }
+    }
+
+    /* Responsive toolbar — gates on the EDITOR'S OWN width (container
+       query), not the viewport, so the toolbar reacts the same whether
+       the user is on a phone, a narrow laptop split, or a narrow embed
+       inside a wider page. Below ~640px the toolbar stays stationary
+       and wraps into compact groups so every section is visible without
+       horizontal discovery. Container queries: Chrome 105+, Safari 16+,
+       Firefox 110+. */
+    @container leaf-editor (max-width: 640px) {
+      [data-visual-toolbar] {
+        gap: 0.25rem 0.375rem;
+        padding: 0.375rem;
+      }
+
+      [data-visual-toolbar] > .flex-1 {
+        display: none;
+      }
+
+      [data-visual-toolbar] .mr-2 {
+        margin-right: 0 !important;
+      }
+
+      [data-visual-toolbar] [data-visual-toolbar-buttons] > .flex {
+        display: contents;
+      }
+
+      [data-visual-toolbar] [data-mode-switcher="inline"] {
+        display: none;
+      }
+
+      [data-visual-toolbar] [data-mode-switcher-compact] {
+        display: inline-flex;
+      }
+
+      [data-visual-toolbar] [data-toolbar-section="fullscreen"] {
+        display: none;
+      }
+
+      [data-visual-toolbar] button {
+        min-width: 1.625rem;
+        min-height: 1.625rem;
+        height: 1.625rem;
+        padding-left: 0.25rem;
+        padding-right: 0.25rem;
+      }
+
+      [data-visual-toolbar] svg {
+        width: 0.875rem;
+        height: 0.875rem;
+      }
+
+      [data-visual-toolbar] [data-mode-switcher],
+      [data-visual-toolbar] > .flex.items-center {
+        flex-wrap: nowrap;
+        gap: 0.125rem;
+      }
+    }
+
+    @container leaf-editor (max-width: 620px) {
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-overflow="insert-more"] {
+        display: none !important;
+      }
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-compact-overflow="insert-title"],
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-compact-overflow="insert-blockquote"],
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-compact-overflow="insert-codeblock"],
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-compact-overflow="insert-hr"] {
+        display: list-item !important;
+      }
+    }
+
+    @container leaf-editor (max-width: 590px) {
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-overflow="insert-table"] {
+        display: none !important;
+      }
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-compact-overflow="insert-table"] {
+        display: list-item !important;
+      }
+    }
+
+    @container leaf-editor (max-width: 560px) {
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-overflow="insert-video"] {
+        display: none !important;
+      }
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-compact-overflow="insert-video"] {
+        display: list-item !important;
+      }
+    }
+
+    @container leaf-editor (max-width: 530px) {
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-overflow="insert-image"] {
+        display: none !important;
+      }
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-compact-overflow="insert-image"] {
+        display: list-item !important;
+      }
+    }
+
+    @container leaf-editor (max-width: 500px) {
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-overflow="insert-emoji"] {
+        display: none !important;
+      }
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-compact-overflow="insert-emoji"] {
+        display: list-item !important;
+      }
+    }
+
+    @container leaf-editor (max-width: 470px) {
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-overflow="insert-link"],
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-divider="insert"] {
+        display: none !important;
+      }
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-compact-overflow="insert-link"] {
+        display: list-item !important;
+      }
+    }
+
+    @container leaf-editor (max-width: 540px) {
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-overflow="list-outdent"] {
+        display: none !important;
+      }
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-compact-overflow="lists-title"],
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-compact-overflow="list-outdent"] {
+        display: list-item !important;
+      }
+    }
+
+    @container leaf-editor (max-width: 510px) {
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-overflow="list-indent"] {
+        display: none !important;
+      }
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-compact-overflow="list-indent"] {
+        display: list-item !important;
+      }
+    }
+
+    @container leaf-editor (max-width: 480px) {
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-overflow="list-ordered"] {
+        display: none !important;
+      }
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-compact-overflow="list-ordered"] {
+        display: list-item !important;
+      }
+    }
+
+    @container leaf-editor (max-width: 450px) {
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-overflow="list-bullet"],
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-divider="lists"] {
+        display: none !important;
+      }
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-compact-overflow="list-bullet"] {
+        display: list-item !important;
+      }
     }
 
     /* Hybrid mode (Obsidian-style live preview): per-char contenteditable=false

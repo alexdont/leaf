@@ -214,6 +214,38 @@
     "  background: color-mix(in oklab, var(--color-base-content, #1f2937) 15%, transparent);",
     "}",
 
+    // Selection toolbar — floating bubble that appears above a non-
+    // collapsed selection on touch devices. Bold / italic / code /
+    // link, the four most common inline formats. Hidden by default;
+    // positioned via JS, animated on entry.
+    ".leaf-selection-toolbar {",
+    "  position: absolute; z-index: 60;",
+    "  display: flex; align-items: center; gap: 0.125rem;",
+    "  background: var(--color-base-content, #1f2937); color: var(--color-base-100, #fff);",
+    "  border-radius: 9999px; padding: 0.25rem;",
+    "  box-shadow: 0 6px 20px rgba(0,0,0,0.18), 0 1px 4px rgba(0,0,0,0.10);",
+    "  animation: leaf-popover-in 0.12s ease-out;",
+    "  user-select: none; -webkit-user-select: none;",
+    "}",
+    ".leaf-selection-toolbar button {",
+    "  background: none; border: none; cursor: pointer;",
+    "  min-width: 36px; min-height: 36px; padding: 0.4rem 0.6rem;",
+    "  border-radius: 9999px; color: inherit;",
+    "  display: flex; align-items: center; justify-content: center;",
+    "  font-size: 0.875rem; font-weight: 600; line-height: 1;",
+    "  transition: background 0.1s;",
+    "}",
+    ".leaf-selection-toolbar button:hover,",
+    ".leaf-selection-toolbar button:active {",
+    "  background: rgba(255,255,255,0.15);",
+    "}",
+    ".leaf-selection-toolbar button.is-active {",
+    "  background: rgba(255,255,255,0.22);",
+    "}",
+    ".leaf-selection-toolbar svg {",
+    "  width: 1.05rem; height: 1.05rem;",
+    "}",
+
     // Image URL dialog
     ".leaf-image-url-backdrop {",
     "  position: fixed; inset: 0; z-index: 99999;",
@@ -848,6 +880,11 @@
       this._setupStickyToolbar();
       this._setupModeSwitcher();
       this._setupLinkPopover();
+      // Selection bubble is a "mobile mode" feature — disabled for
+      // now; will be re-enabled when we ship the mobile slim-toolbar
+      // variant. Code stays in place (`_setupSelectionToolbar` and
+      // friends) so flipping it back on is a one-liner.
+      // this._setupSelectionToolbar();
       this._setupImageDragAndDrop();
       this._registerMarkdownHelpers();
       this._setupMarkdownTextarea();
@@ -857,6 +894,27 @@
       this._wordCountEl = this.el.querySelector("[data-word-count]");
       this._charCountEl = this.el.querySelector("[data-char-count]");
       this._updateCounts();
+
+      // Mobile soft keyboard: when the on-screen keyboard opens, the
+      // visual viewport shrinks but the document height doesn't, so
+      // the caret can end up hidden behind the keyboard. Listen to
+      // `visualViewport.resize` (the standard way to detect keyboard
+      // open / close) and scroll the caret into view if focus is on
+      // the editor at the moment of the resize.
+      if (window.visualViewport) {
+        this._onVisualViewportResize = function () {
+          if (
+            document.activeElement === this._visualEl &&
+            this._visualEl
+          ) {
+            this._scrollCaretIntoView();
+          }
+        }.bind(this);
+        window.visualViewport.addEventListener(
+          "resize",
+          this._onVisualViewportResize
+        );
+      }
 
       // Handle commands from LiveView
       this.handleEvent(
@@ -970,6 +1028,14 @@
       this._closeEmojiPicker();
       this._dismissLinkPopover();
       this._dismissImageUrlDialog();
+      this._teardownSelectionToolbar();
+      if (this._onVisualViewportResize && window.visualViewport) {
+        window.visualViewport.removeEventListener(
+          "resize",
+          this._onVisualViewportResize
+        );
+        this._onVisualViewportResize = null;
+      }
       if (this._gripTooltipCleanup) {
         this._gripTooltipCleanup();
         this._gripTooltipCleanup = null;
@@ -1836,6 +1902,8 @@
               t.classList.add("btn-ghost");
             }
           });
+          var compactMenu = tab.closest("[data-mode-switcher-compact]");
+          if (compactMenu) compactMenu.removeAttribute("open");
 
           var currentMarkdown = "";
           var ta = self._getMarkdownTextarea();
@@ -3207,6 +3275,39 @@
         this._syntaxMutating = prevMutating;
       }
       return rect;
+    },
+
+    // Mobile soft-keyboard helper: scroll the editor (and the page,
+    // if needed) so the caret sits above the on-screen keyboard. Uses
+    // the cheap `range.getBoundingClientRect()` first; falls back to
+    // the temp-marker `_caretRect` if the range itself reports zero.
+    // Called from the `visualViewport.resize` handler in `mounted()`.
+    _scrollCaretIntoView: function () {
+      if (!this._visualEl) return;
+      var sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return;
+      var range = sel.getRangeAt(0);
+      if (!this._visualEl.contains(range.startContainer)) return;
+      var rect = this._caretRect(range);
+      if (!rect) return;
+      var vv = window.visualViewport;
+      var viewBottom = vv ? vv.height + vv.offsetTop : window.innerHeight;
+      var viewTop = vv ? vv.offsetTop : 0;
+      // Margin so the caret isn't flush against the keyboard / top.
+      var margin = 32;
+      if (rect.bottom > viewBottom - margin) {
+        // Caret hidden by (or near) the keyboard — scroll up.
+        var delta = rect.bottom - (viewBottom - margin);
+        // Scroll the editor's own scrollable parent first (the body
+        // wrapper has `overflow: auto`); if that doesn't cover the
+        // delta, scroll the page too.
+        this._visualEl.scrollBy({ top: delta, behavior: "smooth" });
+        window.scrollBy({ top: delta, behavior: "smooth" });
+      } else if (rect.top < viewTop + margin) {
+        var deltaUp = viewTop + margin - rect.top;
+        this._visualEl.scrollBy({ top: -deltaUp, behavior: "smooth" });
+        window.scrollBy({ top: -deltaUp, behavior: "smooth" });
+      }
     },
 
     // Returns the `<hr>` at the mousedown coordinates if any. Checks
@@ -6482,6 +6583,222 @@
         node = node.parentNode;
       }
       return false;
+    },
+
+    // -- Selection toolbar (touch only) --
+    //
+    // A floating bubble that appears above any non-collapsed selection
+    // inside the visual / hybrid editor on touch devices. Replaces the
+    // need to reach for the (often-offscreen) top toolbar on a phone.
+    // Four buttons: Bold, Italic, Code, Link — the most common inline
+    // formats. Block-level stuff is reachable via the auto-format
+    // prefixes (`# `, `- `, `> `, etc.).
+
+    _setupSelectionToolbar: function () {
+      if (!this._visualEl) return;
+
+      var self = this;
+      this._selectionToolbarEl = null;
+      this._onSelectionForToolbar = function () {
+        self._updateSelectionToolbar();
+      };
+      document.addEventListener("selectionchange", this._onSelectionForToolbar);
+      this._onScrollForSelectionToolbar = function () {
+        // Selection rect moves with the scroll; reposition rather
+        // than dismiss so the toolbar tracks the selection.
+        self._updateSelectionToolbar();
+      };
+      window.addEventListener("scroll", this._onScrollForSelectionToolbar, true);
+    },
+
+    // The selection toolbar is a "narrow editor" affordance — once
+    // the top toolbar has slimmed down (container width ≤ 640px) we
+    // surface the bubble so inline formats are one tap away. On a
+    // wide layout the full toolbar is right there, so the bubble
+    // would just be visual noise. Editor `id` host carries the
+    // `container-type` so we measure its actual rendered width.
+    _selectionToolbarEnabled: function () {
+      if (!this.el) return false;
+      return this.el.getBoundingClientRect().width <= 640;
+    },
+
+    _teardownSelectionToolbar: function () {
+      if (this._onSelectionForToolbar) {
+        document.removeEventListener(
+          "selectionchange",
+          this._onSelectionForToolbar
+        );
+        this._onSelectionForToolbar = null;
+      }
+      if (this._onScrollForSelectionToolbar) {
+        window.removeEventListener(
+          "scroll",
+          this._onScrollForSelectionToolbar,
+          true
+        );
+        this._onScrollForSelectionToolbar = null;
+      }
+      this._dismissSelectionToolbar();
+    },
+
+    _updateSelectionToolbar: function () {
+      var sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+        this._dismissSelectionToolbar();
+        return;
+      }
+      if (this._mode !== "visual" && this._mode !== "hybrid") {
+        this._dismissSelectionToolbar();
+        return;
+      }
+      if (!this._selectionToolbarEnabled()) {
+        this._dismissSelectionToolbar();
+        return;
+      }
+      var range = sel.getRangeAt(0);
+      if (!this._visualEl || !this._visualEl.contains(range.startContainer)) {
+        this._dismissSelectionToolbar();
+        return;
+      }
+      this._showSelectionToolbar(range);
+    },
+
+    _showSelectionToolbar: function (range) {
+      if (!this._selectionToolbarEl) {
+        this._selectionToolbarEl = this._buildSelectionToolbar();
+        document.body.appendChild(this._selectionToolbarEl);
+      }
+      // Sync the active-state of each button to whatever formats the
+      // current selection already has, so the user can see what's on.
+      this._syncSelectionToolbarState();
+      var tb = this._selectionToolbarEl;
+      var rect = range.getBoundingClientRect();
+      if (!rect.width && !rect.height) {
+        // Collapsed-after-selection-change edge case.
+        this._dismissSelectionToolbar();
+        return;
+      }
+      // Make sure the toolbar has dimensions before we measure.
+      tb.style.visibility = "hidden";
+      tb.style.left = "0px";
+      tb.style.top = "0px";
+      var tbRect = tb.getBoundingClientRect();
+      var pageScrollX = window.scrollX || window.pageXOffset || 0;
+      var pageScrollY = window.scrollY || window.pageYOffset || 0;
+      // Center horizontally over the selection, clamped to viewport.
+      var left = rect.left + rect.width / 2 - tbRect.width / 2;
+      var minLeft = 8;
+      var maxLeft = window.innerWidth - tbRect.width - 8;
+      if (left < minLeft) left = minLeft;
+      if (left > maxLeft) left = maxLeft;
+      // Above selection by default; flip below if there's no room.
+      var top = rect.top - tbRect.height - 8;
+      if (top < 8) {
+        top = rect.bottom + 8;
+      }
+      tb.style.left = left + pageScrollX + "px";
+      tb.style.top = top + pageScrollY + "px";
+      tb.style.visibility = "visible";
+    },
+
+    _dismissSelectionToolbar: function () {
+      if (this._selectionToolbarEl) {
+        this._selectionToolbarEl.remove();
+        this._selectionToolbarEl = null;
+      }
+    },
+
+    _buildSelectionToolbar: function () {
+      var self = this;
+      var tb = document.createElement("div");
+      tb.className = "leaf-selection-toolbar";
+
+      function makeBtn(action, label, svg) {
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.setAttribute("aria-label", label);
+        btn.setAttribute("data-selection-action", action);
+        btn.innerHTML = svg;
+        // mousedown / touchstart prevent default so the selection
+        // doesn't collapse before the click handler can fire on the
+        // still-active selection.
+        btn.addEventListener("mousedown", function (e) {
+          e.preventDefault();
+        });
+        btn.addEventListener("touchstart", function (e) {
+          e.preventDefault();
+        }, { passive: false });
+        btn.addEventListener("click", function (e) {
+          e.preventDefault();
+          self._execSelectionAction(action);
+        });
+        tb.appendChild(btn);
+        return btn;
+      }
+
+      makeBtn(
+        "bold",
+        "Bold",
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path d="M6.5 3.5h4.25a3.25 3.25 0 0 1 1.83 5.94 3.5 3.5 0 0 1-1.83 6.56H6.5a.5.5 0 0 1-.5-.5V4a.5.5 0 0 1 .5-.5Zm1.5 5.25h2.75a1.75 1.75 0 1 0 0-3.5H8v3.5Zm0 5.75h3a2 2 0 1 0 0-4H8v4Z"/></svg>'
+      );
+      makeBtn(
+        "italic",
+        "Italic",
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path d="M8.5 4h7a.5.5 0 0 1 0 1h-2.6l-2.4 10h2a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1h2.6l2.4-10h-2a.5.5 0 0 1 0-1Z"/></svg>'
+      );
+      makeBtn(
+        "code",
+        "Inline code",
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path d="M7.78 6.22a.75.75 0 0 1 0 1.06L5.06 10l2.72 2.72a.75.75 0 1 1-1.06 1.06l-3.25-3.25a.75.75 0 0 1 0-1.06l3.25-3.25a.75.75 0 0 1 1.06 0Zm4.44 0a.75.75 0 0 1 1.06 0l3.25 3.25a.75.75 0 0 1 0 1.06l-3.25 3.25a.75.75 0 1 1-1.06-1.06L14.94 10l-2.72-2.72a.75.75 0 0 1 0-1.06Z"/></svg>'
+      );
+      makeBtn(
+        "link",
+        "Link",
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path d="M11.13 7.05a.75.75 0 0 1 1.06 0 3.75 3.75 0 0 1 0 5.3l-2.5 2.5a3.75 3.75 0 1 1-5.3-5.3l1.1-1.1a.75.75 0 1 1 1.06 1.06l-1.1 1.1a2.25 2.25 0 1 0 3.18 3.18l2.5-2.5a2.25 2.25 0 0 0 0-3.18.75.75 0 0 1 0-1.06Zm-2.26 5.9a.75.75 0 0 1-1.06 0 3.75 3.75 0 0 1 0-5.3l2.5-2.5a3.75 3.75 0 1 1 5.3 5.3l-1.1 1.1a.75.75 0 1 1-1.06-1.06l1.1-1.1a2.25 2.25 0 1 0-3.18-3.18l-2.5 2.5a2.25 2.25 0 0 0 0 3.18.75.75 0 0 1 0 1.06Z"/></svg>'
+      );
+
+      return tb;
+    },
+
+    _syncSelectionToolbarState: function () {
+      if (!this._selectionToolbarEl) return;
+      var tb = this._selectionToolbarEl;
+      try {
+        var bold = document.queryCommandState("bold");
+        var italic = document.queryCommandState("italic");
+        tb.querySelectorAll("[data-selection-action]").forEach(function (btn) {
+          var action = btn.dataset.selectionAction;
+          var active = false;
+          if (action === "bold") active = bold;
+          else if (action === "italic") active = italic;
+          // Code / link state checks involve ancestor walks — skip for
+          // now; they still fire toggles via execCommand.
+          btn.classList.toggle("is-active", active);
+        });
+      } catch (_e) {
+        /* queryCommandState can throw on some browsers — best effort */
+      }
+    },
+
+    _execSelectionAction: function (action) {
+      var self = this;
+      if (action === "bold") {
+        document.execCommand("bold", false, null);
+      } else if (action === "italic") {
+        document.execCommand("italic", false, null);
+      } else if (action === "code") {
+        this._wrapSelectionWith("code");
+      } else if (action === "link") {
+        var url = prompt("Enter URL:", "https://");
+        if (url === null || url === "") return;
+        document.execCommand("createLink", false, url);
+      }
+      // Refresh the on/off state for the buttons after the toggle.
+      this._syncSelectionToolbarState();
+      // Make sure the editor sees the mutation.
+      if (this._visualEl) {
+        this._visualEl.dispatchEvent(new Event("input", { bubbles: true }));
+      }
     },
 
     // -- Link popover --
