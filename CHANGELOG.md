@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.17
+
+- Hybrid: source-mode markers (`**`, `*`, `~~`, `||`, `` ` ``, `[…](url)`) now appear inside `<li>` body text. `<li>` joins `_isSourceModeBlock` and `_enterSourceMode` builds a `<li data-leaf-source="li">` (keeping the `<ul>` / `<ol>` parent intact); on exit `_buildFormattedFragment` rebuilds the inline body inside a fresh `<li>`. `_scanSource` is skipped for `<li>` source so block-level patterns (`# `, `> `, `1. `) don't mis-retag a list item.
+- Hybrid: typing `> ` at the start of a paragraph auto-formats to a `<blockquote><p>…</p></blockquote>`, mirroring the `- ` / `1. ` list path. The marker is stripped from the body; each typed `> ` creates a fresh `<blockquote>` (no merging into the previous one).
+- Hybrid: Enter inside a blockquote now mirrors list two-Enter UX. Non-empty line → split in place. Empty line in the middle of a quote → split the `<blockquote>` into two with a `<p>` between (mid-quote exit). Empty trailing line → exits to a `<p>` placed after the quote and drops the empty inner block. The same split-into-two-lists pattern applies to empty `<li>` Enter inside a multi-item list — first list + `<p>` + second list with the trailing items.
+- Hybrid: Delete at the end of a source-mode `<li>` or `<p>` inside `<blockquote>` explicitly merges the next sibling of the same kind into the current block. Chrome's default forward-delete didn't always succeed for source-mode blocks (the marker spans and `data-leaf-source` attributes confused its merge path), so the keystroke could appear to do nothing.
+
 ## 0.2.16
 
 - Rework hybrid mode around a per-block source/render toggle: the cursor's paragraph (or heading) is swapped for a `<p data-leaf-source="origTag">` carrying its markdown source as literal text; every other block stays rendered. Cursor-leave re-renders the source back to HTML via `_renderBlockFromSource`. Replaces the old whole-paragraph decoration-span approach, which suffered from Chrome caret-affinity issues and "markers stuck to plain text after switching modes" leaks.
