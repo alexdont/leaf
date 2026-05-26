@@ -4045,7 +4045,7 @@
       var tag = block.tagName.toLowerCase();
       return (
         tag === "p" || tag === "h1" || tag === "h2" || tag === "h3" ||
-        tag === "h4" || tag === "h5" || tag === "h6"
+        tag === "h4" || tag === "h5" || tag === "h6" || tag === "li"
       );
     },
 
@@ -4208,20 +4208,38 @@
       var parent = oldBlock.parentNode;
       if (!parent) return false;
 
+      var isLi = oldBlock.tagName.toLowerCase() === "li";
+
       this._syntaxMutating = true;
       try {
-        // Render the old block's first-half source to HTML and swap
-        // it in. Calling `_exitSourceMode` directly would early-return
-        // because we've already set `_syntaxMutating`, so render
-        // inline via `_renderBlockFromSource` instead.
-        var renderedOld = this._renderBlockFromSource(firstHalf);
+        // Render the old block's first-half source. For `<li>` source
+        // blocks the rendered form is a `<li>` wrapping the inline
+        // body (block-level patterns don't apply); for everything
+        // else we route through `_renderBlockFromSource` which handles
+        // heading / HR / list-block detection.
+        var renderedOld;
+        if (isLi) {
+          renderedOld = document.createElement("li");
+          var liFirstNodes = this._buildFormattedFragment(
+            firstHalf.replace(/ /g, " ")
+          );
+          for (var fi = 0; fi < liFirstNodes.length; fi++) {
+            renderedOld.appendChild(liFirstNodes[fi]);
+          }
+          if (!renderedOld.firstChild) {
+            renderedOld.innerHTML = "<br>";
+          }
+        } else {
+          renderedOld = this._renderBlockFromSource(firstHalf);
+        }
         parent.replaceChild(renderedOld, oldBlock);
 
-        // Create the new source block (always a plain `<p>` — the new
-        // line starts as a fresh paragraph regardless of what tag the
-        // old block was; the user can type `# ` etc. to retag).
-        var newBlock = document.createElement("p");
-        newBlock.setAttribute("data-leaf-source", "p");
+        // Create the new source block. `<li>` source items beget
+        // another `<li>` so the list keeps its structure; everything
+        // else opens a fresh `<p>` regardless of what tag the old
+        // block was (the user can type `# ` etc. to retag).
+        var newBlock = document.createElement(isLi ? "li" : "p");
+        newBlock.setAttribute("data-leaf-source", isLi ? "li" : "p");
         if (secondHalf.length === 0) {
           newBlock.innerHTML = "<br>";
         } else {
@@ -4290,8 +4308,10 @@
       // Drop a `<p data-leaf-source>` with just the raw source text as
       // a single text node; `_refreshSourceBlock` (called immediately
       // below) does the hybrid active/inactive split based on the new
-      // cursor position.
-      var sourceBlock = document.createElement("p");
+      // cursor position. For `<li>` we keep the `<li>` tag so it stays
+      // a valid child of its `<ul>` / `<ol>` parent and the list
+      // bullet / number keeps rendering.
+      var sourceBlock = document.createElement(origTag === "li" ? "li" : "p");
       sourceBlock.setAttribute("data-leaf-source", origTag);
       if (sourceText.length === 0) {
         sourceBlock.innerHTML = "<br>";
@@ -4572,7 +4592,25 @@
       // a never-touched empty source block.
       sourceText = sourceText.replace(/​/g, "");
 
-      var rendered = this._renderBlockFromSource(sourceText);
+      var origTag = sourceBlock.getAttribute("data-leaf-source") || "";
+      var rendered;
+      if (origTag === "li") {
+        // List items render back as `<li>` — block-level patterns
+        // (heading, HR, list) don't apply inside a list item, so we
+        // skip `_renderBlockFromSource` entirely and just build the
+        // inline body.
+        rendered = document.createElement("li");
+        var liInlineText = sourceText.replace(/ /g, " ");
+        var liNodes = this._buildFormattedFragment(liInlineText);
+        for (var i = 0; i < liNodes.length; i++) {
+          rendered.appendChild(liNodes[i]);
+        }
+        if (!rendered.firstChild) {
+          rendered.innerHTML = "<br>";
+        }
+      } else {
+        rendered = this._renderBlockFromSource(sourceText);
+      }
 
       this._syntaxMutating = true;
       try {
@@ -4619,7 +4657,19 @@
       );
       var sourceText = trace.source;
       var cursorOffset = trace.cursorOffset;
-      var scan = this._scanSource(sourceText);
+      var scan;
+      if (this._sourceBlock.tagName.toLowerCase() === "li") {
+        // Block-level patterns (heading, HR, list prefixes) don't
+        // apply inside a `<li>` — `# ` inside a list item is literal
+        // text, not a heading retag. Run only the inline scan.
+        scan = {
+          kind: "li",
+          blockPrefixLen: 0,
+          inlineMatches: this._scanInlineMatches(sourceText),
+        };
+      } else {
+        scan = this._scanSource(sourceText);
+      }
 
       // Walk every enclosing inline match (nesting-aware) so the active
       // path can drive both the marker reveal and the cursor-snap on
