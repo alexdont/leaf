@@ -4264,7 +4264,81 @@
           sourceText.slice(cursorOffset);
         newCursor = cursorOffset - 1;
       } else {
-        if (cursorOffset >= sourceText.length) return false;
+        if (cursorOffset >= sourceText.length) {
+          // Delete at the end of a source-mode block. Chrome's default
+          // tries to merge with the next block but doesn't always
+          // succeed for source-mode `<li>` and blockquote-`<p>` (the
+          // marker spans and `data-leaf-source` attributes confuse its
+          // default merge), so do the merge explicitly when there's a
+          // sibling worth merging.
+          var delHostBlock = this._sourceBlock;
+          var delContextParent = delHostBlock.parentNode;
+          var delHostTag = delHostBlock.tagName.toLowerCase();
+          var delInList = delHostTag === "li";
+          var delInBlockquote =
+            delHostTag === "p" &&
+            delContextParent &&
+            delContextParent.tagName &&
+            delContextParent.tagName.toLowerCase() === "blockquote";
+          if (delInList || delInBlockquote) {
+            var delNext = delHostBlock.nextElementSibling;
+            if (
+              delNext &&
+              delNext.tagName &&
+              delNext.tagName.toLowerCase() === delHostTag
+            ) {
+              // Merge the next sibling's content into the current
+              // source block, then drop the now-empty sibling.
+              this._syntaxMutating = true;
+              try {
+                var delMergedSource =
+                  sourceText + (delNext.textContent || "");
+                while (this._sourceBlock.firstChild) {
+                  this._sourceBlock.removeChild(this._sourceBlock.firstChild);
+                }
+                if (delMergedSource.length === 0) {
+                  this._sourceBlock.innerHTML = "<br>";
+                } else {
+                  this._sourceBlock.appendChild(
+                    document.createTextNode(delMergedSource)
+                  );
+                }
+                delNext.parentNode.removeChild(delNext);
+                var delMergedRange = document.createRange();
+                if (
+                  this._sourceBlock.firstChild &&
+                  this._sourceBlock.firstChild.nodeType === Node.TEXT_NODE
+                ) {
+                  var delClamped = Math.max(
+                    0,
+                    Math.min(
+                      cursorOffset,
+                      this._sourceBlock.firstChild.textContent.length
+                    )
+                  );
+                  delMergedRange.setStart(
+                    this._sourceBlock.firstChild,
+                    delClamped
+                  );
+                } else {
+                  delMergedRange.setStart(this._sourceBlock, 0);
+                }
+                delMergedRange.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(delMergedRange);
+              } finally {
+                this._syntaxMutating = false;
+              }
+              this._lastSourceStateKey = null;
+              this._activeMatchKey = null;
+              this._refreshSourceBlock();
+              this._debouncedPushVisualChange();
+              this._updateCounts();
+              return true;
+            }
+          }
+          return false;
+        }
         newSource =
           sourceText.slice(0, cursorOffset) +
           sourceText.slice(cursorOffset + 1);
@@ -4341,10 +4415,80 @@
 
       var isLi = oldBlock.tagName.toLowerCase() === "li";
 
+      // List item: empty source-mode `<li>` + Enter exits the list.
+      // Like the blockquote-exit branch below — drop the empty item,
+      // split the `<ul>` / `<ol>` if necessary, place a fresh `<p>` in
+      // between (or after the list when the empty item is the trailing
+      // one). Without this branch the source-mode Enter would just
+      // split the empty `<li>` into two empty `<li>`s and the user
+      // could never escape the list with the keyboard.
+      if (
+        isLi &&
+        sourceText.length === 0 &&
+        parent.tagName &&
+        (parent.tagName.toLowerCase() === "ul" ||
+          parent.tagName.toLowerCase() === "ol")
+      ) {
+        var liExitList = parent;
+        var liExitGrandparent = liExitList.parentNode;
+        if (liExitGrandparent) {
+          this._syntaxMutating = true;
+          try {
+            // Items after the empty `<li>` move into a new list of
+            // the same kind so we get list/<p>/list, not list/<p>.
+            var liTrailing = [];
+            var liNext = oldBlock.nextElementSibling;
+            while (liNext) {
+              var liAfterNext = liNext.nextElementSibling;
+              liTrailing.push(liNext);
+              liNext = liAfterNext;
+            }
+
+            liExitList.removeChild(oldBlock);
+
+            var liExitP = document.createElement("p");
+            liExitP.appendChild(document.createElement("br"));
+            liExitGrandparent.insertBefore(liExitP, liExitList.nextSibling);
+
+            if (liTrailing.length > 0) {
+              var liSecondList = document.createElement(liExitList.tagName);
+              for (var lt = 0; lt < liTrailing.length; lt++) {
+                liSecondList.appendChild(liTrailing[lt]);
+              }
+              liExitGrandparent.insertBefore(
+                liSecondList,
+                liExitP.nextSibling
+              );
+            }
+
+            if (!liExitList.firstChild) {
+              liExitGrandparent.removeChild(liExitList);
+            }
+
+            var liExitRange = document.createRange();
+            liExitRange.setStart(liExitP, 0);
+            liExitRange.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(liExitRange);
+            this._sourceBlock = null;
+            this._lastSourceStateKey = null;
+            this._activeMatchKey = null;
+          } finally {
+            this._syntaxMutating = false;
+          }
+          this._debouncedPushVisualChange();
+          this._updateCounts();
+          return true;
+        }
+      }
+
       // Blockquote: empty `<p>` source block inside `<blockquote>` +
-      // Enter exits the quote. Mirrors the list-item UX — Enter on
-      // a non-empty line splits in place, Enter on an empty trailing
-      // line breaks out into a fresh `<p>` placed after the quote.
+      // Enter exits the quote. Mirrors the list-item UX — Enter on a
+      // non-empty line splits in place. If the empty line sits BETWEEN
+      // siblings (mid-quote), split the `<blockquote>` into two so the
+      // user gets `<blockquote>before</blockquote><p/><blockquote>after
+      // </blockquote>` instead of leaking the "after" lines into a
+      // sibling-less paragraph stuck below the original quote.
       if (
         sourceText.length === 0 &&
         oldBlock.tagName.toLowerCase() === "p" &&
@@ -4356,16 +4500,46 @@
         if (bqExitGrandparent) {
           this._syntaxMutating = true;
           try {
+            // Collect anything after the empty `<p>` inside the quote
+            // — those siblings become the contents of a new
+            // `<blockquote>` placed below the exit paragraph.
+            var bqTrailing = [];
+            var bqNext = oldBlock.nextSibling;
+            while (bqNext) {
+              var bqAfterNext = bqNext.nextSibling;
+              bqTrailing.push(bqNext);
+              bqNext = bqAfterNext;
+            }
+
+            // Drop the empty `<p>` that triggered the exit.
+            bqExitQuote.removeChild(oldBlock);
+
+            // The exit paragraph itself.
             var bqExitP = document.createElement("p");
             bqExitP.appendChild(document.createElement("br"));
             bqExitGrandparent.insertBefore(
               bqExitP,
               bqExitQuote.nextSibling
             );
-            bqExitQuote.removeChild(oldBlock);
+
+            // If we collected trailing nodes, move them into a fresh
+            // `<blockquote>` placed AFTER the exit paragraph.
+            if (bqTrailing.length > 0) {
+              var bqSecond = document.createElement("blockquote");
+              for (var bt = 0; bt < bqTrailing.length; bt++) {
+                bqSecond.appendChild(bqTrailing[bt]);
+              }
+              bqExitGrandparent.insertBefore(
+                bqSecond,
+                bqExitP.nextSibling
+              );
+            }
+
+            // Drop the original quote if the exit emptied it.
             if (!bqExitQuote.firstChild) {
               bqExitGrandparent.removeChild(bqExitQuote);
             }
+
             var bqExitRange = document.createRange();
             bqExitRange.setStart(bqExitP, 0);
             bqExitRange.collapse(true);
