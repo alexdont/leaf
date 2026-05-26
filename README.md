@@ -10,6 +10,7 @@ Visual WYSIWYG + Obsidian-style hybrid live preview + markdown editor for Phoeni
 - **Hybrid mode** (Obsidian-style live preview): formatting renders inline (bold, italic, strike, code, spoiler, headings, horizontal rule, lists) while the source markers stay editable — typing `**word**`, `*word*`, `~~word~~`, `||word||`, `` `word` ``, `# heading`, `---`, `- item`, or `1. item` auto-formats on the closing delimiter, and the markers fade in/out as the cursor enters and leaves each formatted run
 - **Markdown mode**: plain textarea with toolbar support
 - **HTML mode**: raw HTML editing for power users
+- **Responsive toolbar**: compact, stationary controls for narrow embeds and mobile comment editors; advanced tools progressively move into menus instead of requiring horizontal scrolling
 - **Drag-and-drop reordering**: drag any block element (headings, paragraphs, lists, images, blockquotes, code blocks) to rearrange content
 - **Resizable**: drag the bottom-right grip to change height; double-click the grip to auto-fit to content
 - **Spoilers**: Discord-style `||hidden||` markdown that renders as a click-to-reveal censored block in published content
@@ -50,7 +51,7 @@ If you prefer not to use the `deps/` import path (e.g., non-standard project str
 ```javascript
 // Load Leaf from CDN
 const script = document.createElement("script");
-script.src = "https://cdn.jsdelivr.net/gh/alexdont/leaf@v0.2.17/priv/static/assets/leaf.js";
+script.src = "https://cdn.jsdelivr.net/gh/alexdont/leaf@v0.2.18/priv/static/assets/leaf.js";
 script.onload = () => {
   // Leaf is now available at window.LeafHooks
 };

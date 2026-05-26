@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.18
+
+- Toolbar: narrow editor layouts now use the editor's own container width to compact the toolbar, not the viewport. The toolbar stays stationary and wraps instead of becoming a horizontally scrolling strip.
+- Toolbar: mode switching collapses into a compact menu on narrow layouts, and fullscreen is hidden there for now to keep comment-editor toolbars focused.
+- Toolbar: advanced list and insert tools progressively move into the inline More menu as space tightens, so the rightmost tools disappear one by one instead of whole sections abruptly wrapping into extra rows.
+- Mobile editing: add touch-oriented editor tweaks, spellcheck/autocorrect attributes, and a visual-viewport caret scroll helper for soft keyboards. The selection toolbar implementation is included but remains disabled for now.
+- Docs: include `LICENSE` in the generated ExDoc bundle so the README license link resolves.
+
 ## 0.2.17
 
 - Hybrid: source-mode markers (`**`, `*`, `~~`, `||`, `` ` ``, `[…](url)`) now appear inside `<li>` body text. `<li>` joins `_isSourceModeBlock` and `_enterSourceMode` builds a `<li data-leaf-source="li">` (keeping the `<ul>` / `<ol>` parent intact); on exit `_buildFormattedFragment` rebuilds the inline body inside a fresh `<li>`. `_scanSource` is skipped for `<li>` source so block-level patterns (`# `, `> `, `1. `) don't mis-retag a list item.
