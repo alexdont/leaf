@@ -477,6 +477,19 @@ defmodule Leaf do
                         </button>
                       </li>
                     <% end %>
+                    <li class="hidden" data-compact-overflow="remove-format">
+                      <button type="button" data-toolbar-action="removeFormat">
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                          class="w-3.5 h-3.5"
+                        >
+                          <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                        </svg>
+                        <span>{t("Remove Formatting")}</span>
+                      </button>
+                    </li>
                   </ul>
                 </div>
               <% else %>
@@ -850,13 +863,14 @@ defmodule Leaf do
               <% end %>
             </div>
 
-            <div class="divider divider-horizontal mx-0.5 h-6"></div>
+            <div class="divider divider-horizontal mx-0.5 h-6" data-toolbar-divider="remove-format"></div>
 
             <%!-- Clear Formatting --%>
-            <div class="flex items-center gap-0.5">
+            <div class="flex items-center gap-0.5" data-toolbar-section="remove-format">
               <button
                 type="button"
                 data-toolbar-action="removeFormat"
+                data-toolbar-overflow="remove-format"
                 class="btn btn-xs btn-ghost px-2"
                 title={t("Remove Formatting")}
               >
@@ -938,68 +952,6 @@ defmodule Leaf do
           </button>
         </div>
 
-        <details class="relative hidden" data-mode-switcher-compact>
-          <summary
-            class="btn btn-xs btn-ghost px-2 cursor-pointer"
-            title={t("Editor mode")}
-            aria-label={t("Editor mode")}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-              class="w-3.5 h-3.5"
-            >
-              <path
-                fill-rule="evenodd"
-                d="M4.25 2A2.25 2.25 0 0 0 2 4.25v11.5A2.25 2.25 0 0 0 4.25 18h11.5A2.25 2.25 0 0 0 18 15.75V4.25A2.25 2.25 0 0 0 15.75 2H4.25ZM5.5 6.25a.75.75 0 0 1 .75-.75h7.5a.75.75 0 0 1 0 1.5h-7.5a.75.75 0 0 1-.75-.75Zm0 3.75a.75.75 0 0 1 .75-.75h7.5a.75.75 0 0 1 0 1.5h-7.5A.75.75 0 0 1 5.5 10Zm.75 3.25a.75.75 0 0 0 0 1.5h4.5a.75.75 0 0 0 0-1.5h-4.5Z"
-                clip-rule="evenodd"
-              />
-            </svg>
-          </summary>
-          <ul
-            class="absolute top-full right-0 menu bg-base-200 rounded-box z-50 w-36 p-1 shadow-sm"
-            data-mode-menu
-          >
-            <li>
-              <button
-                type="button"
-                data-mode-tab="hybrid"
-                class={(@mode == :hybrid && "btn-active") || "btn-ghost"}
-              >
-                <span>{t("Hybrid")}</span>
-              </button>
-            </li>
-            <li>
-              <button
-                type="button"
-                data-mode-tab="visual"
-                class={(@mode == :visual && "btn-active") || "btn-ghost"}
-              >
-                <span>{t("Visual")}</span>
-              </button>
-            </li>
-            <li>
-              <button
-                type="button"
-                data-mode-tab="markdown"
-                class={(@mode == :markdown && "btn-active") || "btn-ghost"}
-              >
-                <span>{t("Markdown")}</span>
-              </button>
-            </li>
-            <li>
-              <button
-                type="button"
-                data-mode-tab="html"
-                class={(@mode == :html && "btn-active") || "btn-ghost"}
-              >
-                <span>{t("HTML")}</span>
-              </button>
-            </li>
-          </ul>
-        </details>
-
         <%!-- Fullscreen toggle (advanced preset only) --%>
         <%= if @preset == :advanced do %>
           <div class="flex items-center gap-0.5" data-toolbar-section="fullscreen">
@@ -1045,6 +997,80 @@ defmodule Leaf do
             </button>
           </div>
         <% end %>
+
+        <details class="relative hidden" data-mode-switcher-compact>
+          <summary
+            class="btn btn-xs btn-ghost px-1.5 cursor-pointer"
+            title={t("More editor options")}
+            aria-label={t("More editor options")}
+          >
+            <span class="text-base font-bold leading-none">&#8942;</span>
+          </summary>
+          <ul
+            class="absolute top-full right-0 menu bg-base-200 rounded-box z-50 w-36 p-1 shadow-sm"
+            data-mode-menu
+          >
+            <li class="menu-title text-xs px-2 pt-1">{t("Mode")}</li>
+            <li>
+              <button
+                type="button"
+                data-mode-tab="hybrid"
+                class={(@mode == :hybrid && "btn-active") || "btn-ghost"}
+              >
+                <span>{t("Hybrid")}</span>
+              </button>
+            </li>
+            <li>
+              <button
+                type="button"
+                data-mode-tab="visual"
+                class={(@mode == :visual && "btn-active") || "btn-ghost"}
+              >
+                <span>{t("Visual")}</span>
+              </button>
+            </li>
+            <li>
+              <button
+                type="button"
+                data-mode-tab="markdown"
+                class={(@mode == :markdown && "btn-active") || "btn-ghost"}
+              >
+                <span>{t("Markdown")}</span>
+              </button>
+            </li>
+            <li>
+              <button
+                type="button"
+                data-mode-tab="html"
+                class={(@mode == :html && "btn-active") || "btn-ghost"}
+              >
+                <span>{t("HTML")}</span>
+              </button>
+            </li>
+            <%= if @preset == :advanced do %>
+              <li class="menu-title text-xs px-2 pt-1">{t("View")}</li>
+              <li>
+                <button type="button" data-toolbar-action="fullscreen">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke-width="2"
+                    stroke="currentColor"
+                    class="w-3.5 h-3.5"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15"
+                    />
+                  </svg>
+                  <span>{t("Fullscreen")}</span>
+                </button>
+              </li>
+            <% end %>
+          </ul>
+        </details>
       </div>
 
       <div
@@ -1319,6 +1345,83 @@ defmodule Leaf do
     [data-mode-switcher-compact] > summary::-webkit-details-marker {
       display: none;
     }
+    [data-visual-toolbar][data-compact-modes="true"] [data-mode-switcher="inline"] {
+      display: none;
+    }
+    [data-visual-toolbar][data-compact-modes="true"] [data-mode-switcher-compact] {
+      display: inline-flex;
+      margin-left: auto;
+    }
+    [data-visual-toolbar][data-compact-modes="true"] [data-toolbar-section="fullscreen"] {
+      display: none;
+    }
+    [data-visual-toolbar][data-compact-modes="true"] > .flex-1 {
+      display: none;
+    }
+    [data-visual-toolbar][data-compact-modes="true"][data-toolbar-preset="advanced"] [data-toolbar-overflow="remove-format"],
+    [data-visual-toolbar][data-compact-modes="true"][data-toolbar-preset="advanced"] [data-toolbar-divider="remove-format"] {
+      display: none !important;
+    }
+    [data-visual-toolbar][data-compact-modes="true"][data-toolbar-preset="advanced"] [data-compact-overflow="remove-format"] {
+      display: list-item !important;
+    }
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="1"], [data-toolbar-overflow-level="2"], [data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-toolbar-overflow="remove-format"],
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="1"], [data-toolbar-overflow-level="2"], [data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-toolbar-divider="remove-format"],
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="1"], [data-toolbar-overflow-level="2"], [data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-toolbar-overflow="insert-more"] {
+      display: none !important;
+    }
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="1"], [data-toolbar-overflow-level="2"], [data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-compact-overflow="remove-format"],
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="1"], [data-toolbar-overflow-level="2"], [data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-compact-overflow="insert-title"],
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="1"], [data-toolbar-overflow-level="2"], [data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-compact-overflow="insert-blockquote"],
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="1"], [data-toolbar-overflow-level="2"], [data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-compact-overflow="insert-codeblock"],
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="1"], [data-toolbar-overflow-level="2"], [data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-compact-overflow="insert-hr"] {
+      display: list-item !important;
+    }
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="2"], [data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-toolbar-overflow="insert-table"] {
+      display: none !important;
+    }
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="2"], [data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-compact-overflow="insert-table"] {
+      display: list-item !important;
+    }
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-toolbar-overflow="insert-video"],
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-toolbar-overflow="list-outdent"] {
+      display: none !important;
+    }
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-compact-overflow="insert-video"],
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-compact-overflow="lists-title"],
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-compact-overflow="list-outdent"] {
+      display: list-item !important;
+    }
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-toolbar-overflow="insert-image"] {
+      display: none !important;
+    }
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-compact-overflow="insert-image"] {
+      display: list-item !important;
+    }
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-toolbar-overflow="list-indent"],
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-toolbar-overflow="insert-emoji"] {
+      display: none !important;
+    }
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-compact-overflow="list-indent"],
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-compact-overflow="insert-emoji"] {
+      display: list-item !important;
+    }
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-toolbar-overflow="list-ordered"],
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-toolbar-overflow="insert-link"],
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-toolbar-divider="insert"] {
+      display: none !important;
+    }
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-compact-overflow="list-ordered"],
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-compact-overflow="insert-link"] {
+      display: list-item !important;
+    }
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-toolbar-overflow="list-bullet"],
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-toolbar-divider="lists"] {
+      display: none !important;
+    }
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-compact-overflow="list-bullet"] {
+      display: list-item !important;
+    }
 
     /* Touch-specific tweaks. These are about finger ergonomics
        regardless of viewport size — image resize handles, hover-only
@@ -1365,6 +1468,7 @@ defmodule Leaf do
 
       [data-visual-toolbar] [data-mode-switcher-compact] {
         display: inline-flex;
+        margin-left: auto;
       }
 
       [data-visual-toolbar] [data-toolbar-section="fullscreen"] {
@@ -1391,7 +1495,14 @@ defmodule Leaf do
       }
     }
 
-    @container leaf-editor (max-width: 620px) {
+    @container leaf-editor (max-width: 660px) {
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-overflow="remove-format"],
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-divider="remove-format"] {
+        display: none !important;
+      }
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-compact-overflow="remove-format"] {
+        display: list-item !important;
+      }
       [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-overflow="insert-more"] {
         display: none !important;
       }
@@ -1403,7 +1514,7 @@ defmodule Leaf do
       }
     }
 
-    @container leaf-editor (max-width: 590px) {
+    @container leaf-editor (max-width: 630px) {
       [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-overflow="insert-table"] {
         display: none !important;
       }
@@ -1412,7 +1523,7 @@ defmodule Leaf do
       }
     }
 
-    @container leaf-editor (max-width: 560px) {
+    @container leaf-editor (max-width: 600px) {
       [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-overflow="insert-video"] {
         display: none !important;
       }
@@ -1421,7 +1532,7 @@ defmodule Leaf do
       }
     }
 
-    @container leaf-editor (max-width: 530px) {
+    @container leaf-editor (max-width: 570px) {
       [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-overflow="insert-image"] {
         display: none !important;
       }
@@ -1430,7 +1541,7 @@ defmodule Leaf do
       }
     }
 
-    @container leaf-editor (max-width: 500px) {
+    @container leaf-editor (max-width: 540px) {
       [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-overflow="insert-emoji"] {
         display: none !important;
       }
@@ -1439,7 +1550,7 @@ defmodule Leaf do
       }
     }
 
-    @container leaf-editor (max-width: 470px) {
+    @container leaf-editor (max-width: 510px) {
       [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-overflow="insert-link"],
       [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-divider="insert"] {
         display: none !important;
@@ -1449,7 +1560,7 @@ defmodule Leaf do
       }
     }
 
-    @container leaf-editor (max-width: 540px) {
+    @container leaf-editor (max-width: 580px) {
       [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-overflow="list-outdent"] {
         display: none !important;
       }
@@ -1459,7 +1570,7 @@ defmodule Leaf do
       }
     }
 
-    @container leaf-editor (max-width: 510px) {
+    @container leaf-editor (max-width: 550px) {
       [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-overflow="list-indent"] {
         display: none !important;
       }
@@ -1468,7 +1579,7 @@ defmodule Leaf do
       }
     }
 
-    @container leaf-editor (max-width: 480px) {
+    @container leaf-editor (max-width: 520px) {
       [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-overflow="list-ordered"] {
         display: none !important;
       }
@@ -1477,7 +1588,7 @@ defmodule Leaf do
       }
     }
 
-    @container leaf-editor (max-width: 450px) {
+    @container leaf-editor (max-width: 490px) {
       [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-overflow="list-bullet"],
       [data-visual-toolbar][data-toolbar-preset="advanced"] [data-toolbar-divider="lists"] {
         display: none !important;

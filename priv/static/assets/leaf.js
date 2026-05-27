@@ -879,6 +879,7 @@
       this._setupToolbar();
       this._setupStickyToolbar();
       this._setupModeSwitcher();
+      this._setupResponsiveToolbar();
       this._setupLinkPopover();
       // Selection bubble is a "mobile mode" feature — disabled for
       // now; will be re-enabled when we ship the mobile slim-toolbar
@@ -1005,6 +1006,10 @@
           this._stickyToolbarEl
         );
       }
+
+      if (this._syncResponsiveToolbar) {
+        this._syncResponsiveToolbar();
+      }
     },
 
     destroyed() {
@@ -1025,6 +1030,18 @@
       }
 
       this._cleanupStickyToolbar();
+      if (this._toolbarResizeObserver) {
+        this._toolbarResizeObserver.disconnect();
+        this._toolbarResizeObserver = null;
+      }
+      if (this._toolbarResizeRaf) {
+        cancelAnimationFrame(this._toolbarResizeRaf);
+        this._toolbarResizeRaf = null;
+      }
+      if (this._toolbarResizeHandler) {
+        window.removeEventListener("resize", this._toolbarResizeHandler);
+        this._toolbarResizeHandler = null;
+      }
       this._closeEmojiPicker();
       this._dismissLinkPopover();
       this._dismissImageUrlDialog();
@@ -1875,6 +1892,124 @@
 
     // -- Mode switching --
 
+    _setupResponsiveToolbar: function () {
+      var toolbar = this.el.querySelector("[data-visual-toolbar]");
+      var inlineModes = this.el.querySelector('[data-mode-switcher="inline"]');
+      var compactModes = this.el.querySelector("[data-mode-switcher-compact]");
+      var fullscreenSection = this.el.querySelector('[data-toolbar-section="fullscreen"]');
+      if (!toolbar || !inlineModes || !compactModes) return;
+
+      var self = this;
+      this._toolbarResizeRaf = null;
+
+      this._syncResponsiveToolbar = function () {
+        if (self._toolbarResizeRaf) {
+          cancelAnimationFrame(self._toolbarResizeRaf);
+        }
+
+        self._toolbarResizeRaf = requestAnimationFrame(function () {
+          self._toolbarResizeRaf = null;
+          if (!toolbar.isConnected) return;
+
+          var toolbarWidth = toolbar.getBoundingClientRect().width;
+          var previousWidth = self._responsiveToolbarWidth;
+          self._responsiveToolbarWidth = toolbarWidth;
+          var isShrinking =
+            previousWidth !== undefined && toolbarWidth < previousWidth;
+
+          var shouldCompactModes = toolbarWidth <= 640;
+
+          if (toolbar.dataset.compactModes === "true") {
+            if (isShrinking || toolbarWidth <= 640) {
+              shouldCompactModes = true;
+            } else if (
+              previousWidth !== undefined &&
+              Math.abs(toolbarWidth - previousWidth) < 1
+            ) {
+              return;
+            } else {
+              // Only when growing do we briefly restore the inline switcher
+              // to test whether it fits again. Shrinking keeps compact mode
+              // pinned to avoid one-frame mode-button flicker.
+              delete toolbar.dataset.compactModes;
+            }
+          }
+
+          var rowTop = null;
+          toolbar.querySelectorAll("button, summary").forEach(function (el) {
+            if (
+              inlineModes.contains(el) ||
+              compactModes.contains(el) ||
+              (fullscreenSection && fullscreenSection.contains(el)) ||
+              el.offsetParent === null
+            ) {
+              return;
+            }
+            var top = el.getBoundingClientRect().top;
+            if (rowTop === null || top < rowTop) rowTop = top;
+          });
+
+          if (rowTop === null) rowTop = toolbar.getBoundingClientRect().top;
+
+          var modeTop = inlineModes.getBoundingClientRect().top;
+          var fullscreenTop =
+            fullscreenSection && fullscreenSection.offsetParent !== null
+              ? fullscreenSection.getBoundingClientRect().top
+              : rowTop;
+
+          if (modeTop > rowTop + 2 || fullscreenTop > rowTop + 2) {
+            shouldCompactModes = true;
+          }
+
+          if (!shouldCompactModes) {
+            delete toolbar.dataset.compactModes;
+            delete toolbar.dataset.toolbarOverflowLevel;
+            self._toolbarCompactStartWidth = null;
+            return;
+          }
+
+          toolbar.dataset.compactModes = "true";
+
+          if (
+            self._toolbarCompactStartWidth === null ||
+            self._toolbarCompactStartWidth === undefined ||
+            toolbarWidth > self._toolbarCompactStartWidth
+          ) {
+            self._toolbarCompactStartWidth = toolbarWidth;
+          }
+
+          // Keep overflow gradual. Modes collapse first; after that, every
+          // additional ~30px of lost width moves only the next priority tier
+          // into the tools menu instead of collapsing several at once.
+          var overflowStep = 30;
+          var overflowLevel = Math.floor(
+            (self._toolbarCompactStartWidth - toolbarWidth) / overflowStep
+          );
+          if (overflowLevel <= 0) {
+            delete toolbar.dataset.toolbarOverflowLevel;
+          } else {
+            toolbar.dataset.toolbarOverflowLevel = String(
+              Math.min(overflowLevel, 10)
+            );
+          }
+        });
+      };
+
+      if (window.ResizeObserver) {
+        this._toolbarResizeObserver = new ResizeObserver(function () {
+          self._syncResponsiveToolbar();
+        });
+        this._toolbarResizeObserver.observe(toolbar);
+      } else {
+        this._toolbarResizeHandler = function () {
+          self._syncResponsiveToolbar();
+        };
+        window.addEventListener("resize", this._toolbarResizeHandler);
+      }
+
+      this._syncResponsiveToolbar();
+    },
+
     _setupModeSwitcher: function () {
       var self = this;
       var tabs = this.el.querySelectorAll("[data-mode-tab]");
@@ -2131,6 +2266,29 @@
         { trigger: "[data-table-trigger]", menu: "[data-table-menu]" },
         { trigger: "[data-insert-more-trigger]", menu: "[data-insert-more-menu]" },
       ];
+      var compactMenu = self.el.querySelector("[data-mode-switcher-compact]");
+      var compactMenuSummary = compactMenu ? compactMenu.querySelector("summary") : null;
+      var closeImageDropdown = function () {
+        if (self._imageDropdownMenu) {
+          self._imageDropdownMenu.classList.add("hidden");
+        }
+        if (self._imageDropdownBackdrop) {
+          self._imageDropdownBackdrop.remove();
+          self._imageDropdownBackdrop = null;
+        }
+      };
+      var closeToolbarMenus = function (exceptMenu, keepImageDropdown) {
+        dropdowns.forEach(function (other) {
+          var otherMenu = self.el.querySelector(other.menu);
+          if (otherMenu && otherMenu !== exceptMenu) {
+            otherMenu.classList.add("hidden");
+          }
+        });
+        if (exceptMenu !== compactMenu && compactMenu) {
+          compactMenu.removeAttribute("open");
+        }
+        if (!keepImageDropdown) closeImageDropdown();
+      };
       dropdowns.forEach(function (cfg) {
         var trigger = self.el.querySelector(cfg.trigger);
         var menu = self.el.querySelector(cfg.menu);
@@ -2139,13 +2297,7 @@
         menu.addEventListener("mousedown", function (e) { e.preventDefault(); });
         trigger.addEventListener("click", function (e) {
           e.preventDefault();
-          // Close other dropdown menus first
-          dropdowns.forEach(function (other) {
-            if (other.menu !== cfg.menu) {
-              var otherMenu = self.el.querySelector(other.menu);
-              if (otherMenu) otherMenu.classList.add("hidden");
-            }
-          });
+          closeToolbarMenus(menu);
           menu.classList.toggle("hidden");
         });
         menu.querySelectorAll("[data-toolbar-action]").forEach(function (btn) {
@@ -2157,6 +2309,31 @@
           }
         });
       });
+
+      if (compactMenu && compactMenuSummary) {
+        compactMenuSummary.addEventListener("mousedown", function (e) {
+          e.preventDefault();
+        });
+        compactMenu.addEventListener("mousedown", function (e) {
+          e.preventDefault();
+        });
+        compactMenuSummary.addEventListener("click", function (e) {
+          e.preventDefault();
+          var willOpen = !compactMenu.hasAttribute("open");
+          closeToolbarMenus(compactMenu);
+          if (willOpen) compactMenu.setAttribute("open", "");
+        });
+        compactMenu.querySelectorAll("[data-toolbar-action], [data-mode-tab]").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            compactMenu.removeAttribute("open");
+          });
+        });
+        document.addEventListener("mousedown", function (e) {
+          if (!compactMenu.contains(e.target)) {
+            compactMenu.removeAttribute("open");
+          }
+        });
+      }
 
       // Image dropdown: rendered on body with a backdrop to sit above navbars
       var imgTrigger = self.el.querySelector("[data-image-dropdown-trigger]");
@@ -2173,10 +2350,7 @@
 
         imgTrigger.addEventListener("click", function (e) {
           e.preventDefault();
-          dropdowns.forEach(function (cfg) {
-            var otherMenu = self.el.querySelector(cfg.menu);
-            if (otherMenu) otherMenu.classList.add("hidden");
-          });
+          closeToolbarMenus(null, true);
 
           if (imgMenu.classList.contains("hidden")) {
             // Show backdrop + menu
