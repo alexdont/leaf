@@ -1073,6 +1073,122 @@ defmodule Leaf do
         </details>
       </div>
 
+      <%= unless @readonly do %>
+        <%!-- Mobile writing toolbar --%>
+        <div
+          id={"#{@id}-mobile-toolbar"}
+          phx-update="ignore"
+          class="hidden items-center gap-1 mb-2 p-1.5 bg-base-200 rounded-lg min-w-0"
+          data-mobile-toolbar
+          data-toolbar-preset={to_string(@preset)}
+        >
+          <button
+            type="button"
+            data-toolbar-action="bold"
+            class="btn btn-sm btn-ghost font-bold px-3"
+            title={t("Bold")}
+          >
+            B
+          </button>
+          <button
+            type="button"
+            data-toolbar-action="italic"
+            class="btn btn-sm btn-ghost italic px-3"
+            title={t("Italic")}
+          >
+            I
+          </button>
+          <button
+            type="button"
+            data-toolbar-action="link"
+            class="btn btn-sm btn-ghost px-2.5"
+            title={t("Link")}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              class="w-4 h-4"
+            >
+              <path d="M12.232 4.232a2.5 2.5 0 013.536 3.536l-1.225 1.224a.75.75 0 001.061 1.06l1.224-1.224a4 4 0 00-5.656-5.656l-3 3a4 4 0 00.225 5.865.75.75 0 00.977-1.138 2.5 2.5 0 01-.142-3.667l3-3z" />
+              <path d="M11.603 7.963a.75.75 0 00-.977 1.138 2.5 2.5 0 01.142 3.667l-3 3a2.5 2.5 0 01-3.536-3.536l1.225-1.224a.75.75 0 00-1.061-1.06l-1.224 1.224a4 4 0 105.656 5.656l3-3a4 4 0 00-.225-5.865z" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            data-toolbar-action="bulletList"
+            class="btn btn-sm btn-ghost px-2.5"
+            title={t("Bullet List")}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              class="w-4 h-4"
+            >
+              <path
+                fill-rule="evenodd"
+                d="M6 4.75A.75.75 0 016.75 4h10.5a.75.75 0 010 1.5H6.75A.75.75 0 016 4.75zM6 10a.75.75 0 01.75-.75h10.5a.75.75 0 010 1.5H6.75A.75.75 0 016 10zm0 5.25a.75.75 0 01.75-.75h10.5a.75.75 0 010 1.5H6.75a.75.75 0 01-.75-.75zM1.99 4.75a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1v-.01zM1.99 15.25a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1v-.01zM1.99 10a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1V10z"
+                clip-rule="evenodd"
+              />
+            </svg>
+          </button>
+
+          <details class="relative" data-mobile-tools-menu>
+            <summary
+              class="btn btn-sm btn-ghost px-2.5 cursor-pointer"
+              title={t("More formatting")}
+              aria-label={t("More formatting")}
+            >
+              <span class="text-base font-bold leading-none">...</span>
+            </summary>
+            <ul class="absolute top-full left-0 menu bg-base-200 rounded-box z-50 w-44 p-1 shadow-sm">
+              <li class="menu-title text-xs px-2 pt-1">{t("Format")}</li>
+              <li><button type="button" data-toolbar-action="heading2"><span>{t("Heading")}</span></button></li>
+              <li><button type="button" data-toolbar-action="orderedList"><span>{t("Numbered List")}</span></button></li>
+              <li><button type="button" data-toolbar-action="code"><span>{t("Inline Code")}</span></button></li>
+              <%= if @preset == :advanced do %>
+                <li><button type="button" data-toolbar-action="blockquote"><span>{t("Blockquote")}</span></button></li>
+                <li><button type="button" data-toolbar-action="codeBlock"><span>{t("Code Block")}</span></button></li>
+                <li class="menu-title text-xs px-2 pt-1">{t("Insert")}</li>
+                <li><button type="button" data-toolbar-action="horizontalRule"><span>{t("Horizontal Rule")}</span></button></li>
+                <%= if :image in @toolbar do %>
+                  <li><button type="button" data-toolbar-action="insert-image"><span>{t("Image")}</span></button></li>
+                <% end %>
+                <%= if :video in @toolbar do %>
+                  <li><button type="button" data-toolbar-action="insert-video"><span>{t("Video")}</span></button></li>
+                <% end %>
+              <% end %>
+              <li class="menu-title text-xs px-2 pt-1">{t("Clean up")}</li>
+              <li><button type="button" data-toolbar-action="removeFormat"><span>{t("Remove Formatting")}</span></button></li>
+            </ul>
+          </details>
+
+          <div class="flex-1"></div>
+
+          <details class="relative" data-mobile-options-menu>
+            <summary
+              class="btn btn-sm btn-ghost px-2.5 cursor-pointer"
+              title={t("More editor options")}
+              aria-label={t("More editor options")}
+            >
+              <span class="text-base font-bold leading-none">...</span>
+            </summary>
+            <ul class="absolute top-full right-0 menu bg-base-200 rounded-box z-50 w-36 p-1 shadow-sm">
+              <li class="menu-title text-xs px-2 pt-1">{t("Mode")}</li>
+              <li><button type="button" data-mode-tab="hybrid" class={(@mode == :hybrid && "btn-active") || "btn-ghost"}><span>{t("Hybrid")}</span></button></li>
+              <li><button type="button" data-mode-tab="visual" class={(@mode == :visual && "btn-active") || "btn-ghost"}><span>{t("Visual")}</span></button></li>
+              <li><button type="button" data-mode-tab="markdown" class={(@mode == :markdown && "btn-active") || "btn-ghost"}><span>{t("Markdown")}</span></button></li>
+              <li><button type="button" data-mode-tab="html" class={(@mode == :html && "btn-active") || "btn-ghost"}><span>{t("HTML")}</span></button></li>
+              <%= if @preset == :advanced do %>
+                <li class="menu-title text-xs px-2 pt-1">{t("View")}</li>
+                <li><button type="button" data-toolbar-action="fullscreen"><span>{t("Fullscreen")}</span></button></li>
+              <% end %>
+            </ul>
+          </details>
+        </div>
+      <% end %>
+
       <div
         class="border border-base-300 overflow-hidden"
         style="border-radius: 0.5rem"
@@ -1332,6 +1448,8 @@ defmodule Leaf do
        editor stylesheet. Without this the toolbar is briefly jagged. */
     [data-visual-toolbar] svg { display: block; }
     [data-visual-toolbar] button { line-height: 1; }
+    [data-mobile-toolbar] svg { display: block; }
+    [data-mobile-toolbar] button { line-height: 1; }
     [data-visual-toolbar] [data-heading-dropdown],
     [data-visual-toolbar] [data-inline-more-dropdown],
     [data-visual-toolbar] [data-table-dropdown],
@@ -1343,6 +1461,14 @@ defmodule Leaf do
       list-style: none;
     }
     [data-mode-switcher-compact] > summary::-webkit-details-marker {
+      display: none;
+    }
+    [data-mobile-tools-menu] > summary,
+    [data-mobile-options-menu] > summary {
+      list-style: none;
+    }
+    [data-mobile-tools-menu] > summary::-webkit-details-marker,
+    [data-mobile-options-menu] > summary::-webkit-details-marker {
       display: none;
     }
     [data-visual-toolbar][data-compact-modes="true"] [data-mode-switcher="inline"] {
@@ -1595,6 +1721,28 @@ defmodule Leaf do
       }
       [data-visual-toolbar][data-toolbar-preset="advanced"] [data-compact-overflow="list-bullet"] {
         display: list-item !important;
+      }
+    }
+
+    @container leaf-editor (max-width: 480px) {
+      [data-visual-toolbar] {
+        display: none !important;
+      }
+
+      [data-mobile-toolbar] {
+        display: flex;
+      }
+
+      [data-mobile-toolbar] button,
+      [data-mobile-toolbar] summary {
+        min-width: 2.25rem;
+        min-height: 2.25rem;
+        height: 2.25rem;
+      }
+
+      [data-mobile-toolbar] ul button {
+        min-height: 2rem;
+        height: auto;
       }
     }
 

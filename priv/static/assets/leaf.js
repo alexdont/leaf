@@ -2268,6 +2268,9 @@
       ];
       var compactMenu = self.el.querySelector("[data-mode-switcher-compact]");
       var compactMenuSummary = compactMenu ? compactMenu.querySelector("summary") : null;
+      var extraDetailsMenus = Array.prototype.slice.call(
+        self.el.querySelectorAll("[data-mobile-tools-menu], [data-mobile-options-menu]")
+      );
       var closeImageDropdown = function () {
         if (self._imageDropdownMenu) {
           self._imageDropdownMenu.classList.add("hidden");
@@ -2287,6 +2290,9 @@
         if (exceptMenu !== compactMenu && compactMenu) {
           compactMenu.removeAttribute("open");
         }
+        extraDetailsMenus.forEach(function (details) {
+          if (details !== exceptMenu) details.removeAttribute("open");
+        });
         if (!keepImageDropdown) closeImageDropdown();
       };
       dropdowns.forEach(function (cfg) {
@@ -2334,6 +2340,33 @@
           }
         });
       }
+
+      extraDetailsMenus.forEach(function (details) {
+        var summary = details.querySelector("summary");
+        if (!summary) return;
+        summary.addEventListener("mousedown", function (e) {
+          e.preventDefault();
+        });
+        details.addEventListener("mousedown", function (e) {
+          e.preventDefault();
+        });
+        summary.addEventListener("click", function (e) {
+          e.preventDefault();
+          var willOpen = !details.hasAttribute("open");
+          closeToolbarMenus(details);
+          if (willOpen) details.setAttribute("open", "");
+        });
+        details.querySelectorAll("[data-toolbar-action], [data-mode-tab]").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            details.removeAttribute("open");
+          });
+        });
+        document.addEventListener("mousedown", function (e) {
+          if (!details.contains(e.target)) {
+            details.removeAttribute("open");
+          }
+        });
+      });
 
       // Image dropdown: rendered on body with a backdrop to sit above navbars
       var imgTrigger = self.el.querySelector("[data-image-dropdown-trigger]");
