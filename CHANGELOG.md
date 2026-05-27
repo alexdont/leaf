@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.19
+
+- Toolbar: mode switching and fullscreen now live in a right-side compact options menu on constrained layouts, with dropdown behavior that keeps only one toolbar menu open at a time.
+- Toolbar: remove formatting and lower-priority tools now move into collapsible menus for cleaner narrow editor layouts.
+- Mobile editing: add a dedicated mobile writing toolbar for very narrow editor containers. The mobile toolbar keeps core actions visible (`Bold`, `Italic`, `Link`, `Bullet List`) and moves formatting, insert tools, modes, and fullscreen into compact menus.
+
 ## 0.2.18
 
 - Toolbar: narrow editor layouts now use the editor's own container width to compact the toolbar, not the viewport. The toolbar stays stationary and wraps instead of becoming a horizontally scrolling strip.
