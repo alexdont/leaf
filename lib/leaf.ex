@@ -91,6 +91,7 @@ defmodule Leaf do
   attr(:height, :string, default: "480px")
   attr(:debounce, :integer, default: 400)
   attr(:upload_handler, :any, default: nil)
+  attr(:sync_input_name, :string, default: nil)
   attr(:class, :string, default: nil)
   attr(:script_nonce, :string, default: "")
 
@@ -128,6 +129,10 @@ defmodule Leaf do
      |> assign_new(:height, fn -> "480px" end)
      |> assign_new(:debounce, fn -> 400 end)
      |> assign_new(:readonly, fn -> false end)
+     |> assign_new(:upload_handler, fn -> nil end)
+     |> assign_new(:sync_input_name, fn -> nil end)
+     |> assign_new(:loading_preset, fn -> :random end)
+     |> assign_new(:loading_text, fn -> nil end)
      |> assign_new(:script_nonce, fn -> "" end)}
   end
 
@@ -149,7 +154,12 @@ defmodule Leaf do
     {:ok,
      socket
      |> assign(:content, content)
-     |> push_event("leaf-set-html:#{socket.assigns.id}", %{html: html})}
+     |> assign(:visual_html, html)
+     |> push_event("leaf-command:#{socket.assigns.id}", %{
+       action: "set_content",
+       content: content,
+       html: html
+     })}
   end
 
   def update(%{action: :set_mode, mode: mode}, socket)
@@ -191,10 +201,12 @@ defmodule Leaf do
       data-editor-id={@id}
       data-mode={to_string(@mode)}
       data-placeholder={@placeholder}
+      data-initial-markdown={@content}
       data-debounce={@debounce}
       data-readonly={@readonly}
       data-height={@height}
       data-has-upload={to_string(@upload_handler != nil)}
+      data-sync-input-name={@sync_input_name}
     >
       {loading_state_style_tag(@height, @script_nonce)}
 

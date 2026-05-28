@@ -838,6 +838,7 @@
       this._debounceMs = parseInt(this.el.dataset.debounce || "400", 10);
       this._readonly = this.el.dataset.readonly === "true";
       this._hasUpload = this.el.dataset.hasUpload === "true";
+      this._syncInputName = this.el.dataset.syncInputName || "";
       this._debounceTimer = null;
       this._markdownDebounceTimer = null;
       this._htmlDebounceTimer = null;
@@ -852,6 +853,7 @@
         "[data-markdown-wrapper]"
       );
       this._htmlWrapper = this.el.querySelector("[data-html-wrapper]");
+      this._syncFormInput(this.el.dataset.initialMarkdown || "");
 
       if (this._visualEl) {
         document.execCommand("defaultParagraphSeparator", false, "p");
@@ -1139,6 +1141,7 @@
     },
 
     _debouncedPushMarkdownChange: function (content) {
+      this._syncFormInput(content);
       if (this._markdownDebounceTimer)
         clearTimeout(this._markdownDebounceTimer);
       var self = this;
@@ -1255,6 +1258,7 @@
     },
 
     _debouncedPushHtmlChange: function (content) {
+      this._syncFormInput(htmlToMarkdown(content || ""));
       if (this._htmlDebounceTimer)
         clearTimeout(this._htmlDebounceTimer);
       var self = this;
@@ -1877,11 +1881,15 @@
 
     _debouncedPushVisualChange: function () {
       if (this._debounceTimer) clearTimeout(this._debounceTimer);
+      if (this._visualEl) {
+        this._syncFormInput(htmlToMarkdown(this._visualEl.innerHTML));
+      }
       this._debounceTimer = setTimeout(
         function () {
           if (!this._visualEl) return;
           var html = this._visualEl.innerHTML;
           var markdown = htmlToMarkdown(html);
+          this._syncFormInput(markdown);
           this.pushEventTo(this.el, "content_changed", {
             editor_id: this._editorId,
             html: html,
@@ -1890,6 +1898,27 @@
         }.bind(this),
         this._debounceMs
       );
+    },
+
+    _syncFormInput: function (markdown) {
+      if (!this._syncInputName) return;
+
+      var form = this.el.closest("form");
+      if (!form) return;
+
+      var input = form.querySelector(
+        'input[type="hidden"][data-leaf-sync-input="' + this._editorId + '"]'
+      );
+
+      if (!input) {
+        input = document.createElement("input");
+        input.type = "hidden";
+        input.name = this._syncInputName;
+        input.dataset.leafSyncInput = this._editorId;
+        form.appendChild(input);
+      }
+
+      input.value = markdown || "";
     },
 
     // -- Mode switching --
@@ -8151,6 +8180,27 @@
           break;
 
         case "set_content":
+          var content = payload.content || "";
+          var html = payload.html || "<p><br></p>";
+
+          if (this._visualEl) {
+            this._visualEl.innerHTML = html;
+          }
+
+          var markdownTextarea = this._getMarkdownTextarea();
+          if (markdownTextarea) {
+            markdownTextarea.value = content;
+          }
+
+          var htmlTextarea = this._getHtmlTextarea();
+          if (htmlTextarea) {
+            htmlTextarea.value = html;
+          }
+
+          this._sourceBlock = null;
+          this._dragHandleBlock = null;
+          this._syncFormInput(content);
+          this._updateCounts();
           break;
 
         case "set_mode":
