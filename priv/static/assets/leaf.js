@@ -1501,7 +1501,9 @@
               : "strikeThrough";
         document.execCommand(cmd, false, null);
         this._updateToolbarState();
-        this._deferredSyntaxRefresh(preSnapshot);
+        if (!this._refreshHybridSourceBlockAfterToolbarAction()) {
+          this._deferredSyntaxRefresh(preSnapshot);
+        }
         return;
       }
       if (mod && e.key === "u") {
@@ -2737,6 +2739,32 @@
           self._syntaxMutating = false;
         }
       }, 0);
+    },
+
+    _refreshHybridSourceBlockAfterToolbarAction: function () {
+      if (this._mode !== "hybrid") return false;
+      if (!this._sourceBlock || !this._sourceBlock.isConnected) return false;
+
+      var sel = window.getSelection();
+      if (!sel.rangeCount) return false;
+      var range = sel.getRangeAt(0);
+      if (
+        !this._sourceBlock.contains(range.startContainer) &&
+        !this._sourceBlock.contains(range.endContainer)
+      ) {
+        return false;
+      }
+
+      // Source-mode blocks already render real markdown markers via
+      // `.leaf-source-marker`. The older deferred decoration path would add
+      // another visible delimiter pair around toolbar-created wrappers, e.g.
+      // `****bold****` until the block was rebuilt. Force the source-block
+      // serializer/rebuilder instead so toolbar formatting follows the same
+      // path as typed markdown.
+      this._clearSyntaxDecoration();
+      this._lastSourceStateKey = null;
+      this._refreshSourceBlock();
+      return true;
     },
 
     _findNewFormatting: function (preSnapshot) {
@@ -6122,7 +6150,9 @@
 
       this._updateToolbarState();
       this._debouncedPushVisualChange();
-      this._deferredSyntaxRefresh(preSnapshot);
+      if (!this._refreshHybridSourceBlockAfterToolbarAction()) {
+        this._deferredSyntaxRefresh(preSnapshot);
+      }
     },
 
     _execMarkdownToolbarAction: function (action) {
