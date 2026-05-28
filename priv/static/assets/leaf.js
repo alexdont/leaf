@@ -3662,6 +3662,19 @@
       return null;
     },
 
+    _lastTextDescendant: function (root) {
+      var c = root.lastChild;
+      while (c) {
+        if (c.nodeType === Node.TEXT_NODE) return c;
+        if (c.nodeType === Node.ELEMENT_NODE) {
+          var f = this._lastTextDescendant(c);
+          if (f) return f;
+        }
+        c = c.previousSibling;
+      }
+      return null;
+    },
+
     _applyAutoFormat: function (
       runNodes,
       cursorNode,
@@ -4575,6 +4588,13 @@
       );
       var sourceText = this._sourceBlock.textContent || "";
 
+      if (
+        sourceText.length === 0 &&
+        this._maybeRemoveEmptySourceListOrQuoteBlock(backspace)
+      ) {
+        return true;
+      }
+
       var newSource;
       var newCursor;
       if (backspace) {
@@ -4718,6 +4738,76 @@
       this._lastSourceStateKey = null;
       this._activeMatchKey = null;
       this._refreshSourceBlock();
+      this._debouncedPushVisualChange();
+      this._updateCounts();
+      return true;
+    },
+
+    _maybeRemoveEmptySourceListOrQuoteBlock: function (backspace) {
+      var block = this._sourceBlock;
+      if (!block || !block.parentNode) return false;
+
+      var tag = block.tagName ? block.tagName.toLowerCase() : "";
+      var parent = block.parentNode;
+      var parentTag = parent.tagName ? parent.tagName.toLowerCase() : "";
+      var inList = tag === "li" && (parentTag === "ul" || parentTag === "ol");
+      var inBlockquote = tag === "p" && parentTag === "blockquote";
+      if (!inList && !inBlockquote) return false;
+
+      var prev = block.previousElementSibling;
+      var next = block.nextElementSibling;
+      var container = parent;
+      var grandparent = container.parentNode;
+      if (!grandparent) return false;
+
+      var target = null;
+      var placeAtEnd = false;
+      if (backspace && prev) {
+        target = prev;
+        placeAtEnd = true;
+      } else if (next) {
+        target = next;
+      } else if (prev) {
+        target = prev;
+        placeAtEnd = true;
+      }
+
+      this._syntaxMutating = true;
+      try {
+        container.removeChild(block);
+
+        if (!target) {
+          target = document.createElement("p");
+          target.appendChild(document.createElement("br"));
+          grandparent.replaceChild(target, container);
+        } else if (!container.firstChild) {
+          grandparent.removeChild(container);
+        }
+
+        var range = document.createRange();
+        var textNode = placeAtEnd
+          ? this._lastTextDescendant(target)
+          : this._firstTextDescendant(target);
+        if (textNode) {
+          range.setStart(
+            textNode,
+            placeAtEnd ? textNode.textContent.length : 0
+          );
+        } else {
+          range.setStart(target, placeAtEnd ? target.childNodes.length : 0);
+        }
+        range.collapse(true);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+
+        this._sourceBlock = null;
+        this._lastSourceStateKey = null;
+        this._activeMatchKey = null;
+      } finally {
+        this._syntaxMutating = false;
+      }
+
       this._debouncedPushVisualChange();
       this._updateCounts();
       return true;
