@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.20
+
+- Toolbar: keep overflow icon direction consistent across desktop and mobile layouts. Tool menus use horizontal dots, while mode/options menus use vertical dots.
+- Hybrid: toolbar and keyboard formatting now refresh the active source block immediately, preventing duplicated markdown markers such as `****bold****` after applying formatting to a selection.
+- Hybrid: Backspace/Delete now removes empty first list items and empty first blockquote lines, matching the existing Enter behavior for empty list/quote exits.
+
 ## 0.2.19
 
 - Toolbar: mode switching and fullscreen now live in a right-side compact options menu on constrained layouts, with dropdown behavior that keeps only one toolbar menu open at a time.
