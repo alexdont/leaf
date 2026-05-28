@@ -339,7 +339,7 @@ defmodule Leaf do
                     title={t("More formatting")}
                     data-inline-more-trigger
                   >
-                    <span class="text-base font-bold leading-none">&#8942;</span>
+                    <span class="text-base font-bold leading-none">...</span>
                   </button>
                   <ul
                     class="hidden absolute top-full left-0 menu bg-base-200 rounded-box z-50 w-44 p-1 shadow-sm"
@@ -803,7 +803,7 @@ defmodule Leaf do
                   title={t("More inserts")}
                   data-insert-more-trigger
                 >
-                  <span class="text-base font-bold leading-none">&#8942;</span>
+                  <span class="text-base font-bold leading-none">...</span>
                 </button>
                 <ul
                   class="hidden absolute top-full left-0 menu bg-base-200 rounded-box z-50 w-40 p-1 shadow-sm"
@@ -1172,7 +1172,7 @@ defmodule Leaf do
               title={t("More editor options")}
               aria-label={t("More editor options")}
             >
-              <span class="text-base font-bold leading-none">...</span>
+              <span class="text-base font-bold leading-none">&#8942;</span>
             </summary>
             <ul class="absolute top-full right-0 menu bg-base-200 rounded-box z-50 w-36 p-1 shadow-sm">
               <li class="menu-title text-xs px-2 pt-1">{t("Mode")}</li>
