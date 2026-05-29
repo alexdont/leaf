@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.21
+
+- Form integration: add a `sync_input_name` attribute. When set, the editor mirrors its current markdown into a hidden `<input>` (auto-created inside the surrounding `<form>`) on mount and on every visual/markdown/html change, so the editor's value submits as a normal form field without extra wiring. Also adds a `set_content` command (used for programmatic reset) that replaces the visual/markdown/html buffers, clears the drag-handle and source-block state, and re-syncs the hidden input.
+- Editor gutter: the visual editor's left padding (the gutter the block drag handle sits in) and the wrapper's positioning context are now emitted inline by the server-rendered `<style>` instead of relying solely on the host app's Tailwind utilities (`p-4 pl-10`, `relative`). Fixes the drag handle ("grabber") overlapping the text when Leaf is embedded in a host whose Tailwind build does not scan the Leaf library files (e.g. inside another component library). No change where those utilities were already generated.
+
 ## 0.2.20
 
 - Toolbar: keep overflow icon direction consistent across desktop and mobile layouts. Tool menus use horizontal dots, while mode/options menus use vertical dots.

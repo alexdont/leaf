@@ -1455,6 +1455,21 @@ defmodule Leaf do
       100% { background-position: -100% 50%; }
     }
 
+    /* Editor gutter + positioning context — emitted inline so they do not
+       depend on the host app's Tailwind build generating the `p-4 pl-10`
+       / `relative` utility classes. The block drag handle is positioned
+       inside this left gutter; without it the handle overlaps the text
+       (e.g. when leaf is embedded in a host whose Tailwind does not scan
+       the leaf library files). Mirrors the `overflow-auto p-4 pl-10`
+       classes on [data-editor-visual] and `relative` on the wrapper. */
+    [data-visual-wrapper] { position: relative; }
+    .content-editor-visual {
+      box-sizing: border-box;
+      overflow: auto;
+      padding: 1rem;
+      padding-left: 2.5rem;
+    }
+
     /* Toolbar alignment — emitted inline so the icon row sits on a single
        centerline at first paint, before the JS hook injects the full
        editor stylesheet. Without this the toolbar is briefly jagged. */
