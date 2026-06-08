@@ -469,6 +469,27 @@
     return result;
   }
 
+  // True when `node` holds hybrid source-mode marker spans
+  // (`<span class="leaf-source-marker">`) as direct children. Such a node's
+  // serialized `inner` already contains its own syntax markers (e.g. an
+  // `<a>` whose children are `[` / body / `](url)`), so the wrapping cases
+  // below must NOT synthesize the markers again — doing so doubles them
+  // (`[[label](url)](url)`). Mirrors `_hasMarkerChildren` on the editor.
+  function hasSourceMarkerChild(node) {
+    if (!node || !node.childNodes) return false;
+    for (var i = 0; i < node.childNodes.length; i++) {
+      var c = node.childNodes[i];
+      if (
+        c.nodeType === Node.ELEMENT_NODE &&
+        c.classList &&
+        c.classList.contains("leaf-source-marker")
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   // Move leading/trailing whitespace outside markers so markdown stays valid
   // e.g. <i>works </i> → "*works* " instead of "*works *"
   function wrapInline(text, marker) {
@@ -552,6 +573,15 @@
         return "\n```\n" + inner.trim() + "\n```\n\n";
 
       case "a":
+        // Hybrid source-mode <a> already contains its `[` / `](url)` marker
+        // spans, so `inner` is the full `[label](url)` — return it as-is.
+        // Only a bare <a> (rendered/visual mode, Earmark, createLink) needs
+        // the markers synthesized. Without this guard, editing a comment/
+        // post round-trips `[label](url)` into `[[label](url)](url)`.
+        if (hasSourceMarkerChild(node)) {
+          return inner;
+        }
+
         var href = node.getAttribute("href") || "";
         return "[" + inner + "](" + href + ")";
 

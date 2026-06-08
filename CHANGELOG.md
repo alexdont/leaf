@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.22
+
+- Hybrid: fix markdown links round-tripping into `[[label](url)](url)` (and compounding further on every edit). The `htmlToMarkdown` serializer's `<a>` case always synthesized `[...](url)` markers — even when the link was in hybrid source mode and already carried its `[` / `](url)` marker spans — doubling them. It now returns the inner text as-is when the `<a>` already has `leaf-source-marker` children (mirroring the inline serializer's existing guard), and only synthesizes markers for a bare `<a>` (rendered/visual mode, Earmark output, or `createLink`). Companion to the 0.2.20 builder-side fix that stopped `****bold****` compounding.
+
 ## 0.2.21
 
 - Form integration: add a `sync_input_name` attribute. When set, the editor mirrors its current markdown into a hidden `<input>` (auto-created inside the surrounding `<form>`) on mount and on every visual/markdown/html change, so the editor's value submits as a normal form field without extra wiring. Also adds a `set_content` command (used for programmatic reset) that replaces the visual/markdown/html buffers, clears the drag-handle and source-block state, and re-syncs the hidden input.
