@@ -84,7 +84,7 @@ defmodule LeafTest do
     refute new_socket.assigns.content =~ "![x](/x.png)"
   end
 
-  test "deny flags hide link, image and video toolbar buttons" do
+  test "deny flags are exposed for toolbar actions" do
     rendered =
       render_component(&Leaf.leaf_editor/1,
         id: "editor-1",
@@ -95,12 +95,12 @@ defmodule LeafTest do
         deny: [:links, :images, :video]
       )
 
-    refute rendered =~ ~s(data-toolbar-action="link")
-    refute rendered =~ ~s(data-toolbar-action="insert-image")
-    refute rendered =~ ~s(data-toolbar-action="insert-video")
+    assert rendered =~ ~s(data-deny-links="true")
+    assert rendered =~ ~s(data-deny-images="true")
+    assert rendered =~ ~s(data-deny-video="true")
   end
 
-  test "deny flags hide markdown and html mode tabs" do
+  test "deny mode flags are exposed to the client" do
     rendered =
       render_component(&Leaf.leaf_editor/1,
         id: "editor-1",
@@ -109,9 +109,8 @@ defmodule LeafTest do
         deny: [:markdown_mode, :html_mode]
       )
 
-    refute rendered =~ ~s(data-mode-tab="markdown")
-    refute rendered =~ ~s(data-mode-tab="html")
-    assert rendered =~ ~s(data-mode-tab="visual")
+    assert rendered =~ ~s(data-deny-markdown-mode="true")
+    assert rendered =~ ~s(data-deny-html-mode="true")
   end
 
   test "mode_changed falls back to visual when requested mode is denied" do
