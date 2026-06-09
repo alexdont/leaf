@@ -745,10 +745,13 @@
         );
 
       case "ul":
-        return "\n" + convertList(node, "ul") + "\n";
+        // Trailing blank line so a following block (paragraph, another
+        // list) is separated — otherwise markdown folds it into the last
+        // list item as a lazy-continuation line.
+        return "\n" + convertList(node, "ul") + "\n\n";
 
       case "ol":
-        return "\n" + convertList(node, "ol") + "\n";
+        return "\n" + convertList(node, "ol") + "\n\n";
 
       case "li":
         return inner;
@@ -1999,22 +2002,49 @@
         // `<p>` below as expected.
         if (block && block.tagName && block.tagName.toLowerCase() === "li") {
           var liParent = block.parentNode;
+          var isTaskLi = block.classList && block.classList.contains("leaf-task");
           var liText = (block.textContent || "").replace(/[​ ]/g, "").trim();
           if (liText === "") {
-            // Standard "empty list item exits the list" UX. Convert
-            // the empty `<li>` to a `<p>` placed after the list.
             e.preventDefault();
             var liGrandparent = liParent && liParent.parentNode;
             if (liGrandparent && liParent) {
+              var trailingItems = [];
+              var trailSib = block.nextSibling;
+              while (trailSib) {
+                var trailNext = trailSib.nextSibling;
+                trailingItems.push(trailSib);
+                trailSib = trailNext;
+              }
+
+              liParent.removeChild(block);
+
+              var exitRange = document.createRange();
+
+              // Empty paragraph divider — a real, draggable block. For a
+              // middle item the trailing items move into a new list below
+              // it, so the list visibly divides in two with an editable
+              // empty line between. For the last item it's just the exit
+              // paragraph after the list.
               var exitP = document.createElement("p");
               exitP.appendChild(document.createElement("br"));
               liGrandparent.insertBefore(exitP, liParent.nextSibling);
-              liParent.removeChild(block);
+
+              if (trailingItems.length) {
+                var splitList = document.createElement(
+                  liParent.tagName.toLowerCase()
+                );
+                for (var si = 0; si < trailingItems.length; si++) {
+                  splitList.appendChild(trailingItems[si]);
+                }
+                liGrandparent.insertBefore(splitList, exitP.nextSibling);
+              }
+
+              exitRange.setStart(exitP, 0);
+
               if (!liParent.firstChild) {
                 liGrandparent.removeChild(liParent);
               }
-              var exitRange = document.createRange();
-              exitRange.setStart(exitP, 0);
+
               exitRange.collapse(true);
               var exitSel = window.getSelection();
               exitSel.removeAllRanges();
@@ -2031,6 +2061,16 @@
           var liSel = window.getSelection();
           var liRange = liSel.getRangeAt(0);
           var newLi = document.createElement("li");
+          // Continue the checklist: a new task item carries its own
+          // (unchecked) checkbox box; the text after the caret follows it.
+          if (isTaskLi) {
+            newLi.className = "leaf-task";
+            newLi.setAttribute("data-checked", "false");
+            var newTaskBox = document.createElement("span");
+            newTaskBox.className = "leaf-task-box";
+            newTaskBox.setAttribute("contenteditable", "false");
+            newLi.appendChild(newTaskBox);
+          }
           var afterRange = document.createRange();
           afterRange.setStart(liRange.startContainer, liRange.startOffset);
           afterRange.setEndAfter(block.lastChild || block);
@@ -2044,7 +2084,12 @@
           // immediately; the ZWSP is stripped from markdown output by
           // the existing `_serializeBlockInline` / `htmlToMarkdown`
           // scrubbers.
-          if (!newLi.firstChild) {
+          // A task item always has the box as firstChild, so emptiness is
+          // measured by the lack of a text node after it.
+          var liNeedsPlaceholder = isTaskLi
+            ? !this._firstTextDescendant(newLi)
+            : !newLi.firstChild;
+          if (liNeedsPlaceholder) {
             newLi.appendChild(document.createTextNode("​"));
           }
           liParent.insertBefore(newLi, block.nextSibling);
