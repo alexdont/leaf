@@ -2402,6 +2402,24 @@ defmodule Leaf do
   # inside `<li>`. Promote those to a clickable checkbox item that the
   # client serializes back to `- [ ] ` / `- [x] `.
   defp apply_task_lists(html) do
+    html
+    |> unwrap_loose_task_items()
+    |> convert_task_checkboxes()
+  end
+
+  # A *loose* list (any blank line between items) wraps each item's content
+  # in a `<p>`: `<li><p>[ ] x</p></li>`. Unwrap task items back to
+  # `<li>[ ] x</li>` so the checkbox match still fires — otherwise loose
+  # checklists round-trip as literal "[ ] x" text.
+  defp unwrap_loose_task_items(html) do
+    Regex.replace(
+      ~r/<li>\s*<p>\s*(\[[ xX]\][\s\S]*?)<\/p>\s*<\/li>/,
+      html,
+      "<li>\\1</li>"
+    )
+  end
+
+  defp convert_task_checkboxes(html) do
     Regex.replace(~r/<li>\s*\[([ xX])\]\s?/, html, fn _full, mark ->
       checked = if mark in ["x", "X"], do: "true", else: "false"
 
