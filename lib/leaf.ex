@@ -98,6 +98,7 @@ defmodule Leaf do
   attr(:toolbar_layout, :atom, default: :fixed, values: [:fixed, :floating, :both])
   attr(:maxlength, :integer, default: nil)
   attr(:spellcheck, :boolean, default: true)
+  attr(:dir, :string, default: "ltr", values: ["ltr", "rtl", "auto"])
   attr(:smart_typography, :boolean, default: false)
   attr(:export, :boolean, default: false)
   attr(:protect_navigation, :boolean, default: false)
@@ -154,6 +155,7 @@ defmodule Leaf do
      |> assign_new(:toolbar_layout, fn -> :fixed end)
      |> assign_new(:maxlength, fn -> nil end)
      |> assign_new(:spellcheck, fn -> true end)
+     |> assign_new(:dir, fn -> "ltr" end)
      |> assign_new(:smart_typography, fn -> false end)
      |> assign_new(:export, fn -> false end)
      |> assign_new(:protect_navigation, fn -> false end)
@@ -1001,6 +1003,15 @@ defmodule Leaf do
                       <span>{t("Callout")}</span>
                     </button>
                   </li>
+                  <li>
+                    <button
+                      type="button"
+                      data-toolbar-action="symbols"
+                    >
+                      <span class="text-sm font-semibold w-3.5 text-center">Ω</span>
+                      <span>{t("Symbols / Date")}</span>
+                    </button>
+                  </li>
                 </ul>
               </div>
               <% end %>
@@ -1403,6 +1414,7 @@ defmodule Leaf do
             contenteditable={if @readonly, do: "false", else: "true"}
             autocapitalize="sentences"
             autocorrect="on"
+            dir={@dir}
             spellcheck={to_string(@spellcheck)}
             class={[
               "content-editor-visual",
@@ -1430,6 +1442,7 @@ defmodule Leaf do
             readonly={@readonly}
             maxlength={@maxlength}
             spellcheck={to_string(@spellcheck)}
+            dir={@dir}
             phx-debounce={@debounce}
           ><%= @content %></textarea>
         </div>

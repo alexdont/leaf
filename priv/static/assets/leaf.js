@@ -1265,6 +1265,7 @@
         this._toolbarResizeHandler = null;
       }
       this._closeEmojiPicker();
+      this._closeSymbolPicker();
       this._dismissLinkPopover();
       this._dismissImageUrlDialog();
       this._teardownSelectionToolbar();
@@ -6965,6 +6966,9 @@
         case "emoji":
           this._openEmojiPicker();
           return; // skip updateToolbarState/push — picker handles it
+        case "symbols":
+          this._openSymbolPicker();
+          return;
         case "insert-image":
           if (this._hasUpload) {
             this.pushEventTo(this.el, "insert_request", {
@@ -7044,6 +7048,7 @@
         case "table": if (ins) ins("\n| Header 1 | Header 2 |\n| --- | --- |\n| Cell 1 | Cell 2 |\n| Cell 3 | Cell 4 |\n"); break;
         case "link": if (lnk) lnk(); break;
         case "emoji": this._openEmojiPicker(); break;
+        case "symbols": this._openSymbolPicker(); break;
         case "insert-image":
           if (this._hasUpload) {
             this.pushEventTo(this.el, "insert_request", { editor_id: this._editorId, type: "image" });
@@ -7365,6 +7370,116 @@
       if (this._emojiCloseHandler) {
         document.removeEventListener("click", this._emojiCloseHandler);
         this._emojiCloseHandler = null;
+      }
+    },
+
+    // -- Special characters / date-time picker (#31) --
+
+    _symbols: [
+      "—","–","…","©","®","™","°","§","¶","•","·","«","»","“","”","‘","’",
+      "×","÷","±","≈","≠","≤","≥","→","←","↑","↓","⇒","∞","µ","½","¼","¾",
+      "€","£","¥","¢","✓","✗","★","☆","♦","→","№","℃","℉","✔","✘","≡",
+    ],
+
+    _openSymbolPicker: function () {
+      var self = this;
+      if (this._symbolPicker) {
+        this._closeSymbolPicker();
+        return;
+      }
+
+      var sel = window.getSelection();
+      if (sel.rangeCount > 0) this._savedRange = sel.getRangeAt(0).cloneRange();
+
+      var anchor =
+        this.el.querySelector("[data-insert-more-trigger]") ||
+        this.el.querySelector('[data-toolbar-action="symbols"]');
+      var toolbar = this.el.querySelector("[data-visual-toolbar]");
+      if (!anchor || !toolbar) return;
+
+      var picker = document.createElement("div");
+      picker.style.cssText =
+        "position:absolute;z-index:50;background:var(--color-base-200,#e5e7eb);color:var(--color-base-content,#1f2937);border:1px solid var(--color-base-300,#d1d5db);border-radius:0.5rem;box-shadow:0 4px 16px rgba(0,0,0,0.12),0 1px 4px rgba(0,0,0,0.08);padding:0.5rem;width:300px;";
+
+      // Date / time insert row.
+      var dtRow = document.createElement("div");
+      dtRow.style.cssText = "display:flex;gap:4px;margin-bottom:0.4rem;";
+      [
+        ["Insert date", function () { return new Date().toLocaleDateString(); }],
+        ["Insert time", function () { return new Date().toLocaleTimeString(); }],
+      ].forEach(function (d) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.textContent = d[0];
+        b.style.cssText =
+          "flex:1;font-size:0.72rem;padding:0.25rem;border:1px solid var(--color-base-300,#d1d5db);border-radius:0.3rem;cursor:pointer;background:none;color:inherit;";
+        b.addEventListener("mousedown", function (e) { e.preventDefault(); });
+        b.addEventListener("click", function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          self._insertEmoji(d[1]());
+          self._closeSymbolPicker();
+        });
+        dtRow.appendChild(b);
+      });
+      picker.appendChild(dtRow);
+
+      // Symbol grid.
+      var grid = document.createElement("div");
+      grid.style.cssText =
+        "display:grid;grid-template-columns:repeat(10,1fr);gap:2px;";
+      this._symbols.forEach(function (s) {
+        var span = document.createElement("span");
+        span.textContent = s;
+        span.style.cssText =
+          "cursor:pointer;text-align:center;padding:4px;border-radius:4px;font-size:1rem;line-height:1;";
+        span.addEventListener("mouseover", function () {
+          span.style.background =
+            "color-mix(in oklab, var(--color-base-content,#1f2937) 8%, transparent)";
+        });
+        span.addEventListener("mouseout", function () {
+          span.style.background = "";
+        });
+        span.addEventListener("click", function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          self._insertEmoji(s);
+          self._closeSymbolPicker();
+        });
+        grid.appendChild(span);
+      });
+      picker.appendChild(grid);
+
+      picker.addEventListener("mousedown", function (e) {
+        e.preventDefault();
+      });
+
+      var rect = anchor.getBoundingClientRect();
+      var tbRect = toolbar.getBoundingClientRect();
+      toolbar.style.position = "relative";
+      picker.style.left =
+        Math.max(0, Math.min(rect.left - tbRect.left, tbRect.width - 300)) + "px";
+      picker.style.top = rect.bottom - tbRect.top + 4 + "px";
+      toolbar.appendChild(picker);
+      this._symbolPicker = picker;
+
+      var closeHandler = function (e) {
+        if (!picker.contains(e.target)) self._closeSymbolPicker();
+      };
+      setTimeout(function () {
+        document.addEventListener("click", closeHandler);
+      }, 0);
+      this._symbolCloseHandler = closeHandler;
+    },
+
+    _closeSymbolPicker: function () {
+      if (this._symbolPicker) {
+        this._symbolPicker.remove();
+        this._symbolPicker = null;
+      }
+      if (this._symbolCloseHandler) {
+        document.removeEventListener("click", this._symbolCloseHandler);
+        this._symbolCloseHandler = null;
       }
     },
 
