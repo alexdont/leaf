@@ -7177,21 +7177,63 @@
     _setupTaskLists: function () {
       if (!this._visualEl) return;
       var self = this;
-      // Use mousedown so the toggle wins before the browser moves the caret
-      // / hybrid reacts to the selection change.
+      // mousedown so we act before the browser places the caret (toggling
+      // the box, or pre-empting a caret that would otherwise strand itself
+      // "behind" the contenteditable=false box where nothing is typeable).
       this._visualEl.addEventListener("mousedown", function (e) {
-        var box = e.target.closest && e.target.closest(".leaf-task-box");
-        if (!box || self._readonly) return;
-        var li = box.closest("li.leaf-task");
+        if (self._readonly) return;
+        var li = e.target.closest && e.target.closest("li.leaf-task");
         if (!li) return;
+        var box = li.querySelector(".leaf-task-box");
+        if (!box) return;
+
+        // Click on the box → toggle.
+        if (e.target.closest(".leaf-task-box")) {
+          e.preventDefault();
+          e.stopPropagation();
+          li.setAttribute(
+            "data-checked",
+            li.getAttribute("data-checked") === "true" ? "false" : "true"
+          );
+          self._debouncedPushVisualChange();
+          return;
+        }
+
+        // Would the caret land on/before the box? Place it at the task text
+        // instead — done on mousedown so there's no visible jump.
+        var pos = self._caretFromPoint(e.clientX, e.clientY);
+        if (!pos) return;
+        var stranded =
+          pos.node === box ||
+          box.contains(pos.node) ||
+          (pos.node === li && pos.offset === 0);
+        if (!stranded) return;
+
         e.preventDefault();
-        e.stopPropagation();
-        li.setAttribute(
-          "data-checked",
-          li.getAttribute("data-checked") === "true" ? "false" : "true"
-        );
-        self._debouncedPushVisualChange();
+        self._visualEl.focus({ preventScroll: true });
+        var r = document.createRange();
+        var after = box.nextSibling;
+        if (after && after.nodeType === Node.TEXT_NODE) r.setStart(after, 0);
+        else r.setStartAfter(box);
+        r.collapse(true);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
       });
+    },
+
+    // Resolve the caret position the browser would pick for a viewport
+    // point, across the two standard APIs. Returns { node, offset } or null.
+    _caretFromPoint: function (x, y) {
+      if (document.caretRangeFromPoint) {
+        var rng = document.caretRangeFromPoint(x, y);
+        return rng ? { node: rng.startContainer, offset: rng.startOffset } : null;
+      }
+      if (document.caretPositionFromPoint) {
+        var p = document.caretPositionFromPoint(x, y);
+        return p ? { node: p.offsetNode, offset: p.offset } : null;
+      }
+      return null;
     },
 
     _insertTaskList: function () {
