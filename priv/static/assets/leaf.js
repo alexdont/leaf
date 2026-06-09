@@ -7565,21 +7565,21 @@
     // old CSS-pin path is possible but not warranted yet.
     _requestFullscreen: function (el) {
       var fn = el.requestFullscreen || el.webkitRequestFullscreen ||
-               el.mozRequestFullScreen || el.msRequestFullscreen;
-      if (fn) { try { return fn.call(el); } catch (_) {} }
+        el.mozRequestFullScreen || el.msRequestFullscreen;
+      if (fn) { try { return fn.call(el); } catch (_) { } }
     },
 
     _exitFullscreen: function () {
       var fn = document.exitFullscreen || document.webkitExitFullscreen ||
-               document.mozCancelFullScreen || document.msExitFullscreen;
-      if (fn) { try { return fn.call(document); } catch (_) {} }
+        document.mozCancelFullScreen || document.msExitFullscreen;
+      if (fn) { try { return fn.call(document); } catch (_) { } }
     },
 
     _fullscreenElement: function () {
       return document.fullscreenElement ||
-             document.webkitFullscreenElement ||
-             document.mozFullScreenElement ||
-             document.msFullscreenElement || null;
+        document.webkitFullscreenElement ||
+        document.mozFullScreenElement ||
+        document.msFullscreenElement || null;
     },
 
     // Reflect `document.fullscreenElement` into our DOM. Called from the

@@ -114,7 +114,7 @@ Then use it in your templates:
 | `mode` | `:hybrid` \| `:visual` \| `:markdown` \| `:html` | `:hybrid` | Initial editor mode |
 | `preset` | `:advanced` \| `:simple` | `:advanced` | Toolbar preset; `:simple` is a compact subset for comments and lightweight editing |
 | `toolbar` | list | `[]` | Extra toolbar buttons (`:image`, `:video`) |
-| `deny` | list | `[]` | Disallowed features (`:links`, `:images`, `:video`, `:markdown_mode`, `:html_mode`) |
+| `deny` | list | `[]` | Disallowed features (`:links`, `:images`, `:video`, `:markdown_mode`, `:html_mode`); denied controls are hidden from the UI |
 | `placeholder` | string | `"Write something..."` | Placeholder text shown when the editor is empty |
 | `readonly` | boolean | `false` | Read-only mode |
 | `height` | string | `"480px"` | Editor height (the body resizes from this baseline) |

@@ -84,6 +84,17 @@ defmodule LeafTest do
     refute new_socket.assigns.content =~ "![x](/x.png)"
   end
 
+  test "set_content keeps image markdown when only links are denied" do
+    socket = base_socket(deny: [:links])
+    content = "See [docs](https://example.com) ![x](/x.png)"
+
+    assert {:ok, new_socket} =
+             Leaf.update(%{action: :set_content, content: content}, socket)
+
+    refute new_socket.assigns.content =~ "[docs](https://example.com)"
+    assert new_socket.assigns.content =~ "![x](/x.png)"
+  end
+
   test "deny flags are exposed for toolbar actions" do
     rendered =
       render_component(&Leaf.leaf_editor/1,
@@ -98,6 +109,9 @@ defmodule LeafTest do
     assert rendered =~ ~s(data-deny-links="true")
     assert rendered =~ ~s(data-deny-images="true")
     assert rendered =~ ~s(data-deny-video="true")
+    refute rendered =~ ~s(data-toolbar-action="link")
+    refute rendered =~ ~s(data-toolbar-action="insert-image")
+    refute rendered =~ ~s(data-toolbar-action="insert-video")
   end
 
   test "deny mode flags are exposed to the client" do
