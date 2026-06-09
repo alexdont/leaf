@@ -96,6 +96,7 @@ defmodule Leaf do
   attr(:emit_events, :boolean, default: false)
   attr(:toolbar_extra, :list, default: [])
   attr(:toolbar_layout, :atom, default: :fixed, values: [:fixed, :floating, :both])
+  attr(:preserve_tags, :list, default: [])
   attr(:maxlength, :integer, default: nil)
   attr(:spellcheck, :boolean, default: true)
   attr(:dir, :string, default: "ltr", values: ["ltr", "rtl", "auto"])
@@ -153,6 +154,7 @@ defmodule Leaf do
      |> assign_new(:emit_events, fn -> false end)
      |> assign_new(:toolbar_extra, fn -> [] end)
      |> assign_new(:toolbar_layout, fn -> :fixed end)
+     |> assign_new(:preserve_tags, fn -> [] end)
      |> assign_new(:maxlength, fn -> nil end)
      |> assign_new(:spellcheck, fn -> true end)
      |> assign_new(:dir, fn -> "ltr" end)
@@ -182,7 +184,7 @@ defmodule Leaf do
   end
 
   def update(%{action: :set_content, content: content}, socket) do
-    html = markdown_to_html(content)
+    html = markdown_to_html(content, preserve_tags(socket))
 
     {:ok,
      socket
@@ -234,7 +236,7 @@ defmodule Leaf do
 
     socket =
       assign_new(socket, :visual_html, fn ->
-        markdown_to_html(socket.assigns.content)
+        markdown_to_html(socket.assigns.content, preserve_tags(socket))
       end)
 
     {:ok, socket}
@@ -567,6 +569,26 @@ defmodule Leaf do
                           <span>{t("Horizontal Rule")}</span>
                         </button>
                       </li>
+                      <li class="hidden" data-compact-overflow="insert-more-extra">
+                        <button type="button" data-toolbar-action="taskList">
+                          <span>{t("Task List")}</span>
+                        </button>
+                      </li>
+                      <li class="hidden" data-compact-overflow="insert-more-extra">
+                        <button type="button" data-toolbar-action="callout">
+                          <span>{t("Callout")}</span>
+                        </button>
+                      </li>
+                      <li class="hidden" data-compact-overflow="insert-more-extra">
+                        <button type="button" data-toolbar-action="detailsBlock">
+                          <span>{t("Details / Accordion")}</span>
+                        </button>
+                      </li>
+                      <li class="hidden" data-compact-overflow="insert-more-extra">
+                        <button type="button" data-toolbar-action="symbols">
+                          <span>{t("Symbols / Date")}</span>
+                        </button>
+                      </li>
                     <% end %>
                     <li class="hidden" data-compact-overflow="remove-format">
                       <button type="button" data-toolbar-action="removeFormat">
@@ -581,6 +603,32 @@ defmodule Leaf do
                         <span>{t("Remove Formatting")}</span>
                       </button>
                     </li>
+                    <%= if @toolbar_extra != [] and not @readonly do %>
+                      <li class="menu-title text-xs px-2 pt-1 hidden" data-compact-overflow="extra">
+                        {t("Components")}
+                      </li>
+                      <%= for btn <- @toolbar_extra do %>
+                        <li class="hidden" data-compact-overflow="extra">
+                          <button type="button" data-host-action={efetch(btn, :id)}>
+                            <span>{efetch(btn, :label) || efetch(btn, :title) || efetch(btn, :id)}</span>
+                          </button>
+                        </li>
+                      <% end %>
+                    <% end %>
+                    <%= if @export and not @readonly do %>
+                      <li class="menu-title text-xs px-2 pt-1 hidden" data-compact-overflow="export">
+                        {t("Export")}
+                      </li>
+                      <li class="hidden" data-compact-overflow="export">
+                        <button type="button" data-toolbar-action="copyMarkdown"><span>{t("Copy as Markdown")}</span></button>
+                      </li>
+                      <li class="hidden" data-compact-overflow="export">
+                        <button type="button" data-toolbar-action="copyHtml"><span>{t("Copy as HTML")}</span></button>
+                      </li>
+                      <li class="hidden" data-compact-overflow="export">
+                        <button type="button" data-toolbar-action="downloadMarkdown"><span>{t("Download .md")}</span></button>
+                      </li>
+                    <% end %>
                   </ul>
                 </div>
               <% else %>
@@ -1049,7 +1097,7 @@ defmodule Leaf do
              {:leaf_toolbar_action, %{editor_id, id, selection}}. --%>
         <%= if @toolbar_extra != [] and not @readonly do %>
           <div class="divider divider-horizontal mx-0.5 h-6" data-toolbar-divider="extra"></div>
-          <div class="flex items-center gap-0.5" data-toolbar-extra>
+          <div class="flex items-center gap-0.5" data-toolbar-extra data-toolbar-overflow="extra">
             <%= for btn <- @toolbar_extra do %>
               <button
                 type="button"
@@ -1069,7 +1117,7 @@ defmodule Leaf do
              reading the current markdown/HTML; no server round-trip. --%>
         <%= if @export and not @readonly do %>
           <div class="divider divider-horizontal mx-0.5 h-6" data-toolbar-divider="export"></div>
-          <div class="flex items-center gap-0.5" data-toolbar-export>
+          <div class="flex items-center gap-0.5" data-toolbar-export data-toolbar-overflow="export">
             <button type="button" data-toolbar-action="copyMarkdown" class="btn btn-xs btn-ghost px-2" title={t("Copy as Markdown")}>
               <span class="text-xs font-semibold">MD</span>
             </button>
@@ -1350,12 +1398,32 @@ defmodule Leaf do
                 <li><button type="button" data-toolbar-action="codeBlock"><span>{t("Code Block")}</span></button></li>
                 <li class="menu-title text-xs px-2 pt-1">{t("Insert")}</li>
                 <li><button type="button" data-toolbar-action="horizontalRule"><span>{t("Horizontal Rule")}</span></button></li>
+                <li><button type="button" data-toolbar-action="taskList"><span>{t("Task List")}</span></button></li>
+                <li><button type="button" data-toolbar-action="callout"><span>{t("Callout")}</span></button></li>
+                <li><button type="button" data-toolbar-action="detailsBlock"><span>{t("Details / Accordion")}</span></button></li>
+                <li><button type="button" data-toolbar-action="symbols"><span>{t("Symbols / Date")}</span></button></li>
                 <%= if :image in @toolbar do %>
                   <li><button type="button" data-toolbar-action="insert-image"><span>{t("Image")}</span></button></li>
                 <% end %>
                 <%= if :video in @toolbar do %>
                   <li><button type="button" data-toolbar-action="insert-video"><span>{t("Video")}</span></button></li>
                 <% end %>
+              <% end %>
+              <%= if @toolbar_extra != [] and not @readonly do %>
+                <li class="menu-title text-xs px-2 pt-1">{t("Components")}</li>
+                <%= for btn <- @toolbar_extra do %>
+                  <li>
+                    <button type="button" data-host-action={efetch(btn, :id)}>
+                      <span>{efetch(btn, :label) || efetch(btn, :title) || efetch(btn, :id)}</span>
+                    </button>
+                  </li>
+                <% end %>
+              <% end %>
+              <%= if @export and not @readonly do %>
+                <li class="menu-title text-xs px-2 pt-1">{t("Export")}</li>
+                <li><button type="button" data-toolbar-action="copyMarkdown"><span>{t("Copy as Markdown")}</span></button></li>
+                <li><button type="button" data-toolbar-action="copyHtml"><span>{t("Copy as HTML")}</span></button></li>
+                <li><button type="button" data-toolbar-action="downloadMarkdown"><span>{t("Download .md")}</span></button></li>
               <% end %>
               <li class="menu-title text-xs px-2 pt-1">{t("Clean up")}</li>
               <li><button type="button" data-toolbar-action="removeFormat"><span>{t("Remove Formatting")}</span></button></li>
@@ -1535,7 +1603,7 @@ defmodule Leaf do
   end
 
   def handle_event("markdown_content_changed", %{"content" => content} = params, socket) do
-    html = markdown_to_html(content)
+    html = markdown_to_html(content, preserve_tags(socket))
 
     send(
       self(),
@@ -1598,7 +1666,7 @@ defmodule Leaf do
   end
 
   def handle_event("sync_markdown_to_visual", %{"markdown" => markdown}, socket) do
-    html = markdown_to_html(markdown)
+    html = markdown_to_html(markdown, preserve_tags(socket))
 
     {:noreply, push_event(socket, "leaf-set-html:#{socket.assigns.id}", %{html: html})}
   end
@@ -1677,6 +1745,8 @@ defmodule Leaf do
   def handle_event("media_ui_closed", _params, socket), do: {:noreply, socket}
 
   # -- Helpers --
+
+  defp preserve_tags(socket), do: Map.get(socket.assigns, :preserve_tags, [])
 
   # Fetch a key from a host-supplied map, tolerating either atom or string
   # keys (so `%{id: "hero"}` and `%{"id" => "hero"}` both work).
@@ -1825,6 +1895,19 @@ defmodule Leaf do
     [data-visual-toolbar][data-compact-modes="true"][data-toolbar-preset="advanced"] [data-compact-overflow="remove-format"] {
       display: list-item !important;
     }
+    /* Extra tools (host toolbar_extra + export) collapse into the compact
+       menu the moment compact mode engages — same as remove-format — so
+       they never spill onto a second row. */
+    [data-visual-toolbar][data-compact-modes="true"][data-toolbar-preset="advanced"] [data-toolbar-overflow="extra"],
+    [data-visual-toolbar][data-compact-modes="true"][data-toolbar-preset="advanced"] [data-toolbar-divider="extra"],
+    [data-visual-toolbar][data-compact-modes="true"][data-toolbar-preset="advanced"] [data-toolbar-overflow="export"],
+    [data-visual-toolbar][data-compact-modes="true"][data-toolbar-preset="advanced"] [data-toolbar-divider="export"] {
+      display: none !important;
+    }
+    [data-visual-toolbar][data-compact-modes="true"][data-toolbar-preset="advanced"] [data-compact-overflow="extra"],
+    [data-visual-toolbar][data-compact-modes="true"][data-toolbar-preset="advanced"] [data-compact-overflow="export"] {
+      display: list-item !important;
+    }
     [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="1"], [data-toolbar-overflow-level="2"], [data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-toolbar-overflow="remove-format"],
     [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="1"], [data-toolbar-overflow-level="2"], [data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-toolbar-divider="remove-format"],
     [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="1"], [data-toolbar-overflow-level="2"], [data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-toolbar-overflow="insert-more"] {
@@ -1834,7 +1917,8 @@ defmodule Leaf do
     [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="1"], [data-toolbar-overflow-level="2"], [data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-compact-overflow="insert-title"],
     [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="1"], [data-toolbar-overflow-level="2"], [data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-compact-overflow="insert-blockquote"],
     [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="1"], [data-toolbar-overflow-level="2"], [data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-compact-overflow="insert-codeblock"],
-    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="1"], [data-toolbar-overflow-level="2"], [data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-compact-overflow="insert-hr"] {
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="1"], [data-toolbar-overflow-level="2"], [data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-compact-overflow="insert-hr"],
+    [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="1"], [data-toolbar-overflow-level="2"], [data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-compact-overflow="insert-more-extra"] {
       display: list-item !important;
     }
     [data-visual-toolbar][data-toolbar-preset="advanced"]:is([data-toolbar-overflow-level="2"], [data-toolbar-overflow-level="3"], [data-toolbar-overflow-level="4"], [data-toolbar-overflow-level="5"], [data-toolbar-overflow-level="6"], [data-toolbar-overflow-level="7"], [data-toolbar-overflow-level="8"], [data-toolbar-overflow-level="9"], [data-toolbar-overflow-level="10"]) [data-toolbar-overflow="insert-table"] {
@@ -1969,7 +2053,8 @@ defmodule Leaf do
       [data-visual-toolbar][data-toolbar-preset="advanced"] [data-compact-overflow="insert-title"],
       [data-visual-toolbar][data-toolbar-preset="advanced"] [data-compact-overflow="insert-blockquote"],
       [data-visual-toolbar][data-toolbar-preset="advanced"] [data-compact-overflow="insert-codeblock"],
-      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-compact-overflow="insert-hr"] {
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-compact-overflow="insert-hr"],
+      [data-visual-toolbar][data-toolbar-preset="advanced"] [data-compact-overflow="insert-more-extra"] {
         display: list-item !important;
       }
     }
@@ -2209,6 +2294,70 @@ defmodule Leaf do
   # characters end up as bare text inside the editor div (no `<p>`).
   # That breaks the hybrid auto-format helpers (`_maybeAutoFormatHeading`
   # & co.) which require the current block to be a `<p>`.
+  # 2-arity variant: when `preserve_tags` is non-empty, custom/unknown tags
+  # (e.g. <Hero/>, <CTA/>) are pulled out of the markdown BEFORE Earmark
+  # (which would otherwise mangle their form), rendered as atomic,
+  # non-editable placeholder blocks, and restored verbatim. The client
+  # serializes those placeholders straight back to their original source,
+  # so custom XML round-trips byte-for-byte through visual/hybrid mode.
+  defp markdown_to_html(nil, _), do: markdown_to_html(nil)
+  defp markdown_to_html("", _), do: markdown_to_html("")
+
+  defp markdown_to_html(markdown, preserve_tags)
+       when is_list(preserve_tags) and preserve_tags != [] do
+    {protected, store} = extract_preserved_tags(markdown, preserve_tags)
+
+    protected
+    |> markdown_to_html()
+    |> restore_preserved_tags(store)
+  end
+
+  defp markdown_to_html(markdown, _), do: markdown_to_html(markdown)
+
+  # Replace each occurrence of a preserved tag with an inert text token,
+  # returning {protected_markdown, %{token => original_source}}.
+  defp extract_preserved_tags(markdown, preserve_tags) do
+    matches =
+      preserve_tags
+      |> Enum.flat_map(fn tag ->
+        t = Regex.escape(to_string(tag))
+        {:ok, re} = Regex.compile("<#{t}\\b[^>]*?/>|<#{t}\\b[^>]*?>.*?</#{t}>", "is")
+        re |> Regex.scan(markdown) |> Enum.map(&hd/1)
+      end)
+      |> Enum.uniq()
+
+    matches
+    |> Enum.with_index()
+    |> Enum.reduce({markdown, %{}}, fn {match, i}, {md, store} ->
+      token = "LEAFPRESERVED#{i}LEAFEND"
+      {String.replace(md, match, token), Map.put(store, token, match)}
+    end)
+  end
+
+  # Swap tokens back for atomic placeholder spans carrying the verbatim
+  # source in a `data-leaf-raw` attribute. A standalone token that Earmark
+  # wrapped in its own `<p>` stays a block; an inline token stays inline.
+  defp restore_preserved_tags(html, store) do
+    Enum.reduce(store, html, fn {token, raw}, acc ->
+      escaped = raw |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
+      label = preserve_label(raw)
+
+      wrapper =
+        ~s(<span class="leaf-atomic" contenteditable="false" data-leaf-raw="#{escaped}"><span class="leaf-atomic-label">#{label}</span></span>)
+
+      acc
+      |> String.replace("<p>#{token}</p>", "<p>#{wrapper}</p>")
+      |> String.replace(token, wrapper)
+    end)
+  end
+
+  defp preserve_label(raw) do
+    case Regex.run(~r/<\s*([A-Za-z][\w-]*)/, raw) do
+      [_, name] -> name
+      _ -> "block"
+    end
+  end
+
   defp markdown_to_html(nil), do: "<p><br></p>"
   defp markdown_to_html(""), do: "<p><br></p>"
 

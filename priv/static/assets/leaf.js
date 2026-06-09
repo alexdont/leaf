@@ -129,6 +129,17 @@
     "  outline-offset: 2px;",
     "}",
 
+    // Atomic preserved blocks (custom/unknown tags) — rendered as a
+    // non-editable chip so the underlying XML can't be corrupted in place.
+    ".content-editor-visual .leaf-atomic {",
+    "  display: inline-block; vertical-align: middle; user-select: all;",
+    "  padding: 0.15em 0.55em; margin: 0.1em 0; border-radius: 0.375rem;",
+    "  border: 1px dashed var(--color-base-300, #d1d5db);",
+    "  background: color-mix(in oklab, var(--color-base-content, #1f2937) 6%, transparent);",
+    "  font: 600 0.8em ui-monospace, monospace; cursor: default;",
+    "}",
+    ".content-editor-visual .leaf-atomic-label::before { content: '⧉ '; opacity: 0.6; }",
+
     // GFM callouts / admonitions
     ".content-editor-visual blockquote.leaf-callout {",
     "  border-left: 4px solid var(--cl, #3b82f6); border-radius: 0.375rem;",
@@ -577,6 +588,12 @@
 
     if (node.nodeType !== Node.ELEMENT_NODE) {
       return "";
+    }
+
+    // Atomic preserved block (#3): a server-wrapped custom/unknown tag.
+    // Emit the verbatim source it carries and ignore the placeholder label.
+    if (node.classList && node.classList.contains("leaf-atomic")) {
+      return node.getAttribute("data-leaf-raw") || "";
     }
 
     var tag = node.tagName.toLowerCase();
@@ -2634,17 +2651,24 @@
           }
 
           var rowTop = null;
+          var maxTop = null;
           toolbar.querySelectorAll("button, summary").forEach(function (el) {
+            // Skip buttons inside the toolbar's dropdown menus — an open
+            // menu positions its items below the row and would otherwise
+            // read as a wrap.
+            var inMenu = el.closest("ul");
             if (
               inlineModes.contains(el) ||
               compactModes.contains(el) ||
               (fullscreenSection && fullscreenSection.contains(el)) ||
+              (inMenu && toolbar.contains(inMenu)) ||
               el.offsetParent === null
             ) {
               return;
             }
             var top = el.getBoundingClientRect().top;
             if (rowTop === null || top < rowTop) rowTop = top;
+            if (maxTop === null || top > maxTop) maxTop = top;
           });
 
           if (rowTop === null) rowTop = toolbar.getBoundingClientRect().top;
@@ -2655,7 +2679,15 @@
               ? fullscreenSection.getBoundingClientRect().top
               : rowTop;
 
-          if (modeTop > rowTop + 2 || fullscreenTop > rowTop + 2) {
+          // Compact when the mode switcher / fullscreen wrap OR when ANY
+          // primary button (including host toolbar_extra + export tools)
+          // has spilled onto a second row — so the extra tools are part of
+          // the width calculation instead of silently wrapping.
+          if (
+            modeTop > rowTop + 2 ||
+            fullscreenTop > rowTop + 2 ||
+            (maxTop !== null && maxTop > rowTop + 2)
+          ) {
             shouldCompactModes = true;
           }
 
