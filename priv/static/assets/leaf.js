@@ -1587,6 +1587,9 @@
         // list auto-format. Consecutive blockquote lines merge into the
         // same `<blockquote>`.
         this._maybeAutoFormatBlockquote();
+        // Task auto-format: `[ ] ` / `[x] ` typed in a list item turns it
+        // into a checkbox.
+        this._maybeAutoFormatTask();
       }
       this._debouncedPushVisualChange();
       this._updateCounts();
@@ -4183,6 +4186,65 @@
         } else {
           caret.setStart(inner, 0);
         }
+        caret.collapse(true);
+        try {
+          sel.removeAllRanges();
+          sel.addRange(caret);
+        } catch (_e) {
+          /* range invalidated mid-frame — skip */
+        }
+      } finally {
+        this._syntaxMutating = false;
+      }
+    },
+
+    // Typing `[ ] ` / `[x] ` / `[] ` at the start of a list item turns it
+    // into a checkbox (the GFM/Notion gesture). `- ` already made the
+    // `<li>`; this finishes the job into a task item.
+    _maybeAutoFormatTask: function () {
+      if (this._syntaxMutating) return;
+      var sel = window.getSelection();
+      if (!sel.rangeCount) return;
+      if (!sel.getRangeAt(0).collapsed) return;
+
+      var block = this._getCurrentBlock();
+      if (!block || !block.tagName) return;
+      if (block.tagName.toLowerCase() !== "li") return;
+      if (block.classList && block.classList.contains("leaf-task")) return;
+
+      // Chrome turns a typed trailing space into NBSP — normalize first.
+      var text = (block.textContent || "").replace(/ /g, " ");
+      var m = text.match(/^\[([ xX]?)\] /);
+      if (!m) return;
+
+      var checked = m[1] === "x" || m[1] === "X";
+
+      this._syntaxMutating = true;
+      try {
+        this._trimLeadingTextChars(block, m[0].length);
+        block.classList.add("leaf-task");
+        block.setAttribute("data-checked", checked ? "true" : "false");
+
+        var box = document.createElement("span");
+        box.className = "leaf-task-box";
+        box.setAttribute("contenteditable", "false");
+        block.insertBefore(box, block.firstChild);
+
+        // Give the caret a text-node home right after the box.
+        var after = box.nextSibling;
+        if (!after || after.nodeType !== Node.TEXT_NODE) {
+          after = document.createTextNode("​");
+          block.insertBefore(after, box.nextSibling);
+        }
+
+        if (this._sourceBlock === block) {
+          this._sourceBlock = null;
+          this._lastSourceStateKey = null;
+          this._activeMatchKey = null;
+        }
+
+        var caret = document.createRange();
+        caret.setStart(after, after.textContent === "​" ? 1 : 0);
         caret.collapse(true);
         try {
           sel.removeAllRanges();
