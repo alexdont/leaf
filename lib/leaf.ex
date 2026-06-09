@@ -97,6 +97,7 @@ defmodule Leaf do
   attr(:toolbar_extra, :list, default: [])
   attr(:toolbar_layout, :atom, default: :fixed, values: [:fixed, :floating, :both])
   attr(:maxlength, :integer, default: nil)
+  attr(:spellcheck, :boolean, default: true)
   attr(:smart_typography, :boolean, default: false)
   attr(:export, :boolean, default: false)
   attr(:protect_navigation, :boolean, default: false)
@@ -152,6 +153,7 @@ defmodule Leaf do
      |> assign_new(:toolbar_extra, fn -> [] end)
      |> assign_new(:toolbar_layout, fn -> :fixed end)
      |> assign_new(:maxlength, fn -> nil end)
+     |> assign_new(:spellcheck, fn -> true end)
      |> assign_new(:smart_typography, fn -> false end)
      |> assign_new(:export, fn -> false end)
      |> assign_new(:protect_navigation, fn -> false end)
@@ -977,6 +979,28 @@ defmodule Leaf do
                       <span>{t("Details / Accordion")}</span>
                     </button>
                   </li>
+                  <li>
+                    <button
+                      type="button"
+                      data-toolbar-action="taskList"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
+                        <path fill-rule="evenodd" d="M7.53 4.97a.75.75 0 0 1 0 1.06L5.06 8.5 7.53 10.97a.75.75 0 0 1-1.06 1.06l-3-3a.75.75 0 0 1 0-1.06l3-3a.75.75 0 0 1 1.06 0ZM10.75 7.5a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5Z" clip-rule="evenodd" />
+                      </svg>
+                      <span>{t("Task List")}</span>
+                    </button>
+                  </li>
+                  <li>
+                    <button
+                      type="button"
+                      data-toolbar-action="callout"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
+                        <path fill-rule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM9 9a.75.75 0 0 0 0 1.5h.253a.25.25 0 0 1 .244.304l-.459 2.066A1.75 1.75 0 0 0 10.747 15H11a.75.75 0 0 0 0-1.5h-.253a.25.25 0 0 1-.244-.304l.459-2.066A1.75 1.75 0 0 0 9.253 9H9Z" clip-rule="evenodd" />
+                      </svg>
+                      <span>{t("Callout")}</span>
+                    </button>
+                  </li>
                 </ul>
               </div>
               <% end %>
@@ -1379,7 +1403,7 @@ defmodule Leaf do
             contenteditable={if @readonly, do: "false", else: "true"}
             autocapitalize="sentences"
             autocorrect="on"
-            spellcheck="true"
+            spellcheck={to_string(@spellcheck)}
             class={[
               "content-editor-visual",
               "overflow-auto p-4 pl-10",
@@ -1405,6 +1429,7 @@ defmodule Leaf do
             placeholder={@placeholder}
             readonly={@readonly}
             maxlength={@maxlength}
+            spellcheck={to_string(@spellcheck)}
             phx-debounce={@debounce}
           ><%= @content %></textarea>
         </div>
@@ -2187,8 +2212,38 @@ defmodule Leaf do
     html
     |> String.replace(~r/<(h[1-6]|p|li|blockquote|a)([^>]*)>\n/, "<\\1\\2>")
     |> String.replace(~r/\s*<\/(h[1-6]|p|li|blockquote|a)>/, "</\\1>")
+    |> apply_task_lists()
+    |> apply_callouts()
     |> apply_spoiler_syntax()
     |> String.trim()
+  end
+
+  # GFM callouts: `> [!NOTE]` etc. Earmark leaves `[!NOTE]` as literal text
+  # at the start of the blockquote's first paragraph. Promote the blockquote
+  # to a styled callout with a derived (non-editable) title label; the client
+  # serializes it back to `> [!NOTE]`.
+  defp apply_callouts(html) do
+    Regex.replace(
+      ~r/<blockquote>\s*<p>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(?:<br\s*\/?>)?\s*/i,
+      html,
+      fn _full, type ->
+        lower = String.downcase(type)
+        title = String.capitalize(lower)
+
+        ~s(<blockquote class="leaf-callout leaf-callout-#{lower}" data-callout="#{lower}"><p class="leaf-callout-title" contenteditable="false">#{title}</p><p>)
+      end
+    )
+  end
+
+  # GFM task lists: Earmark leaves `[ ] text` / `[x] text` as literal text
+  # inside `<li>`. Promote those to a clickable checkbox item that the
+  # client serializes back to `- [ ] ` / `- [x] `.
+  defp apply_task_lists(html) do
+    Regex.replace(~r/<li>\s*\[([ xX])\]\s?/, html, fn _full, mark ->
+      checked = if mark in ["x", "X"], do: "true", else: "false"
+
+      ~s(<li class="leaf-task" data-checked="#{checked}"><span class="leaf-task-box" contenteditable="false"></span>)
+    end)
   end
 
   # Convert `||text||` (Discord-style spoiler) to <span class="leaf-spoiler">.

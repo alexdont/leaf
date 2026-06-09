@@ -129,6 +129,40 @@
     "  outline-offset: 2px;",
     "}",
 
+    // GFM callouts / admonitions
+    ".content-editor-visual blockquote.leaf-callout {",
+    "  border-left: 4px solid var(--cl, #3b82f6); border-radius: 0.375rem;",
+    "  background: color-mix(in oklab, var(--cl, #3b82f6) 8%, transparent);",
+    "  padding: 0.5rem 0.85rem; margin: 0.75em 0;",
+    "}",
+    ".content-editor-visual blockquote.leaf-callout .leaf-callout-title {",
+    "  font-weight: 700; font-size: 0.85em; text-transform: uppercase;",
+    "  letter-spacing: 0.03em; color: var(--cl, #3b82f6); margin: 0 0 0.25em;",
+    "  user-select: none;",
+    "}",
+    ".content-editor-visual blockquote.leaf-callout-note { --cl: #3b82f6; }",
+    ".content-editor-visual blockquote.leaf-callout-tip { --cl: #22c55e; }",
+    ".content-editor-visual blockquote.leaf-callout-important { --cl: #a855f7; }",
+    ".content-editor-visual blockquote.leaf-callout-warning { --cl: #f59e0b; }",
+    ".content-editor-visual blockquote.leaf-callout-caution { --cl: #ef4444; }",
+
+    // GFM task lists
+    ".content-editor-visual li.leaf-task { list-style: none; margin-left: -1.25em; }",
+    ".content-editor-visual .leaf-task-box {",
+    "  display: inline-block; width: 1em; height: 1em; vertical-align: -0.15em;",
+    "  margin-right: 0.45em; border: 1.5px solid currentColor; border-radius: 0.25em;",
+    "  position: relative; cursor: pointer; opacity: 0.65; box-sizing: border-box;",
+    "}",
+    ".content-editor-visual li.leaf-task[data-checked='true'] .leaf-task-box {",
+    "  background: currentColor; opacity: 0.85;",
+    "}",
+    ".content-editor-visual li.leaf-task[data-checked='true'] .leaf-task-box::after {",
+    "  content: ''; position: absolute; left: 0.28em; top: 0.08em;",
+    "  width: 0.28em; height: 0.55em; border: solid var(--color-base-100, #fff);",
+    "  border-width: 0 2px 2px 0; transform: rotate(45deg);",
+    "}",
+    ".content-editor-visual li.leaf-task[data-checked='true'] { opacity: 0.65; }",
+
     // Collapsible details / accordion blocks
     ".content-editor-visual details {",
     "  border: 1px solid var(--color-base-300, #d1d5db); border-radius: 0.5rem;",
@@ -661,10 +695,30 @@
         return "\n" + node.outerHTML.replace(/\s*contenteditable="[^"]*"/gi, "") + "\n\n";
 
       case "blockquote":
+        var callout = node.getAttribute("data-callout");
+        var bqInner;
+        if (callout) {
+          // Serialize children except the derived title label, prefix the
+          // GFM callout marker.
+          var coParts = [];
+          for (var coi = 0; coi < node.childNodes.length; coi++) {
+            var coChild = node.childNodes[coi];
+            if (
+              coChild.nodeType === Node.ELEMENT_NODE &&
+              coChild.classList &&
+              coChild.classList.contains("leaf-callout-title")
+            ) {
+              continue;
+            }
+            coParts.push(convertNode(coChild));
+          }
+          bqInner = "[!" + callout.toUpperCase() + "]\n" + coParts.join("").trim();
+        } else {
+          bqInner = inner.trim();
+        }
         return (
           "\n" +
-          inner
-            .trim()
+          bqInner
             .split("\n")
             .map(function (line) {
               return "> " + line;
@@ -725,8 +779,14 @@
     for (var i = 0; i < listNode.children.length; i++) {
       var child = listNode.children[i];
       if (child.tagName.toLowerCase() === "li") {
-        var prefix = type === "ol" ? index + ". " : "- ";
         var content = nodeToMarkdown(child).trim();
+        var prefix;
+        if (child.classList && child.classList.contains("leaf-task")) {
+          var checked = child.getAttribute("data-checked") === "true";
+          prefix = "- [" + (checked ? "x" : " ") + "] ";
+        } else {
+          prefix = type === "ol" ? index + ". " : "- ";
+        }
         items.push(prefix + content);
         index++;
       }
@@ -1022,6 +1082,7 @@
       }
       this._setupImageDragAndDrop();
       this._setupCodeBlockTools();
+      this._setupTaskLists();
       this._setupMaxlength();
       this._setupAutoGrow();
       this._setupNavigationGuard();
@@ -6862,6 +6923,12 @@
         case "detailsBlock":
           this._insertDetailsBlock();
           break;
+        case "taskList":
+          this._insertTaskList();
+          break;
+        case "callout":
+          this._insertCallout("note");
+          break;
         case "horizontalRule":
           this._insertHorizontalRule();
           break;
@@ -6972,6 +7039,8 @@
         case "codeBlock": if (fmt) fmt("```\n", "\n```"); break;
         case "horizontalRule": if (ins) ins("\n---\n"); break;
         case "detailsBlock": if (ins) ins("\n<details>\n<summary>Summary</summary>\n\nContent\n\n</details>\n"); break;
+        case "taskList": if (pfx) pfx("- [ ] "); break;
+        case "callout": if (ins) ins("\n> [!NOTE]\n> \n"); break;
         case "table": if (ins) ins("\n| Header 1 | Header 2 |\n| --- | --- |\n| Cell 1 | Cell 2 |\n| Cell 3 | Cell 4 |\n"); break;
         case "link": if (lnk) lnk(); break;
         case "emoji": this._openEmojiPicker(); break;
@@ -7020,6 +7089,48 @@
     // stored as `data-language`, and round-trips as a ```lang fence.
     _insertCodeBlock: function () {
       document.execCommand("formatBlock", false, "pre");
+    },
+
+    // -- Task lists (GFM checkboxes) --
+
+    _setupTaskLists: function () {
+      if (!this._visualEl) return;
+      var self = this;
+      this._visualEl.addEventListener("click", function (e) {
+        var box = e.target.closest && e.target.closest(".leaf-task-box");
+        if (!box || self._readonly) return;
+        var li = box.closest("li.leaf-task");
+        if (!li) return;
+        e.preventDefault();
+        li.setAttribute(
+          "data-checked",
+          li.getAttribute("data-checked") === "true" ? "false" : "true"
+        );
+        self._debouncedPushVisualChange();
+      });
+    },
+
+    _insertTaskList: function () {
+      var html =
+        '<ul><li class="leaf-task" data-checked="false">' +
+        '<span class="leaf-task-box" contenteditable="false"></span>​</li></ul>';
+      document.execCommand("insertHTML", false, html);
+    },
+
+    // -- Callouts / admonitions --
+
+    _insertCallout: function (type) {
+      type = type || "note";
+      var title = type.charAt(0).toUpperCase() + type.slice(1);
+      var html =
+        '<blockquote class="leaf-callout leaf-callout-' +
+        type +
+        '" data-callout="' +
+        type +
+        '"><p class="leaf-callout-title" contenteditable="false">' +
+        title +
+        "</p><p>​</p></blockquote><p><br></p>";
+      document.execCommand("insertHTML", false, html);
     },
 
     // Insert a collapsible <details> block with an editable summary + body.
