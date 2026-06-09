@@ -89,7 +89,24 @@ defmodule Leaf do
   attr(:placeholder, :string, default: "Write something...")
   attr(:readonly, :boolean, default: false)
   attr(:height, :string, default: "480px")
+  attr(:min_height, :string, default: nil)
+  attr(:max_height, :string, default: nil)
   attr(:debounce, :integer, default: 400)
+  attr(:flush_on_blur, :boolean, default: true)
+  attr(:emit_events, :boolean, default: false)
+  attr(:toolbar_extra, :list, default: [])
+  attr(:toolbar_layout, :atom, default: :fixed, values: [:fixed, :floating, :both])
+  attr(:maxlength, :integer, default: nil)
+  attr(:smart_typography, :boolean, default: false)
+  attr(:export, :boolean, default: false)
+  attr(:protect_navigation, :boolean, default: false)
+
+  attr(:save_status, :atom,
+    default: nil,
+    values: [nil, :saved, :saving, :unsaved]
+  )
+
+  attr(:gettext_backend, :any, default: nil)
   attr(:upload_handler, :any, default: nil)
   attr(:sync_input_name, :string, default: nil)
   attr(:class, :string, default: nil)
@@ -127,7 +144,19 @@ defmodule Leaf do
      |> assign_new(:toolbar, fn -> [] end)
      |> assign_new(:placeholder, fn -> "Write something..." end)
      |> assign_new(:height, fn -> "480px" end)
+     |> assign_new(:min_height, fn -> nil end)
+     |> assign_new(:max_height, fn -> nil end)
      |> assign_new(:debounce, fn -> 400 end)
+     |> assign_new(:flush_on_blur, fn -> true end)
+     |> assign_new(:emit_events, fn -> false end)
+     |> assign_new(:toolbar_extra, fn -> [] end)
+     |> assign_new(:toolbar_layout, fn -> :fixed end)
+     |> assign_new(:maxlength, fn -> nil end)
+     |> assign_new(:smart_typography, fn -> false end)
+     |> assign_new(:export, fn -> false end)
+     |> assign_new(:protect_navigation, fn -> false end)
+     |> assign_new(:save_status, fn -> nil end)
+     |> assign_new(:gettext_backend, fn -> nil end)
      |> assign_new(:readonly, fn -> false end)
      |> assign_new(:upload_handler, fn -> nil end)
      |> assign_new(:sync_input_name, fn -> nil end)
@@ -173,6 +202,24 @@ defmodule Leaf do
      })}
   end
 
+  def update(%{action: :insert_markdown} = assigns, socket) do
+    text = Map.get(assigns, :text, "")
+
+    {:ok,
+     push_event(socket, "leaf-command:#{socket.assigns.id}", %{
+       action: "insert_markdown",
+       text: text
+     })}
+  end
+
+  def update(%{action: :flush}, socket) do
+    {:ok, push_event(socket, "leaf-command:#{socket.assigns.id}", %{action: "flush"})}
+  end
+
+  def update(%{action: :mark_saved}, socket) do
+    {:ok, push_event(socket, "leaf-command:#{socket.assigns.id}", %{action: "mark_saved"})}
+  end
+
   def update(assigns, socket) do
     {parent_mode, assigns} = Map.pop(assigns, :mode, :hybrid)
 
@@ -191,11 +238,13 @@ defmodule Leaf do
 
   @impl true
   def render(assigns) do
+    Process.put(:leaf_gettext_backend, assigns[:gettext_backend])
+
     ~H"""
     <div
       id={@id}
       phx-hook="Leaf"
-      class="min-w-0"
+      class={["min-w-0", @class]}
       style="container-type: inline-size; container-name: leaf-editor;"
       data-leaf-mount-state="loading"
       data-editor-id={@id}
@@ -203,8 +252,16 @@ defmodule Leaf do
       data-placeholder={@placeholder}
       data-initial-markdown={@content}
       data-debounce={@debounce}
+      data-flush-on-blur={to_string(@flush_on_blur)}
+      data-emit-events={to_string(@emit_events)}
+      data-toolbar-layout={to_string(@toolbar_layout)}
       data-readonly={@readonly}
       data-height={@height}
+      data-min-height={@min_height}
+      data-max-height={@max_height}
+      data-maxlength={@maxlength}
+      data-smart-typography={to_string(@smart_typography)}
+      data-protect-navigation={to_string(@protect_navigation)}
       data-has-upload={to_string(@upload_handler != nil)}
       data-sync-input-name={@sync_input_name}
     >
@@ -314,6 +371,24 @@ defmodule Leaf do
                       class="font-bold text-xs"
                     >
                       H4
+                    </button>
+                  </li>
+                  <li>
+                    <button
+                      type="button"
+                      data-toolbar-action="heading5"
+                      class="font-bold text-xs"
+                    >
+                      H5
+                    </button>
+                  </li>
+                  <li>
+                    <button
+                      type="button"
+                      data-toolbar-action="heading6"
+                      class="font-bold text-xs"
+                    >
+                      H6
                     </button>
                   </li>
                 </ul>
@@ -805,6 +880,27 @@ defmodule Leaf do
                       <span>{t("Remove Column")}</span>
                     </button>
                   </li>
+                  <li class="menu-title text-xs px-2 pt-1">{t("Column align")}</li>
+                  <li>
+                    <button type="button" data-toolbar-action="tableAlignLeft">
+                      <span class="font-mono text-xs">⌑</span><span>{t("Align Left")}</span>
+                    </button>
+                  </li>
+                  <li>
+                    <button type="button" data-toolbar-action="tableAlignCenter">
+                      <span class="font-mono text-xs">⌑</span><span>{t("Align Center")}</span>
+                    </button>
+                  </li>
+                  <li>
+                    <button type="button" data-toolbar-action="tableAlignRight">
+                      <span class="font-mono text-xs">⌑</span><span>{t("Align Right")}</span>
+                    </button>
+                  </li>
+                  <li>
+                    <button type="button" data-toolbar-action="tableToggleHeader">
+                      <span class="font-mono text-xs">▤</span><span>{t("Toggle Header Row")}</span>
+                    </button>
+                  </li>
                 </ul>
               </div>
               <%!-- More inserts --%>
@@ -870,6 +966,17 @@ defmodule Leaf do
                       <span>{t("Horizontal Rule")}</span>
                     </button>
                   </li>
+                  <li>
+                    <button
+                      type="button"
+                      data-toolbar-action="detailsBlock"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
+                        <path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" />
+                      </svg>
+                      <span>{t("Details / Accordion")}</span>
+                    </button>
+                  </li>
                 </ul>
               </div>
               <% end %>
@@ -896,6 +1003,50 @@ defmodule Leaf do
                 </svg>
               </button>
             </div>
+          </div>
+        <% end %>
+
+        <%!-- Host-defined toolbar buttons (toolbar_extra). Rendered as a
+             sibling of the formatting buttons so they stay visible across
+             every mode (including HTML, where the formatting buttons hide).
+             Each click pushes "toolbar_action" with the button id + the
+             current selection; the host LiveView receives
+             {:leaf_toolbar_action, %{editor_id, id, selection}}. --%>
+        <%= if @toolbar_extra != [] and not @readonly do %>
+          <div class="divider divider-horizontal mx-0.5 h-6" data-toolbar-divider="extra"></div>
+          <div class="flex items-center gap-0.5" data-toolbar-extra>
+            <%= for btn <- @toolbar_extra do %>
+              <button
+                type="button"
+                data-host-action={efetch(btn, :id)}
+                class={["btn btn-xs btn-ghost px-2", efetch(btn, :class)]}
+                title={efetch(btn, :title)}
+                aria-label={efetch(btn, :title)}
+              >
+                <%= if icon = efetch(btn, :icon) do %>{raw(icon)}<% end %>
+                <%= if label = efetch(btn, :label) do %><span>{label}</span><% end %>
+              </button>
+            <% end %>
+          </div>
+        <% end %>
+
+        <%!-- Export / copy (opt-in via export={true}). Client-side actions
+             reading the current markdown/HTML; no server round-trip. --%>
+        <%= if @export and not @readonly do %>
+          <div class="divider divider-horizontal mx-0.5 h-6" data-toolbar-divider="export"></div>
+          <div class="flex items-center gap-0.5" data-toolbar-export>
+            <button type="button" data-toolbar-action="copyMarkdown" class="btn btn-xs btn-ghost px-2" title={t("Copy as Markdown")}>
+              <span class="text-xs font-semibold">MD</span>
+            </button>
+            <button type="button" data-toolbar-action="copyHtml" class="btn btn-xs btn-ghost px-2" title={t("Copy as HTML")}>
+              <span class="text-xs font-semibold">HTML</span>
+            </button>
+            <button type="button" data-toolbar-action="downloadMarkdown" class="btn btn-xs btn-ghost px-2" title={t("Download .md")}>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
+                <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
+                <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
+              </svg>
+            </button>
           </div>
         <% end %>
 
@@ -1235,7 +1386,7 @@ defmodule Leaf do
               "focus:outline-none",
               @readonly && "opacity-70 cursor-not-allowed"
             ]}
-            style={"min-height: #{@height}; height: #{@height}; resize: vertical;"}
+            style={surface_style(@height, @min_height, @max_height)}
           >
             {raw(@visual_html)}
           </div>
@@ -1250,9 +1401,10 @@ defmodule Leaf do
               "textarea w-full font-mono text-sm leading-relaxed border-0 rounded-none focus:outline-none focus:ring-0",
               @readonly && "opacity-70 cursor-not-allowed"
             ]}
-            style={"min-height: #{@height}; resize: vertical;"}
+            style={surface_style(@height, @min_height, @max_height)}
             placeholder={@placeholder}
             readonly={@readonly}
+            maxlength={@maxlength}
             phx-debounce={@debounce}
           ><%= @content %></textarea>
         </div>
@@ -1266,7 +1418,7 @@ defmodule Leaf do
               "textarea w-full font-mono text-sm leading-relaxed border-0 rounded-none focus:outline-none focus:ring-0",
               @readonly && "opacity-70 cursor-not-allowed"
             ]}
-            style={"min-height: #{@height}; resize: vertical;"}
+            style={surface_style(@height, @min_height, @max_height)}
             placeholder="<p>Write HTML here...</p>"
             readonly={@readonly}
             phx-debounce={@debounce}
@@ -1274,33 +1426,77 @@ defmodule Leaf do
         </div>
         </div>
 
-        <div id={"#{@id}-footer"} phx-update="ignore" data-editor-footer class="flex justify-end gap-4 px-3 py-1 text-xs text-base-content/50 border-t border-base-300">
-          <span data-word-count>0 words</span>
-          <span data-char-count>0 chars</span>
+        <div class="flex items-center justify-between gap-4 px-3 py-1 text-xs text-base-content/50 border-t border-base-300">
+          <%!-- Save-status badge: server-driven (NOT inside the ignored
+               counts block), so updating the save_status assign re-renders it. --%>
+          <span :if={@save_status} class="flex items-center gap-1">
+            <span
+              class="inline-block w-1.5 h-1.5 rounded-full"
+              style={save_status_dot(@save_status)}
+            >
+            </span>
+            {save_status_label(@save_status)}
+          </span>
+          <span :if={!@save_status}></span>
+          <div id={"#{@id}-footer"} phx-update="ignore" data-editor-footer class="flex gap-4">
+            <span data-word-count>0 words</span>
+            <span data-char-count>0 chars</span>
+            <span data-reading-time>0 min read</span>
+            <span data-maxlength-count></span>
+          </div>
         </div>
       </div>
     </div>
     """
   end
 
+  # Editor-surface sizing. `height="auto"` enables auto-grow: the surface
+  # sizes to its content between min_height and max_height (the textareas
+  # also get a JS resize-to-content hook). A fixed height keeps the classic
+  # user-resizable box.
+  defp surface_style("auto", min_h, max_h) do
+    [
+      "min-height: ",
+      min_h || "8rem",
+      "; height: auto;",
+      if(max_h, do: " max-height: #{max_h}; overflow: auto;", else: "")
+    ]
+    |> Enum.join()
+  end
+
+  defp surface_style(height, _min_h, _max_h) do
+    "min-height: #{height}; height: #{height}; resize: vertical;"
+  end
+
+  defp save_status_label(:saved), do: t("Saved")
+  defp save_status_label(:saving), do: t("Saving…")
+  defp save_status_label(:unsaved), do: t("Unsaved changes")
+  defp save_status_label(_), do: ""
+
+  defp save_status_dot(:saved), do: "background:#22c55e;"
+  defp save_status_dot(:saving), do: "background:#eab308;"
+  defp save_status_dot(:unsaved), do: "background:#9ca3af;"
+  defp save_status_dot(_), do: "background:transparent;"
+
   # -- Events from JS Hook --
 
   @impl true
-  def handle_event("content_changed", %{"markdown" => markdown, "html" => html}, socket) do
+  def handle_event("content_changed", %{"markdown" => markdown, "html" => html} = params, socket) do
     send(
       self(),
       {:leaf_changed,
        %{
          editor_id: socket.assigns.id,
          markdown: markdown,
-         html: html
+         html: html,
+         dirty: Map.get(params, "dirty", true)
        }}
     )
 
     {:noreply, socket |> assign(:content, markdown) |> assign(:visual_html, html)}
   end
 
-  def handle_event("markdown_content_changed", %{"content" => content}, socket) do
+  def handle_event("markdown_content_changed", %{"content" => content} = params, socket) do
     html = markdown_to_html(content)
 
     send(
@@ -1309,7 +1505,8 @@ defmodule Leaf do
        %{
          editor_id: socket.assigns.id,
          markdown: content,
-         html: html
+         html: html,
+         dirty: Map.get(params, "dirty", true)
        }}
     )
 
@@ -1347,14 +1544,15 @@ defmodule Leaf do
     {:noreply, socket}
   end
 
-  def handle_event("html_content_changed", %{"content" => html}, socket) do
+  def handle_event("html_content_changed", %{"content" => html} = params, socket) do
     send(
       self(),
       {:leaf_changed,
        %{
          editor_id: socket.assigns.id,
          markdown: socket.assigns.content,
-         html: html
+         html: html,
+         dirty: Map.get(params, "dirty", true)
        }}
     )
 
@@ -1377,6 +1575,62 @@ defmodule Leaf do
     {:noreply, push_event(socket, "leaf-set-html-textarea:#{socket.assigns.id}", %{html: html})}
   end
 
+  def handle_event("focus", _params, socket) do
+    send(self(), {:leaf_focus, %{editor_id: socket.assigns.id}})
+    {:noreply, socket}
+  end
+
+  def handle_event("blur", _params, socket) do
+    send(self(), {:leaf_blur, %{editor_id: socket.assigns.id}})
+    {:noreply, socket}
+  end
+
+  def handle_event("selection_changed", params, socket) do
+    send(
+      self(),
+      {:leaf_selection_changed,
+       %{
+         editor_id: socket.assigns.id,
+         text: Map.get(params, "text", ""),
+         range: Map.get(params, "range")
+       }}
+    )
+
+    {:noreply, socket}
+  end
+
+  def handle_event("paste_image", params, socket) do
+    send(
+      self(),
+      {:leaf_paste_image,
+       %{
+         editor_id: socket.assigns.id,
+         data_url: Map.get(params, "data_url"),
+         name: Map.get(params, "name"),
+         mime: Map.get(params, "mime")
+       }}
+    )
+
+    {:noreply, socket}
+  end
+
+  def handle_event("toolbar_action", %{"id" => id} = params, socket) do
+    send(
+      self(),
+      {:leaf_toolbar_action,
+       %{
+         editor_id: socket.assigns.id,
+         id: id,
+         selection: %{
+           text: Map.get(params, "text", ""),
+           range: Map.get(params, "range")
+         }
+       }}
+    )
+
+    {:noreply, socket}
+  end
+
   # The image-URL dialog (and other media popovers) push these to signal the
   # server that a modal UI is active. Currently no-op on the server side —
   # they exist so a future hook can react (suspend autosave, freeze the
@@ -1386,13 +1640,28 @@ defmodule Leaf do
 
   # -- Helpers --
 
-  defp t(string) do
-    case Application.get_env(:leaf, :gettext_backend) do
-      nil ->
-        string
+  # Fetch a key from a host-supplied map, tolerating either atom or string
+  # keys (so `%{id: "hero"}` and `%{"id" => "hero"}` both work).
+  defp efetch(map, key) when is_map(map) and is_atom(key) do
+    case Map.fetch(map, key) do
+      {:ok, value} -> value
+      :error -> Map.get(map, Atom.to_string(key))
+    end
+  end
 
-      backend ->
-        Gettext.gettext(backend, string)
+  # Per-instance gettext: render/1 stashes the editor's `gettext_backend`
+  # assign in the process dictionary (render runs synchronously in the
+  # LiveView process), so the bare `t(...)` calls in the template pick it
+  # up without threading the backend through every call site. Falls back to
+  # the app-global config, then to the untranslated string.
+  defp t(string) do
+    backend =
+      Process.get(:leaf_gettext_backend) ||
+        Application.get_env(:leaf, :gettext_backend)
+
+    case backend do
+      nil -> string
+      backend -> Gettext.gettext(backend, string)
     end
   end
 

@@ -129,6 +129,34 @@
     "  outline-offset: 2px;",
     "}",
 
+    // Collapsible details / accordion blocks
+    ".content-editor-visual details {",
+    "  border: 1px solid var(--color-base-300, #d1d5db); border-radius: 0.5rem;",
+    "  padding: 0.5rem 0.75rem; margin: 0.75em 0;",
+    "}",
+    ".content-editor-visual summary {",
+    "  cursor: pointer; font-weight: 600; outline: none;",
+    "}",
+
+    // Image / figure alignment + captions
+    ".content-editor-visual figure { margin: 0.75em 0; }",
+    ".content-editor-visual figure img { margin: 0; }",
+    ".content-editor-visual figcaption {",
+    "  font-size: 0.85em; opacity: 0.7; text-align: center; margin-top: 0.3em;",
+    "}",
+    ".content-editor-visual img[data-align='center'],",
+    ".content-editor-visual figure[data-align='center'] {",
+    "  display: block; margin-left: auto; margin-right: auto;",
+    "}",
+    ".content-editor-visual img[data-align='left'],",
+    ".content-editor-visual figure[data-align='left'] {",
+    "  float: left; margin-right: 1rem; max-width: 50%;",
+    "}",
+    ".content-editor-visual img[data-align='right'],",
+    ".content-editor-visual figure[data-align='right'] {",
+    "  float: right; margin-left: 1rem; max-width: 50%;",
+    "}",
+
     // Image resize handles
     ".leaf-resize-handle {",
     "  position: absolute; width: 10px; height: 10px;",
@@ -218,6 +246,7 @@
     // collapsed selection on touch devices. Bold / italic / code /
     // link, the four most common inline formats. Hidden by default;
     // positioned via JS, animated on entry.
+    "[data-toolbar-layout='floating'] [data-visual-toolbar-buttons] { display: none !important; }",
     ".leaf-selection-toolbar {",
     "  position: absolute; z-index: 60;",
     "  display: flex; align-items: center; gap: 0.125rem;",
@@ -570,7 +599,15 @@
         return "`" + inner + "`";
 
       case "pre":
-        return "\n```\n" + inner.trim() + "\n```\n\n";
+        var preLang = node.getAttribute("data-language") || "";
+        if (!preLang) {
+          var preCode = node.querySelector("code");
+          if (preCode) {
+            var langMatch = preCode.className.match(/language-(\S+)/);
+            if (langMatch) preLang = langMatch[1];
+          }
+        }
+        return "\n```" + preLang + "\n" + inner.trim() + "\n```\n\n";
 
       case "a":
         // Hybrid source-mode <a> already contains its `[` / `](url)` marker
@@ -590,14 +627,38 @@
         var alt = node.getAttribute("alt") || "";
         var w = node.getAttribute("width");
         var h = node.getAttribute("height");
-        if (w || h) {
+        var imgAlign = node.getAttribute("data-align");
+        if (w || h || imgAlign) {
           var tag = '<img src="' + src + '" alt="' + alt + '"';
           if (w) tag += ' width="' + w + '"';
           if (h) tag += ' height="' + h + '"';
+          if (imgAlign) tag += ' data-align="' + imgAlign + '"';
           tag += ' />';
           return tag;
         }
         return "![" + alt + "](" + src + ")";
+
+      case "figure":
+        var fimg = node.querySelector("img");
+        if (!fimg) return inner;
+        var fAlign =
+          node.getAttribute("data-align") || fimg.getAttribute("data-align");
+        var fcap = node.querySelector("figcaption");
+        var capText = fcap ? fcap.textContent : "";
+        var out = "\n<figure" + (fAlign ? ' data-align="' + fAlign + '"' : "") + ">";
+        out += '<img src="' + (fimg.getAttribute("src") || "") + '"';
+        out += ' alt="' + (fimg.getAttribute("alt") || "") + '"';
+        if (fimg.getAttribute("width")) out += ' width="' + fimg.getAttribute("width") + '"';
+        if (fimg.getAttribute("height")) out += ' height="' + fimg.getAttribute("height") + '"';
+        out += " />";
+        if (capText) out += "<figcaption>" + capText + "</figcaption>";
+        out += "</figure>\n\n";
+        return out;
+
+      case "details":
+        // Collapsible block. Markdown has no syntax for it, so emit raw
+        // HTML — Earmark passes block-level HTML through on the way back.
+        return "\n" + node.outerHTML.replace(/\s*contenteditable="[^"]*"/gi, "") + "\n\n";
 
       case "blockquote":
         return (
@@ -677,17 +738,35 @@
     var rows = tableNode.querySelectorAll("tr");
     if (!rows.length) return "";
     var lines = [];
+    var aligns = [];
     for (var i = 0; i < rows.length; i++) {
       var cells = rows[i].querySelectorAll("th, td");
       var parts = [];
       for (var j = 0; j < cells.length; j++) {
         parts.push(nodeToMarkdown(cells[j]).trim().replace(/\|/g, "\\|"));
+        // Capture per-column alignment from the header row (data-align, or
+        // an inline text-align style left by Earmark).
+        if (i === 0) {
+          var a = cells[j].getAttribute("data-align") || "";
+          if (!a) {
+            var st = cells[j].getAttribute("style") || "";
+            var m = st.match(/text-align:\s*(left|center|right)/);
+            if (m) a = m[1];
+          }
+          aligns.push(a);
+        }
       }
       lines.push("| " + parts.join(" | ") + " |");
-      // Add separator after header row
+      // Separator row encodes alignment per CommonMark.
       if (i === 0) {
         var sep = [];
-        for (var k = 0; k < parts.length; k++) sep.push("---");
+        for (var k = 0; k < parts.length; k++) {
+          var al = aligns[k];
+          if (al === "center") sep.push(":---:");
+          else if (al === "left") sep.push(":---");
+          else if (al === "right") sep.push("---:");
+          else sep.push("---");
+        }
         lines.push("| " + sep.join(" | ") + " |");
       }
     }
@@ -872,6 +951,23 @@
       this._debounceTimer = null;
       this._markdownDebounceTimer = null;
       this._htmlDebounceTimer = null;
+      // Host-integration state: flush-on-blur, dirty tracking, and
+      // focus/blur/selection forwarding to the LiveView.
+      this._flushOnBlur = this.el.dataset.flushOnBlur !== "false";
+      // Lifecycle/extra events ({:leaf_focus}, {:leaf_blur},
+      // {:leaf_selection_changed}, {:leaf_paste_image}) are opt-in: a host
+      // LiveView that exports handle_info/2 (every Leaf host does, for
+      // {:leaf_changed}) would crash on an unhandled message, so we only
+      // push these when emit_events is set.
+      this._emitEvents = this.el.dataset.emitEvents === "true";
+      this._savedContent = this.el.dataset.initialMarkdown || "";
+      this._hasEditorFocus = false;
+      this._selectionTimer = null;
+      // Cheap-wins state: char limit, smart typography, auto-grow, nav guard.
+      this._maxlength = parseInt(this.el.dataset.maxlength || "0", 10) || 0;
+      this._smartTypography = this.el.dataset.smartTypography === "true";
+      this._protectNavigation = this.el.dataset.protectNavigation === "true";
+      this._autoGrow = (this.el.dataset.height || "") === "auto";
       // Hybrid source-block engine state: the block currently swapped
       // to its markdown-source `<p data-leaf-source="...">` form. Null
       // when the cursor isn't inside an editable block.
@@ -913,12 +1009,22 @@
       this._setupModeSwitcher();
       this._setupResponsiveToolbar();
       this._setupLinkPopover();
-      // Selection bubble is a "mobile mode" feature — disabled for
-      // now; will be re-enabled when we ship the mobile slim-toolbar
-      // variant. Code stays in place (`_setupSelectionToolbar` and
-      // friends) so flipping it back on is a one-liner.
-      // this._setupSelectionToolbar();
+      // Floating selection bubble: opt-in per instance via toolbar_layout.
+      // "floating" hides the fixed formatting buttons (CSS) and surfaces the
+      // bubble; "both" keeps the fixed toolbar and adds the bubble; "fixed"
+      // (default) leaves it off.
+      this._toolbarLayout = this.el.dataset.toolbarLayout || "fixed";
+      if (
+        this._toolbarLayout === "floating" ||
+        this._toolbarLayout === "both"
+      ) {
+        this._setupSelectionToolbar();
+      }
       this._setupImageDragAndDrop();
+      this._setupCodeBlockTools();
+      this._setupMaxlength();
+      this._setupAutoGrow();
+      this._setupNavigationGuard();
       this._registerMarkdownHelpers();
       this._setupMarkdownTextarea();
       this._setupHtmlTextarea();
@@ -926,6 +1032,8 @@
 
       this._wordCountEl = this.el.querySelector("[data-word-count]");
       this._charCountEl = this.el.querySelector("[data-char-count]");
+      this._readingTimeEl = this.el.querySelector("[data-reading-time]");
+      this._maxlengthCountEl = this.el.querySelector("[data-maxlength-count]");
       this._updateCounts();
 
       // Mobile soft keyboard: when the on-screen keyboard opens, the
@@ -948,6 +1056,11 @@
           this._onVisualViewportResize
         );
       }
+
+      // Forward focus / blur / selection to the LiveView, and flush
+      // pending changes on blur (so a host "Save" doesn't lose the last
+      // debounced keystrokes).
+      this._setupHostEvents();
 
       // Handle commands from LiveView
       this.handleEvent(
@@ -1054,8 +1167,24 @@
       if (this._htmlDebounceTimer) {
         clearTimeout(this._htmlDebounceTimer);
       }
+      if (this._selectionTimer) {
+        clearTimeout(this._selectionTimer);
+        this._selectionTimer = null;
+      }
+      if (this._onSelectionChange) {
+        document.removeEventListener(
+          "selectionchange",
+          this._onSelectionChange
+        );
+        this._onSelectionChange = null;
+      }
+      if (this._beforeUnloadHandler) {
+        window.removeEventListener("beforeunload", this._beforeUnloadHandler);
+        this._beforeUnloadHandler = null;
+      }
 
       this._cleanupDrag();
+      this._closeBlockMenu();
       if (this._imgObserver) {
         this._imgObserver.disconnect();
         this._imgObserver = null;
@@ -1179,6 +1308,7 @@
         self.pushEventTo(self.el, "markdown_content_changed", {
           editor_id: self._editorId,
           content: content,
+          dirty: self._computeDirty(content),
         });
       }, this._debounceMs);
     },
@@ -1292,10 +1422,12 @@
       if (this._htmlDebounceTimer)
         clearTimeout(this._htmlDebounceTimer);
       var self = this;
+      var hmd = htmlToMarkdown(content || "");
       this._htmlDebounceTimer = setTimeout(function () {
         self.pushEventTo(self.el, "html_content_changed", {
           editor_id: self._editorId,
           content: content,
+          dirty: self._computeDirty(hmd),
         });
       }, this._debounceMs);
     },
@@ -1329,6 +1461,18 @@
 
       this._wordCountEl.textContent = words + (words === 1 ? " word" : " words");
       this._charCountEl.textContent = chars + (chars === 1 ? " char" : " chars");
+
+      // Reading time at ~200 wpm — a blank doc reads as "0 min read",
+      // anything non-empty rounds up to at least 1.
+      if (this._readingTimeEl) {
+        var mins = words === 0 ? 0 : Math.max(1, Math.ceil(words / 200));
+        this._readingTimeEl.textContent = mins + " min read";
+      }
+
+      // Character limit, when set.
+      if (this._maxlengthCountEl && this._maxlength) {
+        this._maxlengthCountEl.textContent = chars + " / " + this._maxlength;
+      }
     },
 
     // -- Event handlers --
@@ -1336,6 +1480,7 @@
     _onVisualInput: function () {
       if (this._mode !== "visual" && this._mode !== "hybrid") return;
       this._dismissLinkPopover();
+      if (this._smartTypography) this._maybeSmartTypography();
       // Hybrid mode: re-scan the open source block on every keystroke so
       // the block visually retags itself the moment the user finishes a
       // marker (`# ` → h1, `**bold**` → bold body, etc.) without waiting
@@ -1364,6 +1509,12 @@
       if (this._readonly) return;
 
       var mod = e.ctrlKey || e.metaKey;
+
+      // Ctrl/Cmd+Shift+V arms a one-shot "paste as plain text" for the
+      // paste event that immediately follows (read + cleared in _onPaste).
+      if (mod && e.shiftKey && (e.key === "v" || e.key === "V")) {
+        this._pasteAsPlainText = true;
+      }
 
       // Hybrid source-mode Backspace / Delete: operate on the block's
       // markdown source string directly instead of trusting Chrome's
@@ -1898,6 +2049,30 @@
       var clipboardData = e.clipboardData || window.clipboardData;
       if (!clipboardData) return;
 
+      // 1. Image on the clipboard (screenshot, copied image). Hand the file
+      //    to the host's upload flow rather than baking a giant base64 blob
+      //    into the content; if no upload_handler is wired, fall back to an
+      //    inline data URL so paste still does something useful.
+      var imageFile = this._clipboardImageFile(clipboardData);
+      if (imageFile) {
+        e.preventDefault();
+        this._handlePastedImage(imageFile);
+        return;
+      }
+
+      // 2. "Paste as plain text" (Ctrl/Cmd+Shift+V armed the flag on keydown):
+      //    insert raw text, no HTML cleaning, no autolinking.
+      if (this._pasteAsPlainText) {
+        this._pasteAsPlainText = false;
+        var plain = clipboardData.getData("text/plain");
+        if (plain) {
+          e.preventDefault();
+          document.execCommand("insertText", false, plain);
+          return;
+        }
+      }
+
+      // 3. Rich HTML — clean Word/web junk down to sane markup.
       var html = clipboardData.getData("text/html");
       if (html) {
         e.preventDefault();
@@ -1905,6 +2080,96 @@
         document.execCommand("insertHTML", false, cleaned);
         return;
       }
+
+      // 4. Tabular plain text (TSV/CSV) → a table.
+      var text = clipboardData.getData("text/plain");
+      if (
+        text &&
+        (this._mode === "visual" || this._mode === "hybrid") &&
+        this._maybePasteTabular(text)
+      ) {
+        e.preventDefault();
+        return;
+      }
+
+      // 5. A bare URL on the clipboard: if text is selected, turn it into a
+      //    link to that URL; otherwise drop an autolinked anchor. Anything
+      //    else falls through to the browser's native plain-text paste.
+      if (text && /^https?:\/\/\S+$/.test(text.trim())) {
+        var url = text.trim();
+        e.preventDefault();
+        var sel = window.getSelection();
+        if (
+          sel &&
+          !sel.isCollapsed &&
+          this._visualEl &&
+          this._visualEl.contains(sel.anchorNode)
+        ) {
+          document.execCommand("createLink", false, url);
+        } else {
+          var safe = url
+            .replace(/&/g, "&amp;")
+            .replace(/"/g, "&quot;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+          document.execCommand(
+            "insertHTML",
+            false,
+            '<a href="' + safe + '">' + safe + "</a>"
+          );
+        }
+        return;
+      }
+    },
+
+    // Find an image File on the clipboard, or null. Covers both the
+    // `items` (Chrome/Safari screenshots) and `files` access paths.
+    _clipboardImageFile: function (clipboardData) {
+      if (clipboardData.items) {
+        for (var i = 0; i < clipboardData.items.length; i++) {
+          var item = clipboardData.items[i];
+          if (item.kind === "file" && item.type.indexOf("image/") === 0) {
+            var f = item.getAsFile();
+            if (f) return f;
+          }
+        }
+      }
+      if (clipboardData.files && clipboardData.files.length) {
+        for (var j = 0; j < clipboardData.files.length; j++) {
+          if (clipboardData.files[j].type.indexOf("image/") === 0) {
+            return clipboardData.files[j];
+          }
+        }
+      }
+      return null;
+    },
+
+    // Read a pasted image to a data URL, then either hand it to the host
+    // (so its upload_handler can persist it and swap in a real URL via
+    // send_update(:insert_image)) or insert it inline as a fallback.
+    _handlePastedImage: function (file) {
+      var self = this;
+      var reader = new FileReader();
+      reader.onload = function () {
+        var dataUrl = reader.result;
+        if (self._hasUpload && self._emitEvents) {
+          self.pushEventTo(self.el, "paste_image", {
+            editor_id: self._editorId,
+            data_url: dataUrl,
+            name: file.name || "pasted-image",
+            mime: file.type || "image/png",
+          });
+        } else if (self._visualEl) {
+          self._visualEl.focus();
+          document.execCommand(
+            "insertHTML",
+            false,
+            '<img src="' + dataUrl + '" alt="" draggable="true" />'
+          );
+          self._debouncedPushVisualChange();
+        }
+      };
+      reader.readAsDataURL(file);
     },
 
     // -- Push content to LiveView --
@@ -1924,6 +2189,7 @@
             editor_id: this._editorId,
             html: html,
             markdown: markdown,
+            dirty: this._computeDirty(markdown),
           });
         }.bind(this),
         this._debounceMs
@@ -1949,6 +2215,315 @@
       }
 
       input.value = markdown || "";
+    },
+
+    // -- Host integration: focus / blur / selection / flush / dirty --
+
+    _setupHostEvents: function () {
+      var self = this;
+
+      // Re-baseline the dirty snapshot from the rendered surface now that
+      // all surfaces are set up. For the textarea modes this equals the
+      // initial markdown exactly; for visual/hybrid it captures the
+      // round-trip-normalized form, so an untouched editor reads clean.
+      this._savedContent = this._currentMarkdown();
+
+      // Container-level focusin/focusout so that moving focus between the
+      // editing surface and the toolbar (a real focus shift) does NOT read
+      // as a blur. We only emit blur once focus has genuinely left the
+      // whole component (checked on the next tick via document.activeElement).
+      // focusin/focusout stay attached regardless of emit_events because
+      // flush-on-blur and focus tracking depend on them; only the host-bound
+      // focus/blur *pushes* are gated.
+      this._onFocusIn = function () {
+        if (!self._hasEditorFocus) {
+          self._hasEditorFocus = true;
+          if (self._emitEvents) {
+            self.pushEventTo(self.el, "focus", { editor_id: self._editorId });
+          }
+        }
+      };
+
+      this._onFocusOut = function () {
+        setTimeout(function () {
+          if (!self.el || !self.el.isConnected) return;
+          if (self.el.contains(document.activeElement)) return;
+          if (!self._hasEditorFocus) return;
+          self._hasEditorFocus = false;
+          if (self._flushOnBlur) self._flushPending();
+          if (self._emitEvents) {
+            self.pushEventTo(self.el, "blur", { editor_id: self._editorId });
+          }
+        }, 0);
+      };
+
+      this.el.addEventListener("focusin", this._onFocusIn);
+      this.el.addEventListener("focusout", this._onFocusOut);
+
+      // selectionchange is a document-level event; only wire it when the
+      // host has opted into receiving {:leaf_selection_changed}.
+      if (this._emitEvents) {
+        this._onSelectionChange = function () {
+          if (!self._hasEditorFocus) return;
+          if (self._selectionTimer) return;
+          self._selectionTimer = setTimeout(function () {
+            self._selectionTimer = null;
+            self._emitSelectionChanged();
+          }, 120);
+        };
+        document.addEventListener("selectionchange", this._onSelectionChange);
+      }
+    },
+
+    _emitSelectionChanged: function () {
+      var info = this._getSelectionInfo();
+      if (!info) return;
+      this.pushEventTo(this.el, "selection_changed", {
+        editor_id: this._editorId,
+        text: info.text,
+        range: info.range,
+      });
+    },
+
+    // Returns { text, range } for the current selection, or null when the
+    // selection isn't inside this editor. `range` is { start, end } char
+    // offsets for the textarea surfaces and null for the contenteditable
+    // (where a flat integer offset isn't meaningful).
+    _getSelectionInfo: function () {
+      if (this._mode === "markdown" || this._mode === "html") {
+        var ta =
+          this._mode === "markdown"
+            ? this._getMarkdownTextarea()
+            : this._getHtmlTextarea();
+        if (!ta || document.activeElement !== ta) return null;
+        var start = ta.selectionStart;
+        var end = ta.selectionEnd;
+        return {
+          text: ta.value.substring(start, end),
+          range: { start: start, end: end },
+        };
+      }
+
+      if (!this._visualEl) return null;
+      var sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return null;
+      var range = sel.getRangeAt(0);
+      if (!this._visualEl.contains(range.commonAncestorContainer)) return null;
+      return { text: sel.toString(), range: null };
+    },
+
+    // Force any pending debounced change to fire immediately for the
+    // surface that matches the current mode. Pushing only the active
+    // surface avoids clobbering server content with a stale inactive one.
+    _flushPending: function () {
+      var id = this._editorId;
+
+      if (this._mode === "markdown") {
+        if (this._markdownDebounceTimer) {
+          clearTimeout(this._markdownDebounceTimer);
+          this._markdownDebounceTimer = null;
+        }
+        var mta = this._getMarkdownTextarea();
+        if (mta) {
+          this._syncFormInput(mta.value);
+          this.pushEventTo(this.el, "markdown_content_changed", {
+            editor_id: id,
+            content: mta.value,
+            dirty: this._computeDirty(mta.value),
+          });
+        }
+      } else if (this._mode === "html") {
+        if (this._htmlDebounceTimer) {
+          clearTimeout(this._htmlDebounceTimer);
+          this._htmlDebounceTimer = null;
+        }
+        var hta = this._getHtmlTextarea();
+        if (hta) {
+          var hmd = htmlToMarkdown(hta.value || "");
+          this._syncFormInput(hmd);
+          this.pushEventTo(this.el, "html_content_changed", {
+            editor_id: id,
+            content: hta.value,
+            dirty: this._computeDirty(hmd),
+          });
+        }
+      } else if (this._visualEl) {
+        if (this._debounceTimer) {
+          clearTimeout(this._debounceTimer);
+          this._debounceTimer = null;
+        }
+        var html = this._visualEl.innerHTML;
+        var markdown = htmlToMarkdown(html);
+        this._syncFormInput(markdown);
+        this.pushEventTo(this.el, "content_changed", {
+          editor_id: id,
+          html: html,
+          markdown: markdown,
+          dirty: this._computeDirty(markdown),
+        });
+      }
+    },
+
+    _computeDirty: function (markdown) {
+      return (markdown || "") !== (this._savedContent || "");
+    },
+
+    // The current content as markdown, read from the active surface.
+    _currentMarkdown: function () {
+      if (this._mode === "markdown") {
+        var mta = this._getMarkdownTextarea();
+        return mta ? mta.value : this._savedContent || "";
+      }
+      if (this._mode === "html") {
+        var hta = this._getHtmlTextarea();
+        return hta ? htmlToMarkdown(hta.value || "") : this._savedContent || "";
+      }
+      return this._visualEl
+        ? htmlToMarkdown(this._visualEl.innerHTML)
+        : this._savedContent || "";
+    },
+
+    // Insert text at the caret of a textarea, collapsing any selection.
+    _insertAtTextarea: function (ta, text) {
+      var start = ta.selectionStart;
+      var end = ta.selectionEnd;
+      var v = ta.value;
+      ta.value = v.substring(0, start) + text + v.substring(end);
+      var pos = start + text.length;
+      ta.selectionStart = ta.selectionEnd = pos;
+      ta.focus();
+    },
+
+    // -- Character limit (maxlength) --
+
+    _setupMaxlength: function () {
+      if (!this._maxlength || !this._visualEl) return;
+      var self = this;
+      // Textareas enforce maxlength natively (server-rendered attr); the
+      // contenteditable needs a beforeinput guard that blocks length-adding
+      // edits once the cap is reached, while still allowing deletions.
+      this._visualEl.addEventListener("beforeinput", function (e) {
+        if (!self._maxlength) return;
+        if (e.inputType && e.inputType.indexOf("delete") === 0) return;
+        var len = (self._visualEl.innerText || "").length;
+        if (
+          len >= self._maxlength &&
+          /^(insertText|insertParagraph|insertFromPaste|insertCompositionText|insertLineBreak)$/.test(
+            e.inputType || ""
+          )
+        ) {
+          e.preventDefault();
+        }
+      });
+    },
+
+    // -- Auto-grow (height="auto") --
+
+    _setupAutoGrow: function () {
+      if (!this._autoGrow) return;
+      var self = this;
+      var attach = function (ta) {
+        if (!ta) return;
+        ta.style.resize = "none";
+        ta.addEventListener("input", function () {
+          self._growTextarea(ta);
+        });
+        self._growTextarea(ta);
+      };
+      attach(this._getMarkdownTextarea());
+      attach(this._getHtmlTextarea());
+    },
+
+    _growTextarea: function (ta) {
+      if (!ta) return;
+      ta.style.height = "auto";
+      ta.style.height = ta.scrollHeight + "px";
+    },
+
+    // -- Unsaved-changes navigation guard --
+
+    _setupNavigationGuard: function () {
+      if (!this._protectNavigation) return;
+      var self = this;
+      this._beforeUnloadHandler = function (e) {
+        if (self._computeDirty(self._currentMarkdown())) {
+          e.preventDefault();
+          e.returnValue = "";
+          return "";
+        }
+      };
+      window.addEventListener("beforeunload", this._beforeUnloadHandler);
+    },
+
+    // -- Smart typography (opt-in) --
+
+    // Replace the just-typed sequence before the caret with its typographic
+    // form (-- → em dash, ... → ellipsis, straight → curly quotes). Skips
+    // code/pre so samples stay literal. Called from _onVisualInput.
+    _maybeSmartTypography: function () {
+      if (!this._smartTypography) return;
+      var sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return;
+      var range = sel.getRangeAt(0);
+      var node = range.startContainer;
+      if (node.nodeType !== Node.TEXT_NODE) return;
+      if (node.parentElement && node.parentElement.closest("code, pre")) return;
+
+      var offset = range.startOffset;
+      var text = node.textContent;
+      var before = text.slice(0, offset);
+      var repl = null;
+      var cut = 0;
+
+      if (/\.\.\.$/.test(before)) {
+        repl = "…";
+        cut = 3;
+      } else if (/--$/.test(before)) {
+        repl = "—";
+        cut = 2;
+      } else if (before.charAt(offset - 1) === '"') {
+        var p = before.charAt(offset - 2);
+        repl = p === "" || /\s/.test(p) ? "“" : "”";
+        cut = 1;
+      } else if (before.charAt(offset - 1) === "'") {
+        var p2 = before.charAt(offset - 2);
+        repl = p2 === "" || /\s/.test(p2) ? "‘" : "’";
+        cut = 1;
+      }
+      if (!repl) return;
+
+      var newBefore = before.slice(0, offset - cut) + repl;
+      node.textContent = newBefore + text.slice(offset);
+      var r = document.createRange();
+      r.setStart(node, newBefore.length);
+      r.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(r);
+    },
+
+    // -- Export / copy (#54) --
+
+    _currentHtml: function () {
+      if (this._mode === "html") {
+        var hta = this._getHtmlTextarea();
+        return hta ? hta.value : "";
+      }
+      return this._visualEl ? this._visualEl.innerHTML : "";
+    },
+
+    _downloadMarkdown: function () {
+      var md = this._currentMarkdown();
+      var blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = (this._editorId || "document") + ".md";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () {
+        URL.revokeObjectURL(url);
+      }, 1000);
     },
 
     // -- Mode switching --
@@ -2144,6 +2719,13 @@
           toolbarButtons.classList.add("contents");
         }
       }
+
+      // Auto-grow: a textarea reports scrollHeight 0 while hidden, so size
+      // it once it becomes visible for this mode.
+      if (this._autoGrow) {
+        if (mode === "markdown") this._growTextarea(this._getMarkdownTextarea());
+        else if (mode === "html") this._growTextarea(this._getHtmlTextarea());
+      }
     },
 
     _syncModes: function (from, to) {
@@ -2317,6 +2899,27 @@
           e.preventDefault();
           var action = btn.dataset.toolbarAction;
           self._execToolbarAction(action);
+        });
+      });
+
+      // Host-defined toolbar buttons (toolbar_extra). Each emits a
+      // "toolbar_action" event carrying the button id and the current
+      // selection, leaving what-to-do entirely to the host LiveView
+      // (typically a send_update(..., action: :insert_markdown, ...)).
+      var hostButtons = this.el.querySelectorAll("[data-host-action]");
+      hostButtons.forEach(function (btn) {
+        btn.addEventListener("mousedown", function (e) {
+          e.preventDefault();
+        });
+        btn.addEventListener("click", function (e) {
+          e.preventDefault();
+          var info = self._getSelectionInfo() || { text: "", range: null };
+          self.pushEventTo(self.el, "toolbar_action", {
+            editor_id: self._editorId,
+            id: btn.dataset.hostAction,
+            text: info.text,
+            range: info.range,
+          });
         });
       });
 
@@ -6168,6 +6771,21 @@
         return;
       }
 
+      // Export / copy are read-only operations — allowed in any mode, even
+      // when editing is disabled.
+      if (action === "copyMarkdown") {
+        this._copyText(this._currentMarkdown());
+        return;
+      }
+      if (action === "copyHtml") {
+        this._copyText(this._currentHtml());
+        return;
+      }
+      if (action === "downloadMarkdown") {
+        this._downloadMarkdown();
+        return;
+      }
+
       if (this._readonly) return;
 
       if (this._mode === "markdown") {
@@ -6217,6 +6835,12 @@
         case "heading4":
           this._toggleHeading("h4");
           break;
+        case "heading5":
+          this._toggleHeading("h5");
+          break;
+        case "heading6":
+          this._toggleHeading("h6");
+          break;
         case "bulletList":
           document.execCommand("insertUnorderedList", false, null);
           break;
@@ -6233,7 +6857,10 @@
           this._toggleBlockquote();
           break;
         case "codeBlock":
-          document.execCommand("formatBlock", false, "pre");
+          this._insertCodeBlock();
+          break;
+        case "detailsBlock":
+          this._insertDetailsBlock();
           break;
         case "horizontalRule":
           this._insertHorizontalRule();
@@ -6252,6 +6879,18 @@
           break;
         case "tableRemoveCol":
           this._tableRemoveCol();
+          break;
+        case "tableAlignLeft":
+          this._tableSetAlign("left");
+          break;
+        case "tableAlignCenter":
+          this._tableSetAlign("center");
+          break;
+        case "tableAlignRight":
+          this._tableSetAlign("right");
+          break;
+        case "tableToggleHeader":
+          this._tableToggleHeader();
           break;
         case "link":
           this._insertLink();
@@ -6323,6 +6962,8 @@
         case "heading2": if (pfx) pfx("## "); break;
         case "heading3": if (pfx) pfx("### "); break;
         case "heading4": if (pfx) pfx("#### "); break;
+        case "heading5": if (pfx) pfx("##### "); break;
+        case "heading6": if (pfx) pfx("###### "); break;
         case "bulletList": if (pfx) pfx("- "); break;
         case "orderedList": if (pfx) pfx("1. "); break;
         case "indent": { var ind = window["markdownIndent_" + gid]; if (ind) ind("indent"); break; }
@@ -6330,6 +6971,7 @@
         case "blockquote": if (pfx) pfx("> "); break;
         case "codeBlock": if (fmt) fmt("```\n", "\n```"); break;
         case "horizontalRule": if (ins) ins("\n---\n"); break;
+        case "detailsBlock": if (ins) ins("\n<details>\n<summary>Summary</summary>\n\nContent\n\n</details>\n"); break;
         case "table": if (ins) ins("\n| Header 1 | Header 2 |\n| --- | --- |\n| Cell 1 | Cell 2 |\n| Cell 3 | Cell 4 |\n"); break;
         case "link": if (lnk) lnk(); break;
         case "emoji": this._openEmojiPicker(); break;
@@ -6373,6 +7015,22 @@
       }
     },
 
+    // Insert a code block (one click, no prompt — same as before). The
+    // language is set afterwards via the hover overlay's language button,
+    // stored as `data-language`, and round-trips as a ```lang fence.
+    _insertCodeBlock: function () {
+      document.execCommand("formatBlock", false, "pre");
+    },
+
+    // Insert a collapsible <details> block with an editable summary + body.
+    _insertDetailsBlock: function () {
+      var html =
+        "<details open><summary>" +
+        "Summary" +
+        "</summary><p><br></p></details><p><br></p>";
+      document.execCommand("insertHTML", false, html);
+    },
+
     // -- Emoji Picker --
 
     _emojiCategories: [
@@ -6385,6 +7043,58 @@
       { name: "Objects", emojis: ["⌚","📱","💻","⌨️","🖥","🖨","🖱","💾","💿","📷","📹","🎥","📺","📻","🎙","⏰","🔋","🔌","💡","🔦","🕯","💰","💳","💎","🔧","🔨","🔩","⚙️","📎","📌","✂️","🔑","🗝","🔒","🔓"] },
       { name: "Symbols", emojis: ["✅","❌","❓","❗","💯","🔥","⭐","🌟","✨","💫","💥","💢","💤","🎵","🎶","🔔","🔕","📣","💬","💭","🏁","🚩","🎯","♻️","⚠️","🚫","❎","✳️","❇️","🔴","🟠","🟡","🟢","🔵","🟣","⚫","⚪"] }
     ],
+
+    // Search keywords per emoji (space-separated, lowercase). Covers the
+    // common/searchable ones; emojis absent here are still browsable by
+    // category and still match when their category name matches the query.
+    _emojiKeywords: {
+      "😀":"grinning happy smile","😃":"happy smile joy","😄":"happy smile laugh",
+      "😁":"grin smile happy","😆":"laugh haha","😅":"sweat laugh nervous",
+      "🤣":"rofl laugh haha funny","😂":"joy laugh cry funny tears","🙂":"slight smile",
+      "🙃":"upside down silly","😉":"wink","😊":"blush smile happy","😇":"angel innocent halo",
+      "🥰":"love hearts adore","😍":"love heart eyes","🤩":"star struck wow excited",
+      "😘":"kiss love","😋":"yum tasty tongue","😛":"tongue silly","😜":"wink tongue silly",
+      "🤪":"crazy zany silly","🤑":"money mouth rich","🤗":"hug","🤔":"thinking hmm",
+      "🤐":"zipper quiet secret","😐":"neutral meh","😑":"expressionless meh","😶":"no mouth quiet",
+      "😏":"smirk","😒":"unamused meh","🙄":"eye roll","😬":"grimace awkward","😴":"sleep tired zzz",
+      "😷":"mask sick","🤒":"sick thermometer ill","🤕":"hurt injured bandage","🤢":"sick nausea gross",
+      "🤮":"vomit sick puke","🥴":"woozy drunk dizzy","😵":"dizzy dead knockout","🤯":"mind blown explode",
+      "🥳":"party celebrate birthday","😎":"cool sunglasses","🤓":"nerd geek glasses","🧐":"monocle inspect",
+      "👋":"wave hello hi bye","✋":"hand stop raised","👌":"ok perfect","✌️":"peace victory",
+      "🤞":"fingers crossed luck","🤟":"love you hand","🤘":"rock horns","🤙":"call me shaka",
+      "👈":"point left","👉":"point right","👆":"point up","👇":"point down","☝️":"point up one",
+      "👍":"thumbs up like yes good approve","👎":"thumbs down dislike no bad","✊":"fist raised power",
+      "👊":"fist bump punch","👏":"clap applause","🙌":"raise hands celebrate praise","🙏":"pray thanks please",
+      "🤝":"handshake deal agree","❤️":"heart love red","🧡":"orange heart","💛":"yellow heart",
+      "💚":"green heart","💙":"blue heart","💜":"purple heart","🖤":"black heart","🤍":"white heart",
+      "💔":"broken heart","💕":"hearts love","💖":"sparkle heart love","💗":"growing heart love",
+      "🐶":"dog puppy","🐱":"cat kitten","🐭":"mouse","🐹":"hamster","🐰":"rabbit bunny","🦊":"fox",
+      "🐻":"bear","🐼":"panda","🐨":"koala","🐯":"tiger","🦁":"lion","🐮":"cow","🐷":"pig","🐸":"frog",
+      "🐵":"monkey","🐔":"chicken","🐧":"penguin","🐦":"bird","🦆":"duck","🦅":"eagle","🦉":"owl",
+      "🦄":"unicorn","🐝":"bee","🦋":"butterfly","🐌":"snail","🐞":"ladybug",
+      "🍎":"apple red fruit","🍐":"pear","🍊":"orange tangerine","🍋":"lemon","🍌":"banana",
+      "🍉":"watermelon","🍇":"grapes","🍓":"strawberry","🍑":"peach","🥭":"mango","🍍":"pineapple",
+      "🥥":"coconut","🥝":"kiwi","🍅":"tomato","🥑":"avocado","🍕":"pizza","🍔":"burger hamburger",
+      "🍟":"fries chips","🌭":"hot dog","🍿":"popcorn","🧁":"cupcake","🍰":"cake slice","🎂":"birthday cake",
+      "🍩":"donut doughnut","🍪":"cookie","🍫":"chocolate","🍬":"candy sweet","☕":"coffee tea hot",
+      "🍵":"tea green","🥤":"soda drink cup","🍺":"beer","🍷":"wine",
+      "🚗":"car auto","🚕":"taxi cab","🚌":"bus","🚑":"ambulance","🚒":"fire truck","✈️":"plane flight travel",
+      "🚀":"rocket launch space","🛸":"ufo alien","🚁":"helicopter","⛵":"sailboat boat","🚢":"ship",
+      "🏠":"house home","🏢":"office building","🏥":"hospital","🏫":"school","⛪":"church","🗼":"tower",
+      "🗽":"statue liberty","🌋":"volcano","🏔":"mountain","🏖":"beach","🏕":"camping tent",
+      "⌚":"watch time","📱":"phone mobile","💻":"laptop computer","⌨️":"keyboard","🖥":"desktop monitor",
+      "🖨":"printer","📷":"camera photo","📹":"video camera","🎥":"movie film","📺":"tv television",
+      "⏰":"alarm clock time","🔋":"battery","🔌":"plug power","💡":"idea light bulb","🔦":"flashlight torch",
+      "💰":"money bag cash","💳":"credit card","💎":"diamond gem","🔧":"wrench tool","🔨":"hammer tool",
+      "⚙️":"gear settings cog","📎":"paperclip attach","📌":"pin","✂️":"scissors cut","🔑":"key",
+      "🔒":"lock locked secure","🔓":"unlock open",
+      "✅":"check tick done yes correct","❌":"cross x no wrong cancel","❓":"question","❗":"exclamation",
+      "💯":"hundred percent perfect","🔥":"fire hot lit flame","⭐":"star","🌟":"star glowing","✨":"sparkles shiny",
+      "💥":"explosion boom","💤":"sleep zzz","🎵":"music note","🎶":"music notes","🔔":"bell notification",
+      "💬":"speech bubble chat comment","💭":"thought bubble","🚩":"flag red","🎯":"target dart bullseye",
+      "♻️":"recycle","⚠️":"warning caution","🚫":"no prohibited forbidden","🔴":"red circle","🟠":"orange circle",
+      "🟡":"yellow circle","🟢":"green circle","🔵":"blue circle","🟣":"purple circle","⚫":"black circle","⚪":"white circle"
+    },
 
     _openEmojiPicker: function () {
       var self = this;
@@ -6472,25 +7182,36 @@
         });
       }
 
-      // Search filtering
+      // Search filtering: match the query against per-emoji keywords and
+      // the category name. Dedupe across categories.
       searchInput.addEventListener("input", function () {
         var q = searchInput.value.toLowerCase().trim();
         if (!q) {
+          tabsWrap.style.display = "";
           renderTabs();
           renderGrid(categories[activeCategory].emojis);
           return;
         }
-        // Flatten all emojis for search (simple: show all since emoji chars aren't searchable by name easily)
-        var all = [];
+        tabsWrap.style.display = "none";
+        var matches = [];
+        var seen = {};
         categories.forEach(function (cat) {
-          if (cat.name.toLowerCase().indexOf(q) !== -1) {
-            all = all.concat(cat.emojis);
-          }
+          var catMatch = cat.name.toLowerCase().indexOf(q) !== -1;
+          cat.emojis.forEach(function (em) {
+            if (seen[em]) return;
+            var kw = self._emojiKeywords[em] || "";
+            if (catMatch || kw.indexOf(q) !== -1) {
+              matches.push(em);
+              seen[em] = true;
+            }
+          });
         });
-        if (all.length === 0) {
-          categories.forEach(function (cat) { all = all.concat(cat.emojis); });
+        if (matches.length === 0) {
+          gridWrap.innerHTML =
+            '<div style="padding:1rem;text-align:center;opacity:0.6;font-size:0.8rem;">No emoji found</div>';
+        } else {
+          renderGrid(matches);
         }
-        renderGrid(all);
       });
 
       // Prevent picker clicks from stealing editor focus
@@ -6812,6 +7533,120 @@
       }
     },
 
+    // Align the current column (markdown alignment is per-column, encoded in
+    // the header row, so we stamp every cell and let the serializer read the
+    // header). Pass "" to clear.
+    _tableSetAlign: function (align) {
+      var ctx = this._getTableContext();
+      if (!ctx) return;
+      var rows = ctx.table.querySelectorAll("tr");
+      for (var i = 0; i < rows.length; i++) {
+        var cells = rows[i].querySelectorAll("th, td");
+        var cell = cells[ctx.colIndex];
+        if (!cell) continue;
+        if (align) {
+          cell.setAttribute("data-align", align);
+          cell.style.textAlign = align;
+        } else {
+          cell.removeAttribute("data-align");
+          cell.style.textAlign = "";
+        }
+      }
+      this._debouncedPushVisualChange();
+    },
+
+    // Toggle the first row between header (<th>) and body (<td>) cells.
+    // Markdown always treats row 0 as the header, so this is the
+    // round-trip-safe interpretation of a header toggle.
+    _tableToggleHeader: function () {
+      var ctx = this._getTableContext();
+      if (!ctx) return;
+      var firstRow = ctx.table.querySelector("tr");
+      if (!firstRow) return;
+      var isHeader = !!firstRow.querySelector("th");
+      var cells = firstRow.querySelectorAll("th, td");
+      for (var i = 0; i < cells.length; i++) {
+        var old = cells[i];
+        var tag = isHeader ? "td" : "th";
+        var repl = document.createElement(tag);
+        repl.innerHTML = old.innerHTML;
+        if (old.getAttribute("data-align")) {
+          repl.setAttribute("data-align", old.getAttribute("data-align"));
+          repl.style.textAlign = old.style.textAlign;
+        }
+        old.parentNode.replaceChild(repl, old);
+      }
+      this._debouncedPushVisualChange();
+    },
+
+    // Parse pasted TSV/CSV text into a table. Returns true if it handled the
+    // paste. Tabs win as the delimiter when present (spreadsheet copy);
+    // otherwise commas. A single cell with no delimiter is left to normal
+    // paste handling.
+    _maybePasteTabular: function (text) {
+      if (!text) return false;
+      var rawLines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+      // Drop a trailing empty line from the clipboard.
+      while (rawLines.length && rawLines[rawLines.length - 1] === "") {
+        rawLines.pop();
+      }
+      if (rawLines.length === 0) return false;
+
+      // Tabs are an unambiguous tabular signal (you don't type them in
+      // prose), so a single tab anywhere triggers the table. Commas are
+      // NOT — to avoid hijacking normal multi-line prose that happens to
+      // contain commas, the CSV path requires every line to split into the
+      // SAME number of fields and at least 3 columns (≥2 commas per line),
+      // which prose almost never does consistently.
+      var delim = text.indexOf("\t") !== -1 ? "\t" : null;
+      var grid;
+      var cols;
+      if (delim) {
+        grid = rawLines.map(function (ln) {
+          return ln.split(delim);
+        });
+        cols = grid.reduce(function (m, r) {
+          return Math.max(m, r.length);
+        }, 0);
+        if (cols < 2) return false;
+      } else {
+        if (rawLines.length < 2) return false;
+        grid = rawLines.map(function (ln) {
+          return ln.split(",");
+        });
+        var first = grid[0].length;
+        if (first < 3) return false;
+        var consistent = grid.every(function (r) {
+          return r.length === first;
+        });
+        if (!consistent) return false;
+        cols = first;
+      }
+
+      function esc(s) {
+        return (s || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+      }
+      var html = "<table><thead><tr>";
+      for (var c = 0; c < cols; c++) {
+        html += "<th>" + (esc(grid[0][c]) || "<br>") + "</th>";
+      }
+      html += "</tr></thead><tbody>";
+      for (var r = 1; r < grid.length; r++) {
+        html += "<tr>";
+        for (var c2 = 0; c2 < cols; c2++) {
+          html += "<td>" + (esc(grid[r][c2]) || "<br>") + "</td>";
+        }
+        html += "</tr>";
+      }
+      html += "</tbody></table><p><br></p>";
+      document.execCommand("insertHTML", false, html);
+      this._debouncedPushVisualChange();
+      return true;
+    },
+
     _tableRemoveRow: function () {
       var ctx = this._getTableContext();
       if (!ctx) return;
@@ -7005,7 +7840,11 @@
     // `container-type` so we measure its actual rendered width.
     _selectionToolbarEnabled: function () {
       if (!this.el) return false;
-      return this.el.getBoundingClientRect().width <= 640;
+      // Opt-in layouts always show the bubble on selection; setup is only
+      // wired for floating/both, so this guard just confirms intent.
+      return (
+        this._toolbarLayout === "floating" || this._toolbarLayout === "both"
+      );
     },
 
     _teardownSelectionToolbar: function () {
@@ -7504,6 +8343,59 @@
 
     // -- Image selection + resize + popover --
 
+    // Alignment lives on the <figure> when the image is captioned, else
+    // directly on the <img>; both serialize as a data-align attribute.
+    _imageAlignTarget: function (imgEl) {
+      var fig = imgEl.closest && imgEl.closest("figure");
+      return fig || imgEl;
+    },
+
+    _setImageAlign: function (imgEl, align) {
+      var t = this._imageAlignTarget(imgEl);
+      if (align) t.setAttribute("data-align", align);
+      else t.removeAttribute("data-align");
+    },
+
+    _imageCaption: function (imgEl) {
+      var fig = imgEl.closest && imgEl.closest("figure");
+      if (!fig) return "";
+      var cap = fig.querySelector("figcaption");
+      return cap ? cap.textContent : "";
+    },
+
+    // Set (or clear) a caption, wrapping/unwrapping a <figure> as needed and
+    // carrying any alignment across the boundary.
+    _setImageCaption: function (imgEl, text) {
+      text = text || "";
+      var fig = imgEl.closest && imgEl.closest("figure");
+      if (text.trim()) {
+        if (!fig) {
+          fig = document.createElement("figure");
+          var align = imgEl.getAttribute("data-align");
+          if (align) {
+            fig.setAttribute("data-align", align);
+            imgEl.removeAttribute("data-align");
+          }
+          if (imgEl.parentNode) {
+            imgEl.parentNode.insertBefore(fig, imgEl);
+            fig.appendChild(imgEl);
+          }
+        }
+        var cap = fig.querySelector("figcaption");
+        if (!cap) {
+          cap = document.createElement("figcaption");
+          fig.appendChild(cap);
+        }
+        cap.textContent = text;
+      } else if (fig) {
+        var falign = fig.getAttribute("data-align");
+        if (falign) imgEl.setAttribute("data-align", falign);
+        if (fig.parentNode) fig.parentNode.insertBefore(imgEl, fig);
+        fig.remove();
+      }
+      this._debouncedPushVisualChange();
+    },
+
     _showImagePopover: function (imgEl) {
       this._dismissImagePopover(true);
       this._imagePopoverTarget = imgEl;
@@ -7564,6 +8456,49 @@
         }
       });
       pop.appendChild(altInput);
+
+      // Caption input — wraps the image in a <figure><figcaption> when set.
+      var capInput = document.createElement("input");
+      capInput.type = "text";
+      capInput.value = self._imageCaption(imgEl);
+      capInput.placeholder = "Caption...";
+      capInput.title = "Image caption";
+      capInput.style.cssText = [
+        "background: color-mix(in oklab, var(--color-base-content, #1f2937) 8%, transparent);",
+        "border: none; border-radius: 0.25rem; padding: 0.2rem 0.4rem;",
+        "font-size: 0.8125rem; color: inherit; outline: none; width: 130px;",
+      ].join("");
+      capInput.addEventListener("mousedown", function (e) { e.stopPropagation(); });
+      capInput.addEventListener("input", function () {
+        self._setImageCaption(imgEl, capInput.value);
+      });
+      capInput.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") self._dismissImagePopover();
+      });
+      pop.appendChild(capInput);
+
+      // Alignment buttons (left / center / right; click active to clear).
+      var alignWrap = document.createElement("span");
+      alignWrap.style.cssText = "display:inline-flex;gap:2px;";
+      [["left", "L"], ["center", "C"], ["right", "R"]].forEach(function (a) {
+        var ab = document.createElement("button");
+        ab.type = "button";
+        ab.title = "Align " + a[0];
+        ab.textContent = a[1];
+        ab.style.cssText =
+          "border:none;background:none;cursor:pointer;color:inherit;font-size:0.7rem;font-weight:700;padding:0.125rem 0.3rem;border-radius:0.25rem;";
+        ab.addEventListener("mousedown", function (e) { e.preventDefault(); });
+        ab.addEventListener("click", function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          var t = self._imageAlignTarget(imgEl);
+          var cur = t.getAttribute("data-align");
+          self._setImageAlign(imgEl, cur === a[0] ? "" : a[0]);
+          self._debouncedPushVisualChange();
+        });
+        alignWrap.appendChild(ab);
+      });
+      pop.appendChild(alignWrap);
 
       // Actions group
       var actions = document.createElement("span");
@@ -7816,6 +8751,10 @@
         self._dismissImagePopover();
         self._dismissLinkPopover();
 
+        var startX = e.clientX;
+        var startY = e.clientY;
+        var moved = false;
+
         self._dragSourceBlock = block;
         block.classList.add("leaf-dragging");
         self._dragHandle.style.cursor = "grabbing";
@@ -7824,6 +8763,13 @@
 
         function onMouseMove(ev) {
           ev.preventDefault();
+          if (
+            !moved &&
+            (Math.abs(ev.clientY - startY) > 4 ||
+              Math.abs(ev.clientX - startX) > 4)
+          ) {
+            moved = true;
+          }
           var target = self._findDropTarget(ev.clientY);
           if (target) {
             self._dragDropTarget = target;
@@ -7835,6 +8781,13 @@
           document.removeEventListener("mousemove", onMouseMove);
           document.removeEventListener("mouseup", onMouseUp);
           self._dragHandle.style.cursor = "";
+
+          // A click (no real drag) opens the block menu instead of moving.
+          if (!moved) {
+            self._cleanupDrag();
+            self._openBlockMenu(block);
+            return;
+          }
 
           if (self._dragSourceBlock && self._dragDropTarget) {
             var sourceEl = self._dragSourceBlock;
@@ -8065,6 +9018,133 @@
       this._dragIndicator = indicator;
     },
 
+    // -- Code block tools (language label + copy button) --
+
+    _setupCodeBlockTools: function () {
+      if (!this._visualEl || !this._visualWrapper) return;
+      var self = this;
+      this._visualEl.addEventListener("mouseover", function (e) {
+        var pre = e.target.closest && e.target.closest("pre");
+        if (pre && self._visualEl.contains(pre)) self._showCodeTools(pre);
+      });
+      this._visualEl.addEventListener("mouseleave", function () {
+        self._hideCodeTools();
+      });
+    },
+
+    _ensureCodeTools: function () {
+      if (this._codeTools) return this._codeTools;
+      var self = this;
+      var bar = document.createElement("div");
+      bar.className = "leaf-code-tools";
+      bar.setAttribute("contenteditable", "false");
+      bar.style.cssText =
+        "position:absolute;z-index:20;display:none;align-items:center;gap:0.375rem;padding:0.125rem 0.25rem;border-radius:0.375rem;background:color-mix(in oklab, var(--color-base-content,#1f2937) 8%, transparent);font-size:0.7rem;user-select:none;";
+
+      var label = document.createElement("button");
+      label.type = "button";
+      label.title = "Set language";
+      label.style.cssText =
+        "border:none;background:none;cursor:pointer;color:inherit;opacity:0.7;text-transform:uppercase;letter-spacing:0.03em;font-size:0.7rem;padding:0;";
+      label.addEventListener("mousedown", function (e) {
+        e.preventDefault();
+      });
+      label.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!self._codeToolsPre) return;
+        var cur = self._codeToolsPre.getAttribute("data-language") || "";
+        var lang = window.prompt("Language (e.g. javascript):", cur);
+        if (lang === null) return;
+        lang = lang.trim();
+        if (lang) self._codeToolsPre.setAttribute("data-language", lang);
+        else self._codeToolsPre.removeAttribute("data-language");
+        label.textContent = lang || "code";
+        self._debouncedPushVisualChange();
+      });
+      bar.appendChild(label);
+
+      var copy = document.createElement("button");
+      copy.type = "button";
+      copy.textContent = "Copy";
+      copy.style.cssText =
+        "border:none;background:none;cursor:pointer;color:inherit;font-size:0.7rem;padding:0.125rem 0.25rem;border-radius:0.25rem;";
+      copy.addEventListener("mousedown", function (e) {
+        e.preventDefault();
+      });
+      copy.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (self._codeToolsPre) {
+          self._copyText(self._codeToolsPre.textContent || "");
+          copy.textContent = "Copied";
+          setTimeout(function () {
+            copy.textContent = "Copy";
+          }, 1200);
+        }
+      });
+      bar.appendChild(copy);
+
+      // Don't let hovering the bar trigger the editor's mouseleave hide.
+      bar.addEventListener("mouseover", function (e) {
+        e.stopPropagation();
+      });
+
+      this._visualWrapper.appendChild(bar);
+      this._codeToolsLabel = label;
+      this._codeTools = bar;
+      return bar;
+    },
+
+    _showCodeTools: function (pre) {
+      var bar = this._ensureCodeTools();
+      this._codeToolsPre = pre;
+
+      var lang = pre.getAttribute("data-language") || "";
+      if (!lang) {
+        var c = pre.querySelector("code");
+        if (c) {
+          var m = c.className.match(/language-(\S+)/);
+          if (m) lang = m[1];
+        }
+      }
+      this._codeToolsLabel.textContent = lang || "code";
+
+      var wrapperRect = this._visualWrapper.getBoundingClientRect();
+      var preRect = pre.getBoundingClientRect();
+      this._visualWrapper.style.position = "relative";
+      bar.style.display = "flex";
+      bar.style.top = preRect.top - wrapperRect.top + 4 + "px";
+      bar.style.left =
+        Math.max(
+          0,
+          preRect.right - wrapperRect.left - bar.offsetWidth - 8
+        ) + "px";
+    },
+
+    _hideCodeTools: function () {
+      if (this._codeTools) this._codeTools.style.display = "none";
+      this._codeToolsPre = null;
+    },
+
+    _copyText: function (text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(function () {});
+        return;
+      }
+      // Fallback for non-secure contexts.
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+      } catch (e) {}
+      document.body.removeChild(ta);
+    },
+
     _findDropTarget: function (clientY) {
       var children = this._visualEl.childNodes;
       var blocks = [];
@@ -8170,6 +9250,154 @@
       }
     },
 
+    // -- Block handle menu (convert type / duplicate / delete) --
+
+    _openBlockMenu: function (block) {
+      this._closeBlockMenu();
+      if (!block || !this._dragHandle || !this._visualWrapper) return;
+      var self = this;
+
+      var menu = document.createElement("div");
+      menu.className = "leaf-block-menu";
+      menu.style.cssText =
+        "position:absolute;z-index:60;background:var(--color-base-100,#fff);color:var(--color-base-content,#1f2937);border:1px solid var(--color-base-300,#d1d5db);border-radius:0.5rem;box-shadow:0 6px 20px rgba(0,0,0,0.18),0 1px 4px rgba(0,0,0,0.10);padding:0.25rem;min-width:160px;font-size:0.8rem;";
+
+      var items = [
+        { label: "Text", fn: function () { self._convertBlock(block, "p"); } },
+        { label: "Heading 1", fn: function () { self._convertBlock(block, "h1"); } },
+        { label: "Heading 2", fn: function () { self._convertBlock(block, "h2"); } },
+        { label: "Heading 3", fn: function () { self._convertBlock(block, "h3"); } },
+        { label: "Quote", fn: function () { self._convertBlock(block, "blockquote"); } },
+        { label: "Code block", fn: function () { self._convertBlock(block, "pre"); } },
+        { divider: true },
+        { label: "Duplicate", fn: function () { self._duplicateBlock(block); } },
+        { label: "Delete", danger: true, fn: function () { self._deleteBlock(block); } },
+      ];
+
+      items.forEach(function (item) {
+        if (item.divider) {
+          var hr = document.createElement("div");
+          hr.style.cssText =
+            "height:1px;background:var(--color-base-300,#d1d5db);margin:0.25rem 0;";
+          menu.appendChild(hr);
+          return;
+        }
+        var b = document.createElement("button");
+        b.type = "button";
+        b.textContent = item.label;
+        b.style.cssText =
+          "display:block;width:100%;text-align:left;padding:0.3rem 0.5rem;border:none;background:none;border-radius:0.3rem;cursor:pointer;color:" +
+          (item.danger ? "var(--color-error,#dc2626)" : "inherit") +
+          ";";
+        b.addEventListener("mouseover", function () {
+          b.style.background =
+            "color-mix(in oklab, var(--color-base-content,#1f2937) 8%, transparent)";
+        });
+        b.addEventListener("mouseout", function () {
+          b.style.background = "";
+        });
+        b.addEventListener("mousedown", function (e) {
+          e.preventDefault();
+        });
+        b.addEventListener("click", function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          item.fn();
+          self._closeBlockMenu();
+          self._debouncedPushVisualChange();
+          self._updateCounts();
+        });
+        menu.appendChild(b);
+      });
+
+      menu.addEventListener("mousedown", function (e) {
+        e.preventDefault();
+      });
+
+      // Position just right of the drag handle.
+      var hRect = this._dragHandle.getBoundingClientRect();
+      var wRect = this._visualWrapper.getBoundingClientRect();
+      this._visualWrapper.style.position = "relative";
+      menu.style.left = Math.max(0, hRect.right - wRect.left + 2) + "px";
+      menu.style.top = Math.max(0, hRect.top - wRect.top) + "px";
+      this._visualWrapper.appendChild(menu);
+      this._blockMenu = menu;
+
+      var closeHandler = function (e) {
+        if (!menu.contains(e.target)) self._closeBlockMenu();
+      };
+      setTimeout(function () {
+        document.addEventListener("mousedown", closeHandler);
+      }, 0);
+      this._blockMenuCloseHandler = closeHandler;
+    },
+
+    _closeBlockMenu: function () {
+      if (this._blockMenu) {
+        this._blockMenu.remove();
+        this._blockMenu = null;
+      }
+      if (this._blockMenuCloseHandler) {
+        document.removeEventListener("mousedown", this._blockMenuCloseHandler);
+        this._blockMenuCloseHandler = null;
+      }
+    },
+
+    // Replace a block element with a new tag, carrying its content across.
+    _convertBlock: function (block, tag) {
+      if (!block || !block.parentNode) return;
+      var cur = block.tagName.toLowerCase();
+      if (cur === tag) return;
+
+      var el;
+      if (tag === "blockquote") {
+        el = document.createElement("blockquote");
+        var p = document.createElement("p");
+        p.innerHTML = cur === "pre" ? block.textContent : block.innerHTML;
+        el.appendChild(p);
+      } else if (tag === "pre") {
+        el = document.createElement("pre");
+        var code = document.createElement("code");
+        code.textContent = block.textContent || "";
+        el.appendChild(code);
+      } else {
+        el = document.createElement(tag);
+        if (cur === "blockquote") {
+          // unwrap inner <p> wrappers
+          el.innerHTML = block.innerHTML.replace(/<\/?p[^>]*>/gi, "");
+        } else if (cur === "pre") {
+          el.textContent = block.textContent || "";
+        } else {
+          el.innerHTML = block.innerHTML;
+        }
+      }
+      if (el.innerHTML.trim() === "") el.innerHTML = "<br>";
+      block.parentNode.replaceChild(el, block);
+      this._dragHandleBlock = null;
+    },
+
+    _duplicateBlock: function (block) {
+      if (!block || !block.parentNode) return;
+      var clone = block.cloneNode(true);
+      clone.classList.remove("leaf-dragging");
+      if (block.nextSibling) {
+        block.parentNode.insertBefore(clone, block.nextSibling);
+      } else {
+        block.parentNode.appendChild(clone);
+      }
+    },
+
+    _deleteBlock: function (block) {
+      if (!block || !block.parentNode) return;
+      block.remove();
+      this._dragHandleBlock = null;
+      if (this._dragHandle) this._dragHandle.style.display = "none";
+      // Never leave the editor with no editable block.
+      if (this._visualEl && this._visualEl.innerHTML.trim() === "") {
+        this._visualEl.innerHTML = "<p><br></p>";
+      }
+    },
+
     _dismissImagePopover: function (skipPush) {
       // Remove selection class
       if (this._imagePopoverTarget) {
@@ -8240,6 +9468,39 @@
             );
             if (tab) tab.click();
           }
+          break;
+
+        case "insert_markdown":
+          var text = payload.text || "";
+          if (this._mode === "markdown") {
+            var insMd = this._getMarkdownTextarea();
+            if (insMd) {
+              this._insertAtTextarea(insMd, text);
+              this._debouncedPushMarkdownChange(insMd.value);
+              this._updateCounts();
+            }
+          } else if (this._mode === "html") {
+            var insHtml = this._getHtmlTextarea();
+            if (insHtml) {
+              this._insertAtTextarea(insHtml, text);
+              this._debouncedPushHtmlChange(insHtml.value);
+              this._updateCounts();
+            }
+          } else if (this._visualEl) {
+            this._visualEl.focus();
+            document.execCommand("insertText", false, text);
+            if (this._mode === "hybrid") this._refreshSourceBlock();
+            this._debouncedPushVisualChange();
+            this._updateCounts();
+          }
+          break;
+
+        case "flush":
+          this._flushPending();
+          break;
+
+        case "mark_saved":
+          this._savedContent = this._currentMarkdown();
           break;
       }
     },
