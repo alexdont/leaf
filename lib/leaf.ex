@@ -260,6 +260,7 @@ defmodule Leaf do
       data-debounce={@debounce}
       data-flush-on-blur={to_string(@flush_on_blur)}
       data-emit-events={to_string(@emit_events)}
+      data-preserve-tags={Enum.map_join(@preserve_tags, ",", &String.downcase(to_string(&1)))}
       data-toolbar-layout={to_string(@toolbar_layout)}
       data-readonly={@readonly}
       data-height={@height}

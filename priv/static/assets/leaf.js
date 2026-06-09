@@ -1037,6 +1037,11 @@
       // {:leaf_changed}) would crash on an unhandled message, so we only
       // push these when emit_events is set.
       this._emitEvents = this.el.dataset.emitEvents === "true";
+      // Lowercased custom-tag names that render as atomic chips, so a
+      // freshly inserted preserved tag becomes a chip immediately.
+      this._preserveTags = (this.el.dataset.preserveTags || "")
+        .split(",")
+        .filter(Boolean);
       this._savedContent = this.el.dataset.initialMarkdown || "";
       this._hasEditorFocus = false;
       this._selectionTimer = null;
@@ -2471,6 +2476,37 @@
       var pos = start + text.length;
       ta.selectionStart = ta.selectionEnd = pos;
       ta.focus();
+    },
+
+    // If `text` is exactly one preserved custom tag (<Hero .../> or
+    // <CTA>…</CTA> whose name is in preserve_tags), return the atomic-chip
+    // HTML so it can be inserted as a finished chip in visual/hybrid mode;
+    // otherwise null (insert as plain text).
+    _maybeAtomicChip: function (text) {
+      if (!this._preserveTags || this._preserveTags.length === 0) return null;
+      var trimmed = (text || "").trim();
+      var m = trimmed.match(/^<([A-Za-z][\w-]*)\b/);
+      if (!m) return null;
+      var name = m[1];
+      if (this._preserveTags.indexOf(name.toLowerCase()) === -1) return null;
+
+      var whole = new RegExp(
+        "^<" + name + "\\b[^>]*?(?:/>|>[\\s\\S]*</" + name + ">)$"
+      );
+      if (!whole.test(trimmed)) return null;
+
+      var raw = trimmed
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+      return (
+        '<span class="leaf-atomic" contenteditable="false" data-leaf-raw="' +
+        raw +
+        '"><span class="leaf-atomic-label">' +
+        name +
+        "</span></span>"
+      );
     },
 
     // -- Character limit (maxlength) --
@@ -5278,6 +5314,14 @@
     // cursor is inside them.
     _isSourceModeBlock: function (block) {
       if (!block || !block.tagName) return false;
+      // Task-list items stay rendered as checkboxes — never swap them to
+      // their `- [ ]` markdown source, or the checkbox is destroyed the
+      // moment the cursor lands in it.
+      if (block.classList && block.classList.contains("leaf-task")) return false;
+      // A block holding a preserved-tag chip (.leaf-atomic) must stay
+      // rendered too — swapping it to source turns the chip into raw
+      // <Hero/> text the client can't re-wrap, so it never comes back.
+      if (block.querySelector && block.querySelector(".leaf-atomic")) return false;
       var tag = block.tagName.toLowerCase();
       return (
         tag === "p" || tag === "h1" || tag === "h2" || tag === "h3" ||
@@ -7133,12 +7177,15 @@
     _setupTaskLists: function () {
       if (!this._visualEl) return;
       var self = this;
-      this._visualEl.addEventListener("click", function (e) {
+      // Use mousedown so the toggle wins before the browser moves the caret
+      // / hybrid reacts to the selection change.
+      this._visualEl.addEventListener("mousedown", function (e) {
         var box = e.target.closest && e.target.closest(".leaf-task-box");
         if (!box || self._readonly) return;
         var li = box.closest("li.leaf-task");
         if (!li) return;
         e.preventDefault();
+        e.stopPropagation();
         li.setAttribute(
           "data-checked",
           li.getAttribute("data-checked") === "true" ? "false" : "true"
@@ -7148,10 +7195,27 @@
     },
 
     _insertTaskList: function () {
-      var html =
-        '<ul><li class="leaf-task" data-checked="false">' +
-        '<span class="leaf-task-box" contenteditable="false"></span>​</li></ul>';
-      document.execCommand("insertHTML", false, html);
+      if (!this._visualEl) return;
+      this._visualEl.focus();
+      document.execCommand(
+        "insertHTML",
+        false,
+        '<ul><li class="leaf-task" data-checked="false" data-task-new="1">' +
+          '<span class="leaf-task-box" contenteditable="false"></span>​</li></ul>'
+      );
+      // Drop the caret inside the new item (after the box) so typing fills
+      // in the task text instead of landing after the list.
+      var li = this._visualEl.querySelector('li[data-task-new="1"]');
+      if (li) {
+        li.removeAttribute("data-task-new");
+        var range = document.createRange();
+        range.selectNodeContents(li);
+        range.collapse(false);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+      this._debouncedPushVisualChange();
     },
 
     // -- Callouts / admonitions --
@@ -9746,8 +9810,14 @@
             }
           } else if (this._visualEl) {
             this._visualEl.focus();
-            document.execCommand("insertText", false, text);
-            if (this._mode === "hybrid") this._refreshSourceBlock();
+            var chip = this._maybeAtomicChip(text);
+            if (chip) {
+              // A preserved custom tag — drop it in as a finished chip.
+              document.execCommand("insertHTML", false, chip);
+            } else {
+              document.execCommand("insertText", false, text);
+              if (this._mode === "hybrid") this._refreshSourceBlock();
+            }
             this._debouncedPushVisualChange();
             this._updateCounts();
           }
