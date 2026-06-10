@@ -1,5 +1,86 @@
 # Changelog
 
+## 0.2.23
+
+A large feature release: GFM task lists & callouts, custom-tag round-trip
+preservation, a host-integration/authoring API, RTL + symbol/date inserts,
+and a full Obsidian-style hybrid live preview for list markers and
+checkboxes. All additions are opt-in or default-preserving — stored
+markdown and existing hosts are unchanged.
+
+### Features
+
+- **GFM task lists (#14):** `- [ ] ` / `- [x] ` render as clickable
+  checkboxes (toolbar + markdown action, click-to-toggle) and round-trip
+  via a server `apply_task_lists/1` transform + client `<li>` serializer.
+  Loose checklists (a blank line between items makes CommonMark wrap each
+  item's text in a `<p>`, breaking the checkbox match) are unwrapped back
+  to `<li>[ ] x</li>` on both the server and the client, so they no longer
+  round-trip as literal `[ ] ` text.
+- **GFM callouts (#16):** `> [!NOTE|TIP|IMPORTANT|WARNING|CAUTION]`
+  blockquotes render as colored admonition blocks with a derived,
+  non-editable title and round-trip via `apply_callouts/1` + a
+  `data-callout` serializer.
+- **Custom / unknown tag preservation (#3):** a new `preserve_tags` attr
+  (default `[]`). Listed tags (e.g. `<Hero/>`, `<CTA>`) are pulled out
+  before Earmark, rendered in visual/hybrid as atomic, non-editable chips,
+  and restored byte-for-byte; the client serializes the chip's
+  `data-leaf-raw` straight back to source, so custom XML round-trips
+  exactly. A single preserved tag inserted live via `:insert_markdown`
+  becomes a chip on the spot.
+- **Host-integration & authoring API (all backward-compatible):**
+  `send_update` actions `:insert_markdown`, `:flush`, `:mark_saved`; new
+  attrs `toolbar_extra` (+ `{:leaf_toolbar_action}`), `toolbar_layout`,
+  `min_height`/`max_height` + `height="auto"`, `maxlength`,
+  `smart_typography`, `export`, `protect_navigation`, `save_status`,
+  per-instance `gettext_backend`, `class` (now actually applied),
+  `emit_events`, `flush_on_blur`. `{:leaf_changed}` gains a `dirty`
+  boolean. Lifecycle events (`{:leaf_focus}`, `{:leaf_blur}`,
+  `{:leaf_selection_changed}`, `{:leaf_paste_image}`) are gated behind
+  `emit_events` (default `false`) so existing hosts can't crash on an
+  unhandled message. Authoring: autolink on URL paste, image
+  caption/alignment, paste image→upload (with inline fallback) and
+  paste-as-plain-text (Ctrl/Cmd+Shift+V), TSV/CSV→table, and code blocks
+  with a language tag + copy button (` ```lang ` round-trip).
+- **Symbols / date picker (#31)** in the insert menu (symbol grid + insert
+  date/time), and **RTL support (#46)** via a new `dir` attr
+  (`"ltr"|"rtl"|"auto"`, default `"ltr"`).
+- **Spellcheck toggle (#55):** new `spellcheck` attr (default `true`).
+- **Obsidian-style hybrid live preview for lists & checkboxes:** a list
+  item's `- ` / `N. ` / `- [ ] ` marker now reveals as editable source
+  *only while the cursor is on it* — exactly like the inline `**` / `*`
+  markers — and shows the bullet / checkbox otherwise, instead of the
+  whole row switching to source. The revealed marker is seated in the
+  bullet/checkbox gutter so it lines up with sibling items; ArrowLeft from
+  the body start steps into the hidden marker; deleting the marker breaks
+  the item out to a paragraph immediately; and typing `- ` leaves a
+  blinking caret at the end of the new item, ready to type.
+
+### Fixes
+
+- Hybrid: list editing no longer breaks after a markdown↔hybrid round-trip.
+  The server's pretty-printed HTML left whitespace-only text nodes between
+  block children — a cursor trap that resolved `_getCurrentBlock` to the
+  `<ul>` so Enter/Backspace couldn't act on a list item — and loose lists
+  wrapped each item in a `<p>` so Enter inserted a nested paragraph instead
+  of a new item. Both are now stripped / unwrapped on init and on every
+  markdown→hybrid sync.
+- Hybrid: leading and repeated spaces typed inside list / checkbox content
+  are preserved (pinned as NBSP) instead of collapsing when the line
+  re-renders; single inter-word spaces stay regular so wrapping is
+  unaffected.
+- Task lists: don't destroy the checkbox when the cursor lands on a task
+  item (excluded from source-mode swapping); toggle on mousedown so a tap
+  reliably checks/unchecks; fix a stranded caret before the checkbox box.
+- Custom-tag chips: blocks containing a `.leaf-atomic` chip are excluded
+  from source-mode swapping, so clicking on or around a chip no longer
+  collapses it to raw `<Hero/>` text that never came back.
+- Serialization: list / paragraph spacing keeps a following paragraph from
+  folding into the last list item (lists end with a blank line), and
+  task-list Enter behavior matches the existing list UX (continue / split /
+  exit). Auto-formatting `- ` re-focuses the editor and places the caret at
+  the end of the new item.
+
 ## 0.2.22
 
 - Hybrid: fix markdown links round-tripping into `[[label](url)](url)` (and compounding further on every edit). The `htmlToMarkdown` serializer's `<a>` case always synthesized `[...](url)` markers — even when the link was in hybrid source mode and already carried its `[` / `](url)` marker spans — doubling them. It now returns the inner text as-is when the `<a>` already has `leaf-source-marker` children (mirroring the inline serializer's existing guard), and only synthesizes markers for a bare `<a>` (rendered/visual mode, Earmark output, or `createLink`). Companion to the 0.2.20 builder-side fix that stopped `****bold****` compounding.
