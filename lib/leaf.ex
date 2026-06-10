@@ -2212,6 +2212,11 @@ defmodule Leaf do
       /* Inline-block keeps the source block on a single line for inline
          tags but still flows like a paragraph in the editor. */
     }
+    /* A list item in source mode shows its literal `- ` / `N. ` marker, so
+       hide the rendered bullet/number to avoid a double marker. */
+    .content-editor-visual li[data-leaf-source="li"] {
+      list-style: none;
+    }
     .content-editor-visual [data-leaf-source="h1"] {
       font-size: 2em;
       font-weight: 700;

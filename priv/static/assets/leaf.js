@@ -583,7 +583,7 @@
       // sometimes leaves U+200B (ZWSP) — strip those too.
       return node.textContent
         .replace(/​/g, "")
-        .replace(/ /g, " ");
+        .replace(/\u00a0/g, " ");
     }
 
     if (node.nodeType !== Node.ELEMENT_NODE) {
@@ -1587,9 +1587,6 @@
         // list auto-format. Consecutive blockquote lines merge into the
         // same `<blockquote>`.
         this._maybeAutoFormatBlockquote();
-        // Task auto-format: `[ ] ` / `[x] ` typed in a list item turns it
-        // into a checkbox.
-        this._maybeAutoFormatTask();
       }
       this._debouncedPushVisualChange();
       this._updateCounts();
@@ -4042,7 +4039,7 @@
 
       // Chrome auto-converts a typed trailing space inside a `<p>` to NBSP,
       // so normalize before regex-matching the marker.
-      var text = block.textContent.replace(/ /g, " ");
+      var text = block.textContent.replace(/\u00a0/g, " ");
       var um = text.match(/^([-*+]) /);
       var om = !um && text.match(/^(\d+)\. /);
       if (!um && !om) return;
@@ -4142,7 +4139,7 @@
         return;
       }
 
-      var text = block.textContent.replace(/ /g, " ");
+      var text = block.textContent.replace(/\u00a0/g, " ");
       var bm = text.match(/^> /);
       if (!bm) return;
 
@@ -4186,65 +4183,6 @@
         } else {
           caret.setStart(inner, 0);
         }
-        caret.collapse(true);
-        try {
-          sel.removeAllRanges();
-          sel.addRange(caret);
-        } catch (_e) {
-          /* range invalidated mid-frame — skip */
-        }
-      } finally {
-        this._syntaxMutating = false;
-      }
-    },
-
-    // Typing `[ ] ` / `[x] ` / `[] ` at the start of a list item turns it
-    // into a checkbox (the GFM/Notion gesture). `- ` already made the
-    // `<li>`; this finishes the job into a task item.
-    _maybeAutoFormatTask: function () {
-      if (this._syntaxMutating) return;
-      var sel = window.getSelection();
-      if (!sel.rangeCount) return;
-      if (!sel.getRangeAt(0).collapsed) return;
-
-      var block = this._getCurrentBlock();
-      if (!block || !block.tagName) return;
-      if (block.tagName.toLowerCase() !== "li") return;
-      if (block.classList && block.classList.contains("leaf-task")) return;
-
-      // Chrome turns a typed trailing space into NBSP — normalize first.
-      var text = (block.textContent || "").replace(/ /g, " ");
-      var m = text.match(/^\[([ xX]?)\] /);
-      if (!m) return;
-
-      var checked = m[1] === "x" || m[1] === "X";
-
-      this._syntaxMutating = true;
-      try {
-        this._trimLeadingTextChars(block, m[0].length);
-        block.classList.add("leaf-task");
-        block.setAttribute("data-checked", checked ? "true" : "false");
-
-        var box = document.createElement("span");
-        box.className = "leaf-task-box";
-        box.setAttribute("contenteditable", "false");
-        block.insertBefore(box, block.firstChild);
-
-        // Give the caret a text-node home right after the box.
-        var after = box.nextSibling;
-        if (!after || after.nodeType !== Node.TEXT_NODE) {
-          after = document.createTextNode("​");
-          block.insertBefore(after, box.nextSibling);
-        }
-
-        if (this._sourceBlock === block) {
-          this._sourceBlock = null;
-          this._lastSourceStateKey = null;
-          this._activeMatchKey = null;
-        }
-
-        var caret = document.createRange();
-        caret.setStart(after, after.textContent === "​" ? 1 : 0);
         caret.collapse(true);
         try {
           sel.removeAllRanges();
@@ -5421,13 +5359,11 @@
     // cursor is inside them.
     _isSourceModeBlock: function (block) {
       if (!block || !block.tagName) return false;
-      // Task-list items stay rendered as checkboxes — never swap them to
-      // their `- [ ]` markdown source, or the checkbox is destroyed the
-      // moment the cursor lands in it.
-      if (block.classList && block.classList.contains("leaf-task")) return false;
       // A block holding a preserved-tag chip (.leaf-atomic) must stay
-      // rendered too — swapping it to source turns the chip into raw
-      // <Hero/> text the client can't re-wrap, so it never comes back.
+      // rendered — swapping it to source turns the chip into raw <Hero/>
+      // text the client can't re-wrap, so it never comes back. (Task items
+      // DO enter source mode: `_enterSourceMode` shows their `[ ] ` marker
+      // and `_exitSourceMode` re-parses it back into a checkbox.)
       if (block.querySelector && block.querySelector(".leaf-atomic")) return false;
       var tag = block.tagName.toLowerCase();
       return (
@@ -5470,8 +5406,19 @@
       this._activeMatchKey = null;
 
       if (block && this._isSourceModeBlock(block)) {
-        var newBlock = this._enterSourceMode(block);
-        if (newBlock) this._sourceBlock = newBlock;
+        if (block.hasAttribute("data-leaf-source")) {
+          // Already a source block (its `_sourceBlock` tracking was lost,
+          // e.g. across a re-render or split). Adopt it and refresh —
+          // re-running `_enterSourceMode` would prepend a SECOND `- ` /
+          // `# ` marker and accumulate them on every cursor entry.
+          this._sourceBlock = block;
+          this._lastSourceStateKey = null;
+          this._activeMatchKey = null;
+          this._refreshSourceBlock();
+        } else {
+          var newBlock = this._enterSourceMode(block);
+          if (newBlock) this._sourceBlock = newBlock;
+        }
       }
     },
 
@@ -5748,6 +5695,34 @@
 
       var isLi = oldBlock.tagName.toLowerCase() === "li";
 
+      // A source-mode `<li>` always carries its revealed `- ` / `N. `
+      // marker (plus an optional `[ ] ` / `[x] ` checkbox), so "the item
+      // is empty" means "only the marker remains", not "textContent is
+      // empty". Derive the marker the new split-off item should carry
+      // (next number for `ol`, a fresh unchecked `[ ] ` for tasks) and
+      // whether the current item has no content past the marker.
+      var liMarkerPrefix = "";
+      var liContentEmpty = false;
+      if (isLi) {
+        var liNormFirst = firstHalf.replace(/\u00a0/g, " ");
+        var liNormFull = sourceText.replace(/\u00a0/g, " ");
+        var markerM = liNormFirst.match(/^(- |(\d+)\. )/);
+        if (markerM) {
+          liMarkerPrefix = markerM[2]
+            ? parseInt(markerM[2], 10) + 1 + ". "
+            : "- ";
+          if (/^\[[ xX]?\] /.test(liNormFirst.slice(markerM[0].length))) {
+            liMarkerPrefix += "[ ] ";
+          }
+        } else {
+          liMarkerPrefix = "- ";
+        }
+        var liContentRest = liNormFull
+          .replace(/^(- |\d+\. )/, "")
+          .replace(/^\[([ xX]?)\] /, "");
+        liContentEmpty = liContentRest.length === 0;
+      }
+
       // List item: empty source-mode `<li>` + Enter exits the list.
       // Like the blockquote-exit branch below — drop the empty item,
       // split the `<ul>` / `<ol>` if necessary, place a fresh `<p>` in
@@ -5757,7 +5732,7 @@
       // could never escape the list with the keyboard.
       if (
         isLi &&
-        sourceText.length === 0 &&
+        liContentEmpty &&
         parent.tagName &&
         (parent.tagName.toLowerCase() === "ul" ||
           parent.tagName.toLowerCase() === "ol")
@@ -5899,16 +5874,10 @@
         // heading / HR / list-block detection.
         var renderedOld;
         if (isLi) {
-          renderedOld = document.createElement("li");
-          var liFirstNodes = this._buildFormattedFragment(
-            firstHalf.replace(/ /g, " ")
-          );
-          for (var fi = 0; fi < liFirstNodes.length; fi++) {
-            renderedOld.appendChild(liFirstNodes[fi]);
-          }
-          if (!renderedOld.firstChild) {
-            renderedOld.innerHTML = "<br>";
-          }
+          // Strip the revealed `- ` / `N. ` marker (and re-form a checkbox)
+          // via the shared helper so the split-off rendered <li> never
+          // keeps a literal marker that would double on the next entry.
+          renderedOld = this._renderListItemFromSource(firstHalf);
         } else {
           renderedOld = this._renderBlockFromSource(firstHalf);
         }
@@ -5920,20 +5889,28 @@
         // block was (the user can type `# ` etc. to retag).
         var newBlock = document.createElement(isLi ? "li" : "p");
         newBlock.setAttribute("data-leaf-source", isLi ? "li" : "p");
-        if (secondHalf.length === 0) {
+        // A new `<li>` half re-reveals its own `- ` / `N. ` marker so it
+        // reads the same as any other cursored list line; the caret lands
+        // right after the marker, at the start of the carried-over content.
+        var newSourceText = isLi ? liMarkerPrefix + secondHalf : secondHalf;
+        var newCaretOffset = isLi ? liMarkerPrefix.length : 0;
+        if (newSourceText.length === 0) {
           newBlock.innerHTML = "<br>";
         } else {
-          newBlock.appendChild(document.createTextNode(secondHalf));
+          newBlock.appendChild(document.createTextNode(newSourceText));
         }
         parent.insertBefore(newBlock, renderedOld.nextSibling);
 
-        // Cursor at the start of the new block.
+        // Cursor at the start of the new block's content (past the marker).
         var newRange = document.createRange();
         if (
           newBlock.firstChild &&
           newBlock.firstChild.nodeType === Node.TEXT_NODE
         ) {
-          newRange.setStart(newBlock.firstChild, 0);
+          newRange.setStart(
+            newBlock.firstChild,
+            Math.min(newCaretOffset, newBlock.firstChild.textContent.length)
+          );
         } else {
           newRange.setStart(newBlock, 0);
         }
@@ -5976,14 +5953,40 @@
 
       var origTag = block.tagName.toLowerCase();
       var blockPrefix = this._blockSourcePrefix(origTag);
+      // List item: surface its FULL markdown source — the `- ` / `N. ` list
+      // marker (plus a `[ ] ` / `[x] ` checkbox for task items) — so the
+      // whole line is editable and breakable like any other source.
+      var isTaskLi =
+        origTag === "li" &&
+        block.classList &&
+        block.classList.contains("leaf-task");
+      var liMarker = "";
+      if (origTag === "li") {
+        var listParent = block.parentNode;
+        if (
+          listParent &&
+          listParent.tagName &&
+          listParent.tagName.toLowerCase() === "ol"
+        ) {
+          var liIndex =
+            Array.prototype.indexOf.call(listParent.children, block) + 1;
+          liMarker = liIndex + ". ";
+        } else {
+          liMarker = "- ";
+        }
+        if (isTaskLi) {
+          liMarker +=
+            block.getAttribute("data-checked") === "true" ? "[x] " : "[ ] ";
+        }
+      }
       var trace = this._serializeBlockInline(
         block,
         range.startContainer,
         range.startOffset
       );
 
-      var sourceText = blockPrefix + trace.source;
-      var caretOffset = blockPrefix.length + trace.cursorOffset;
+      var sourceText = blockPrefix + liMarker + trace.source;
+      var caretOffset = blockPrefix.length + liMarker.length + trace.cursorOffset;
 
       // Drop a `<p data-leaf-source>` with just the raw source text as
       // a single text node; `_refreshSourceBlock` (called immediately
@@ -5993,6 +5996,15 @@
       // bullet / number keeps rendering.
       var sourceBlock = document.createElement(origTag === "li" ? "li" : "p");
       sourceBlock.setAttribute("data-leaf-source", origTag);
+      if (isTaskLi) {
+        // Keep the task class so the bullet stays hidden while the `[ ] `
+        // marker is shown as editable source.
+        sourceBlock.classList.add("leaf-task");
+        sourceBlock.setAttribute(
+          "data-checked",
+          block.getAttribute("data-checked") || "false"
+        );
+      }
       if (sourceText.length === 0) {
         sourceBlock.innerHTML = "<br>";
       } else {
@@ -6263,6 +6275,52 @@
       return caretTarget;
     },
 
+    // Build a rendered `<li>` from a list-item source string. Strips the
+    // revealed `- ` / `N. ` list marker (the <li>'s position in its
+    // <ul>/<ol> already carries it — a rendered <li> must NEVER hold the
+    // literal marker, or each re-entry into source mode would prepend
+    // another one and accumulate `- - - …`). A `[ ] ` / `[x] ` marker
+    // re-forms the checkbox box; an edited (broken) marker falls through
+    // to plain text so the user can break a checkbox by editing its
+    // source. Used by both `_exitSourceMode` and the Enter-split path so
+    // the strip happens on every source→rendered transition.
+    _renderListItemFromSource: function (sourceText) {
+      var li = document.createElement("li");
+      // Normalize NBSP (contenteditable inserts it for some spaces) to a
+      // regular space so the marker strip below actually matches.
+      var text = (sourceText || "").replace(/\u00a0/g, " ");
+      var markerM = text.match(/^(- |\d+\. )/);
+      if (markerM) {
+        text = text.slice(markerM[0].length);
+        // A `[ ] ` / `[x] ` checkbox is only valid immediately after the
+        // list marker. If the user broke the marker (deleted the `- `),
+        // the brackets fall through as literal text. (`_exitSourceMode`
+        // lifts a fully marker-less `<li>` out to a `<p>`; this helper is
+        // reached with the marker present.)
+        var taskM = text.match(/^\[([ xX]?)\] /);
+        if (taskM) {
+          li.className = "leaf-task";
+          li.setAttribute(
+            "data-checked",
+            taskM[1] === "x" || taskM[1] === "X" ? "true" : "false"
+          );
+          var box = document.createElement("span");
+          box.className = "leaf-task-box";
+          box.setAttribute("contenteditable", "false");
+          li.appendChild(box);
+          text = text.slice(taskM[0].length);
+        }
+      }
+      var nodes = this._buildFormattedFragment(text);
+      for (var i = 0; i < nodes.length; i++) {
+        li.appendChild(nodes[i]);
+      }
+      if (!li.firstChild) {
+        li.innerHTML = "<br>";
+      }
+      return li;
+    },
+
     _exitSourceMode: function (sourceBlock) {
       if (!sourceBlock || !sourceBlock.parentNode) return;
       if (this._syntaxMutating) return;
@@ -6273,21 +6331,35 @@
       sourceText = sourceText.replace(/​/g, "");
 
       var origTag = sourceBlock.getAttribute("data-leaf-source") || "";
+
+      // A source `<li>` whose `- ` / `N. ` marker the user deleted is no
+      // longer a list item — break it out of the list into a `<p>` (like
+      // Obsidian), splitting the surrounding `<ul>`/`<ol>` if it sat
+      // mid-list. The user has already moved their cursor to another
+      // block, so we restructure the DOM without touching the selection.
+      if (origTag === "li") {
+        var liNormalized = sourceText.replace(/\u00a0/g, " ");
+        var hasMarker = /^(- |\d+\. )/.test(liNormalized);
+        var liList = sourceBlock.parentNode;
+        var liListTag =
+          liList && liList.tagName ? liList.tagName.toLowerCase() : "";
+        if (
+          !hasMarker &&
+          (liListTag === "ul" || liListTag === "ol") &&
+          liList.parentNode
+        ) {
+          this._exitListItemToParagraph(sourceBlock, liNormalized, liList);
+          return;
+        }
+      }
+
       var rendered;
       if (origTag === "li") {
         // List items render back as `<li>` — block-level patterns
-        // (heading, HR, list) don't apply inside a list item, so we
-        // skip `_renderBlockFromSource` entirely and just build the
-        // inline body.
-        rendered = document.createElement("li");
-        var liInlineText = sourceText.replace(/ /g, " ");
-        var liNodes = this._buildFormattedFragment(liInlineText);
-        for (var i = 0; i < liNodes.length; i++) {
-          rendered.appendChild(liNodes[i]);
-        }
-        if (!rendered.firstChild) {
-          rendered.innerHTML = "<br>";
-        }
+        // (heading, HR, list) don't apply inside a list item. The shared
+        // helper strips the revealed `- ` / `N. ` marker and re-forms a
+        // checkbox.
+        rendered = this._renderListItemFromSource(sourceText);
       } else {
         rendered = this._renderBlockFromSource(sourceText);
       }
@@ -6295,6 +6367,53 @@
       this._syntaxMutating = true;
       try {
         sourceBlock.parentNode.replaceChild(rendered, sourceBlock);
+      } finally {
+        this._syntaxMutating = false;
+      }
+    },
+
+    // Lift a marker-less `<li>` out of its `<ul>`/`<ol>` into a sibling
+    // `<p>` carrying the item's (marker-less) content. Items that sat
+    // AFTER it move into a fresh list of the same kind placed below the
+    // paragraph, so the result is list / `<p>` / list rather than leaking
+    // the tail into a sibling-less paragraph. Does not move the cursor.
+    _exitListItemToParagraph: function (li, contentText, list) {
+      var grandparent = list.parentNode;
+
+      var p = document.createElement("p");
+      var pNodes = this._buildFormattedFragment(contentText);
+      for (var i = 0; i < pNodes.length; i++) {
+        p.appendChild(pNodes[i]);
+      }
+      if (!p.firstChild) {
+        p.innerHTML = "<br>";
+      }
+
+      this._syntaxMutating = true;
+      try {
+        // Trailing siblings → a new list of the same kind below the `<p>`.
+        var trailing = [];
+        var next = li.nextElementSibling;
+        while (next) {
+          var afterNext = next.nextElementSibling;
+          trailing.push(next);
+          next = afterNext;
+        }
+
+        list.removeChild(li);
+        grandparent.insertBefore(p, list.nextSibling);
+
+        if (trailing.length > 0) {
+          var secondList = document.createElement(list.tagName);
+          for (var t = 0; t < trailing.length; t++) {
+            secondList.appendChild(trailing[t]);
+          }
+          grandparent.insertBefore(secondList, p.nextSibling);
+        }
+
+        if (!list.firstChild) {
+          grandparent.removeChild(list);
+        }
       } finally {
         this._syntaxMutating = false;
       }
@@ -6475,7 +6594,7 @@
       // heading regex below uses a literal space, so without the
       // normalization the prefix only matches until the user happens
       // to type a non-space character that flips NBSP back.
-      text = text.replace(/ /g, " ");
+      text = text.replace(/\u00a0/g, " ");
       var kind = "p";
       var blockPrefixLen = 0;
 
@@ -6778,7 +6897,7 @@
       // typed trailing space inside a contenteditable to U+00A0, which
       // otherwise breaks the heading regex (the literal ` ` doesn't
       // match NBSP) and drops the rendered block back to a plain `<p>`.
-      var text = sourceText.replace(/ /g, " ");
+      var text = sourceText.replace(/\u00a0/g, " ");
       var tagName = "p";
 
       // Heading: leading `#`s (1-6, no 7th) optionally followed by a
