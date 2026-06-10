@@ -159,12 +159,6 @@
 
     // GFM task lists
     ".content-editor-visual li.leaf-task { list-style: none; margin-left: -1.25em; }",
-    // A source-mode list item gets `text-indent: -1.2em` (leaf.ex) to pull its
-    // `- ` / `N. ` marker into the bullet gutter. Task items already sit in
-    // that gutter via `margin-left: -1.25em` above, so the indent would
-    // double-shift them left of the rendered checkboxes — cancel it so the
-    // `- [x] ` source starts exactly where the checkbox box was.
-    ".content-editor-visual li[data-leaf-source=\"li\"].leaf-task { text-indent: 0; }",
     ".content-editor-visual .leaf-task-box {",
     "  display: inline-block; width: 1em; height: 1em; vertical-align: -0.15em;",
     "  margin-right: 0.45em; border: 1.5px solid currentColor; border-radius: 0.25em;",
@@ -1644,6 +1638,64 @@
         if (this._maybeHandleSourceDelete(e.key === "Backspace")) {
           e.preventDefault();
           return;
+        }
+      }
+
+      // Hybrid: a list item's `- ` / `- [ ] ` marker is hidden (CSS) while
+      // the cursor is in the body, so a plain Left from the body start
+      // (`- [ ] |text`) skips the `display:none` marker span and jumps to
+      // the PREVIOUS line — the user can never reach the marker to edit it.
+      // Intercept: reveal the marker and step the caret onto it, landing
+      // just after the last marker char (`- [ ]| text`).
+      if (
+        this._mode === "hybrid" &&
+        !mod &&
+        !e.shiftKey &&
+        e.key === "ArrowLeft" &&
+        this._sourceBlock &&
+        this._sourceBlock.isConnected &&
+        this._sourceBlock.tagName &&
+        this._sourceBlock.tagName.toLowerCase() === "li"
+      ) {
+        var alSel = window.getSelection();
+        if (alSel.rangeCount && alSel.getRangeAt(0).collapsed) {
+          var alRange = alSel.getRangeAt(0);
+          if (this._sourceBlock.contains(alRange.startContainer)) {
+            var alOffset = this._textOffsetInBlock(
+              this._sourceBlock,
+              alRange.startContainer,
+              alRange.startOffset
+            );
+            var alSrc = (this._sourceBlock.textContent || "").replace(
+              /\u00a0/g,
+              " "
+            );
+            var alM = alSrc.match(/^(- |\d+\. )(\[[ xX]\] )?/);
+            var alMarkerLen = alM ? alM[0].length : 0;
+            if (
+              alMarkerLen > 0 &&
+              alOffset === alMarkerLen &&
+              !this._sourceBlock.classList.contains("leaf-marker-active")
+            ) {
+              e.preventDefault();
+              this._sourceBlock.classList.add("leaf-marker-active");
+              var alMarker =
+                this._sourceBlock.querySelector(".leaf-list-marker");
+              var alTextNode = alMarker ? alMarker.firstChild : null;
+              if (alTextNode && alTextNode.nodeType === Node.TEXT_NODE) {
+                var alNewRange = document.createRange();
+                alNewRange.setStart(
+                  alTextNode,
+                  Math.min(alMarkerLen - 1, alTextNode.textContent.length)
+                );
+                alNewRange.collapse(true);
+                alSel.removeAllRanges();
+                alSel.addRange(alNewRange);
+                this._refreshSourceBlock();
+              }
+              return;
+            }
+          }
         }
       }
 
@@ -4173,6 +4225,26 @@
         var enteredLi = this._enterSourceMode(li);
         if (enteredLi) {
           this._sourceBlock = enteredLi;
+          // The cascade of replaceChild()s during auto-format + source-mode
+          // entry can drop the selection (the caret appears to lose focus).
+          // Re-focus the editor and force the caret to the END of the new
+          // item so the user can start typing immediately.
+          try {
+            if (
+              this._visualEl &&
+              document.activeElement !== this._visualEl
+            ) {
+              this._visualEl.focus();
+            }
+            var afEndRange = document.createRange();
+            afEndRange.selectNodeContents(enteredLi);
+            afEndRange.collapse(false);
+            var afSel = window.getSelection();
+            afSel.removeAllRanges();
+            afSel.addRange(afEndRange);
+          } catch (_afErr) {
+            /* selection invalidated mid-frame — skip */
+          }
         }
       }
     },
@@ -6226,10 +6298,11 @@
         }
       }
 
-      function appendMarker(host, text, sourceStart) {
+      function appendMarker(host, text, sourceStart, extraClass) {
         if (text.length === 0) return;
         var span = document.createElement("span");
-        span.className = "leaf-source-marker";
+        span.className =
+          "leaf-source-marker" + (extraClass ? " " + extraClass : "");
         var textNode = document.createTextNode(text);
         span.appendChild(textNode);
         host.appendChild(span);
@@ -6242,9 +6315,29 @@
         }
       }
 
-      // Block prefix (heading hashes + trailing space).
+      // Block prefix marker. For headings it's the `# ` (always faded but
+      // visible). For a list item it's the `- ` / `N. ` / `- [ ] ` marker,
+      // tagged `.leaf-list-marker` so CSS can hide it behind the bullet /
+      // checkbox until the cursor lands on it. Task items also get a
+      // (contenteditable-false) checkbox box that shows while the marker
+      // is hidden.
       if (scan.blockPrefixLen > 0) {
-        appendMarker(parent, sourceText.slice(0, scan.blockPrefixLen), 0);
+        if (scan.listMarker) {
+          if (scan.isTask) {
+            var taskBox = document.createElement("span");
+            taskBox.className = "leaf-task-box";
+            taskBox.setAttribute("contenteditable", "false");
+            parent.appendChild(taskBox);
+          }
+          appendMarker(
+            parent,
+            sourceText.slice(0, scan.blockPrefixLen),
+            0,
+            "leaf-list-marker"
+          );
+        } else {
+          appendMarker(parent, sourceText.slice(0, scan.blockPrefixLen), 0);
+        }
       }
 
       // Render the rest of the source text recursively so nested
@@ -6553,6 +6646,75 @@
       }
     },
 
+    // Live counterpart to `_exitListItemToParagraph`: the user deleted a
+    // list item's marker WHILE editing it. Convert the source `<li>` to a
+    // source `<p>` in place — splitting the `<ul>`/`<ol>` if mid-list — and
+    // keep the caret, so the bullet and list indent vanish immediately and
+    // editing continues in the paragraph. The refresh at the end re-scans
+    // the `<p>` and rebuilds its inline formatting.
+    _breakSourceListItemToParagraph: function (sourceText, cursorOffset) {
+      var li = this._sourceBlock;
+      var list = li.parentNode;
+      var grandparent = list ? list.parentNode : null;
+      if (!grandparent) return;
+
+      var p = document.createElement("p");
+      p.setAttribute("data-leaf-source", "p");
+
+      this._syntaxMutating = true;
+      try {
+        // Items after this one move into a fresh list below the `<p>`.
+        var trailing = [];
+        var next = li.nextElementSibling;
+        while (next) {
+          var after = next.nextElementSibling;
+          trailing.push(next);
+          next = after;
+        }
+        list.removeChild(li);
+        grandparent.insertBefore(p, list.nextSibling);
+        if (trailing.length > 0) {
+          var second = document.createElement(list.tagName);
+          for (var i = 0; i < trailing.length; i++) {
+            second.appendChild(trailing[i]);
+          }
+          grandparent.insertBefore(second, p.nextSibling);
+        }
+        if (!list.firstChild) {
+          grandparent.removeChild(list);
+        }
+
+        // Seed the `<p>` with the raw source + caret; the refresh below
+        // re-scans it as a paragraph and rebuilds inline formatting.
+        if (sourceText.length === 0) {
+          p.innerHTML = "<br>";
+        } else {
+          p.appendChild(document.createTextNode(sourceText));
+        }
+        var range = document.createRange();
+        if (p.firstChild && p.firstChild.nodeType === Node.TEXT_NODE) {
+          range.setStart(
+            p.firstChild,
+            Math.min(cursorOffset, p.firstChild.textContent.length)
+          );
+        } else {
+          range.setStart(p, 0);
+        }
+        range.collapse(true);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      } finally {
+        this._syntaxMutating = false;
+      }
+
+      this._sourceBlock = p;
+      this._lastSourceStateKey = null;
+      this._activeMatchKey = null;
+      this._refreshSourceBlock();
+      this._debouncedPushVisualChange();
+    },
+
     // Lift a marker-less `<li>` out of its `<ul>`/`<ol>` into a sibling
     // `<p>` carrying the item's (marker-less) content. Items that sat
     // AFTER it move into a fresh list of the same kind placed below the
@@ -6639,16 +6801,53 @@
       var cursorOffset = trace.cursorOffset;
       var scan;
       if (this._sourceBlock.tagName.toLowerCase() === "li") {
-        // Block-level patterns (heading, HR, list prefixes) don't
-        // apply inside a `<li>` — `# ` inside a list item is literal
-        // text, not a heading retag. Run only the inline scan.
+        // The leading `- ` / `N. ` (plus an optional `[ ] ` / `[x] `
+        // checkbox) is the list marker. Treat it as a block-prefix marker
+        // so `_buildSourceFragment` renders it as a `.leaf-list-marker`
+        // span that CSS hides — showing the bullet / checkbox in its place
+        // — UNLESS the cursor is on it (`.leaf-marker-active`, set below).
+        // That mirrors how inline markers (`**`, `*`) only reveal when the
+        // cursor is inside them, instead of the whole row going to source.
+        // (Block-level patterns like `# ` are literal text inside a list
+        // item, so we run only the inline scan on the body.)
+        var liM = sourceText
+          .replace(/ /g, " ")
+          .match(/^(- |\d+\. )(\[([ xX])\] )?/);
+        var liMarkerLen = liM ? liM[0].length : 0;
+        var liIsTask = !!(liM && liM[2]);
+        var liChecked = liIsTask && (liM[3] === "x" || liM[3] === "X");
+        var liBodyMatches = this._scanInlineMatches(
+          sourceText.slice(liMarkerLen)
+        );
+        for (var lim = 0; lim < liBodyMatches.length; lim++) {
+          liBodyMatches[lim].start += liMarkerLen;
+          liBodyMatches[lim].end += liMarkerLen;
+        }
         scan = {
           kind: "li",
-          blockPrefixLen: 0,
-          inlineMatches: this._scanInlineMatches(sourceText),
+          blockPrefixLen: liMarkerLen,
+          inlineMatches: liBodyMatches,
+          listMarker: liMarkerLen > 0,
+          isTask: liIsTask,
+          checked: liChecked,
         };
       } else {
         scan = this._scanSource(sourceText);
+      }
+
+      // Marker fully deleted — the item is no longer a list item. Break it
+      // out of its `<ul>`/`<ol>` into a source `<p>` RIGHT NOW (caret
+      // preserved) so the bullet AND the list indent vanish immediately,
+      // instead of lingering until the cursor leaves the line.
+      if (
+        scan.kind === "li" &&
+        !scan.listMarker &&
+        this._sourceBlock.parentNode &&
+        this._sourceBlock.parentNode.tagName &&
+        /^(ul|ol)$/i.test(this._sourceBlock.parentNode.tagName)
+      ) {
+        this._breakSourceListItemToParagraph(sourceText, cursorOffset);
+        return;
       }
 
       // Walk every enclosing inline match (nesting-aware) so the active
@@ -6691,11 +6890,48 @@
       }
       this._activeMatchKey = activeKey;
 
+      var stateKey = scan.kind + "|" + activeKey + "|" + sourceText;
+      var willRebuild = stateKey !== this._lastSourceStateKey;
+
+      // List marker reveal: show the `- ` / `N. ` / `- [ ] ` source only
+      // while the cursor is on the marker's non-space chars — strictly
+      // BEFORE the trailing space that separates the marker from the body.
+      // So `- [ ]| text` reveals (touching `]`), but `- [ ] |text` (past the
+      // space, at the body) shows the bullet / checkbox. This is a class
+      // flip — no rebuild — so it runs even when the dedupe skips the
+      // rebuild (the marker span / checkbox box live in the DOM the whole
+      // time; only their visibility changes).
+      if (scan.kind === "li") {
+        this._sourceBlock.classList.toggle("leaf-task", !!scan.isTask);
+        if (scan.isTask) {
+          this._sourceBlock.setAttribute(
+            "data-checked",
+            scan.checked ? "true" : "false"
+          );
+        }
+        // Also keep it active while the body is still empty — i.e. you're
+        // typing the marker itself (`- `, `- [ ] `). Without that the marker
+        // would hide the instant you finish typing it and strand the caret
+        // in the now-`display:none` span, corrupting the next keystrokes.
+        var markerActive =
+          !!scan.listMarker &&
+          (cursorOffset < scan.blockPrefixLen ||
+            sourceText.length <= scan.blockPrefixLen);
+        this._sourceBlock.classList.toggle("leaf-marker-active", markerActive);
+        // Marker just deleted (`- ` / `N. ` gone) — the item is no longer a
+        // list item (it breaks out to a `<p>` on cursor-leave). Hide the
+        // bullet / number NOW so the broken formatting shows immediately,
+        // instead of a stray bullet lingering until the line is left.
+        this._sourceBlock.classList.toggle(
+          "leaf-marker-broken",
+          !scan.listMarker
+        );
+      }
+
       // Cheap dedupe: same kind + same active path + same source text
       // means the DOM we'd build is identical to what's already there.
       // Cursor moves within a single segment land here every time.
-      var stateKey = scan.kind + "|" + activeKey + "|" + sourceText;
-      if (stateKey === this._lastSourceStateKey) return;
+      if (!willRebuild) return;
       this._lastSourceStateKey = stateKey;
 
       this._syntaxMutating = true;

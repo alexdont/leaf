@@ -2212,16 +2212,42 @@ defmodule Leaf do
       /* Inline-block keeps the source block on a single line for inline
          tags but still flows like a paragraph in the editor. */
     }
-    /* A list item in source mode shows its literal `- ` / `N. ` marker, so
-       hide the rendered bullet/number to avoid a double marker. The
-       negative text-indent pulls the revealed `- ` / `N. ` left into the
-       marker gutter so it sits where the sibling items' bullets/numbers
-       are — otherwise the source marker starts at the content edge and
-       looks indented relative to the rendered bullets. Only the first
-       line shifts (hanging indent), matching how wrapped list text aligns. */
-    .content-editor-visual li[data-leaf-source="li"] {
+    /* A list item in source mode mirrors how inline markers reveal: by
+       default it looks rendered — the natural bullet / number (or, for a
+       task, the checkbox) shows and the literal `- ` / `N. ` / `- [ ] `
+       marker is hidden. The marker reveals — and the bullet / checkbox
+       hides — only while the cursor is on it (the li carries
+       `.leaf-marker-active`, toggled by `_refreshSourceBlock`). So the row
+       reads as formatted until you cursor onto the marker, just like
+       `**bold**`. */
+    .content-editor-visual li[data-leaf-source="li"] > .leaf-list-marker {
+      display: none;
+    }
+    .content-editor-visual li[data-leaf-source="li"].leaf-marker-active {
+      /* Hide the bullet / number and seat the revealed `- ` in the marker
+         gutter (negative text-indent) so it lines up with sibling items'
+         bullets. Only the first line shifts (hanging indent). */
       list-style: none;
       text-indent: -1.2em;
+    }
+    .content-editor-visual li[data-leaf-source="li"].leaf-marker-active > .leaf-list-marker {
+      display: inline;
+      opacity: 0.4;
+    }
+    /* Task items: the checkbox already sits in the marker gutter via the
+       `.leaf-task` margin, so the revealed `- [ ] ` needs no text-indent;
+       hide the checkbox box while the marker is showing. */
+    .content-editor-visual li[data-leaf-source="li"].leaf-task.leaf-marker-active {
+      text-indent: 0;
+    }
+    .content-editor-visual li[data-leaf-source="li"].leaf-task.leaf-marker-active > .leaf-task-box {
+      display: none;
+    }
+    /* Marker deleted (no valid `- ` / `N. ` left): hide the bullet/number
+       so the broken formatting is obvious immediately — the item breaks
+       out to a `<p>` once the cursor leaves the line. */
+    .content-editor-visual li[data-leaf-source="li"].leaf-marker-broken {
+      list-style: none;
     }
     .content-editor-visual [data-leaf-source="h1"] {
       font-size: 2em;
