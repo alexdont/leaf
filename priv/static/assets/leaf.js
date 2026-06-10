@@ -159,6 +159,12 @@
 
     // GFM task lists
     ".content-editor-visual li.leaf-task { list-style: none; margin-left: -1.25em; }",
+    // A source-mode list item gets `text-indent: -1.2em` (leaf.ex) to pull its
+    // `- ` / `N. ` marker into the bullet gutter. Task items already sit in
+    // that gutter via `margin-left: -1.25em` above, so the indent would
+    // double-shift them left of the rendered checkboxes — cancel it so the
+    // `- [x] ` source starts exactly where the checkbox box was.
+    ".content-editor-visual li[data-leaf-source=\"li\"].leaf-task { text-indent: 0; }",
     ".content-editor-visual .leaf-task-box {",
     "  display: inline-block; width: 1em; height: 1em; vertical-align: -0.15em;",
     "  margin-right: 0.45em; border: 1.5px solid currentColor; border-radius: 0.25em;",
@@ -4056,6 +4062,32 @@
         var li = document.createElement("li");
         while (block.firstChild) li.appendChild(block.firstChild);
         this._trimLeadingTextChars(li, prefixLen);
+
+        // Re-form a task checkbox when the un-prefixed item starts with a
+        // `[ ] ` / `[x] ` marker, so re-typing `- ` in front of a broken-out
+        // `[ ] foo` rebuilds the real checkbox flat in the list immediately
+        // — instead of leaving literal brackets that only become a checkbox
+        // on a later source-mode enter/leave cycle (which read as a stray,
+        // mis-indented item in the meantime).
+        var afFirst = this._firstTextDescendant(li);
+        if (afFirst) {
+          var afTask = afFirst.textContent
+            .replace(/ /g, " ")
+            .match(/^\[([ xX]?)\] /);
+          if (afTask) {
+            li.classList.add("leaf-task");
+            li.setAttribute(
+              "data-checked",
+              afTask[1] === "x" || afTask[1] === "X" ? "true" : "false"
+            );
+            afFirst.textContent = afFirst.textContent.slice(afTask[0].length);
+            var afBox = document.createElement("span");
+            afBox.className = "leaf-task-box";
+            afBox.setAttribute("contenteditable", "false");
+            li.insertBefore(afBox, li.firstChild);
+          }
+        }
+
         if (
           !li.firstChild ||
           (li.childNodes.length === 1 &&
@@ -4111,6 +4143,21 @@
         }
       } finally {
         this._syntaxMutating = false;
+      }
+
+      // Hybrid mode: go STRAIGHT into source mode on the new item so the
+      // user sees a single `<p>- ` → `<li>- ` transition with the caret
+      // landing right after the revealed marker. Without this, the item
+      // would render as a bare bullet first and `_updateSourceBlock`
+      // would re-enter source mode on the next tick — two competing caret
+      // placements that drifted the cursor one char right per transform.
+      // (The caret was set to the item's start just above, so
+      // `_enterSourceMode` traces from the right position.)
+      if (this._mode === "hybrid" && li.isConnected) {
+        var enteredLi = this._enterSourceMode(li);
+        if (enteredLi) {
+          this._sourceBlock = enteredLi;
+        }
       }
     },
 
@@ -6272,6 +6319,25 @@
         }
       }
 
+      // A regular space at the very end of the block collapses in
+      // contenteditable (Chrome renders it zero-width), so the caret
+      // parks on top of it and the next keystroke overwrites it — e.g. a
+      // freshly-revealed `- ` marker (empty body) loses its space and the
+      // next char yields `-x` instead of `- x`. Pin trailing spaces as
+      // NBSP so they hold width and the caret sits AFTER them. NBSP is
+      // normalized back to a regular space on serialize / exit, so the
+      // markdown stays clean. Same length, so the recorded caret offset
+      // stays valid.
+      var lastTail = this._lastTextDescendant(parent);
+      if (lastTail && /\u0020$/.test(lastTail.textContent)) {
+        lastTail.textContent = lastTail.textContent.replace(
+          /\u0020+$/,
+          function (run) {
+            return run.replace(/\u0020/g, "\u00a0");
+          }
+        );
+      }
+
       return caretTarget;
     },
 
@@ -6350,6 +6416,29 @@
         ) {
           this._exitListItemToParagraph(sourceBlock, liNormalized, liList);
           return;
+        }
+
+        // An empty list item — just the `- ` / `N. ` marker (and maybe an
+        // empty `[ ] ` checkbox), no content — that the cursor LEAVES is
+        // visual noise (a stray bullet). Drop it instead of rendering an
+        // empty bullet; if that empties the list, drop the list too. This
+        // is the blur counterpart to the empty-item Enter/Backspace exits.
+        if (hasMarker) {
+          var liContent = liNormalized
+            .replace(/^(- |\d+\. )/, "")
+            .replace(/^\[([ xX]?)\] /, "");
+          if (liContent.trim() === "" && (liListTag === "ul" || liListTag === "ol")) {
+            this._syntaxMutating = true;
+            try {
+              liList.removeChild(sourceBlock);
+              if (!liList.firstElementChild && liList.parentNode) {
+                liList.parentNode.removeChild(liList);
+              }
+            } finally {
+              this._syntaxMutating = false;
+            }
+            return;
+          }
         }
       }
 

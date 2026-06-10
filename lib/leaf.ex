@@ -2213,9 +2213,15 @@ defmodule Leaf do
          tags but still flows like a paragraph in the editor. */
     }
     /* A list item in source mode shows its literal `- ` / `N. ` marker, so
-       hide the rendered bullet/number to avoid a double marker. */
+       hide the rendered bullet/number to avoid a double marker. The
+       negative text-indent pulls the revealed `- ` / `N. ` left into the
+       marker gutter so it sits where the sibling items' bullets/numbers
+       are — otherwise the source marker starts at the content edge and
+       looks indented relative to the rendered bullets. Only the first
+       line shifts (hanging indent), matching how wrapped list text aligns. */
     .content-editor-visual li[data-leaf-source="li"] {
       list-style: none;
+      text-indent: -1.2em;
     }
     .content-editor-visual [data-leaf-source="h1"] {
       font-size: 2em;
