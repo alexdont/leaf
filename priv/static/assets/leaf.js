@@ -6537,18 +6537,20 @@
     // the strip happens on every source→rendered transition.
     _renderListItemFromSource: function (sourceText) {
       var li = document.createElement("li");
-      // Normalize NBSP (contenteditable inserts it for some spaces) to a
-      // regular space so the marker strip below actually matches.
-      var text = (sourceText || "").replace(/\u00a0/g, " ");
-      var markerM = text.match(/^(- |\d+\. )/);
+      var src = sourceText || "";
+      // Normalize NBSP to a regular space for MARKER detection only \u2014 the
+      // body is sliced from the original so the user's spaces survive.
+      var normalized = src.replace(/\u00a0/g, " ");
+      var bodyStart = 0;
+      var markerM = normalized.match(/^(- |\d+\. )/);
       if (markerM) {
-        text = text.slice(markerM[0].length);
+        bodyStart = markerM[0].length;
         // A `[ ] ` / `[x] ` checkbox is only valid immediately after the
         // list marker. If the user broke the marker (deleted the `- `),
         // the brackets fall through as literal text. (`_exitSourceMode`
         // lifts a fully marker-less `<li>` out to a `<p>`; this helper is
         // reached with the marker present.)
-        var taskM = text.match(/^\[([ xX]?)\] /);
+        var taskM = normalized.slice(bodyStart).match(/^\[([ xX]?)\] /);
         if (taskM) {
           li.className = "leaf-task";
           li.setAttribute(
@@ -6559,9 +6561,13 @@
           box.className = "leaf-task-box";
           box.setAttribute("contenteditable", "false");
           li.appendChild(box);
-          text = text.slice(taskM[0].length);
+          bodyStart += taskM[0].length;
         }
       }
+      // Keep the body's NBSP and pin any leading / repeated regular spaces
+      // the user added as NBSP, so HTML doesn't collapse them on render \u2014
+      // i.e. spaces typed before/inside the item content stick.
+      var text = this._preserveSpaces(src.slice(bodyStart));
       var nodes = this._buildFormattedFragment(text);
       for (var i = 0; i < nodes.length; i++) {
         li.appendChild(nodes[i]);
@@ -6570,6 +6576,19 @@
         li.innerHTML = "<br>";
       }
       return li;
+    },
+
+    // Pin spaces that HTML would otherwise collapse \u2014 a leading run, and any
+    // run of two or more \u2014 as NBSP, so they render at their typed width.
+    // Single inter-word spaces stay regular so normal line-wrapping works.
+    _preserveSpaces: function (text) {
+      return text
+        .replace(/^[\u0020\u00a0]+/, function (run) {
+          return run.replace(/\u0020/g, "\u00a0");
+        })
+        .replace(/[\u0020\u00a0]{2,}/g, function (run) {
+          return run.replace(/\u0020/g, "\u00a0");
+        });
     },
 
     _exitSourceMode: function (sourceBlock) {
