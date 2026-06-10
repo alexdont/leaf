@@ -2386,6 +2386,7 @@ defmodule Leaf do
     html
     |> String.replace(~r/<(h[1-6]|p|li|blockquote|a)([^>]*)>\n/, "<\\1\\2>")
     |> String.replace(~r/\s*<\/(h[1-6]|p|li|blockquote|a)>/, "</\\1>")
+    |> unwrap_loose_list_items()
     |> apply_task_lists()
     |> apply_callouts()
     |> apply_spoiler_syntax()
@@ -2416,6 +2417,24 @@ defmodule Leaf do
     html
     |> unwrap_loose_task_items()
     |> convert_task_checkboxes()
+  end
+
+  # A *loose* list (any blank line between items) wraps each item's content
+  # in a `<p>`: `<li><p>text</p></li>`. The hybrid editor expects inline
+  # content directly inside the `<li>` — a `<p>` inside traps the cursor
+  # (the current block resolves to the inner `<p>`, so Enter inserts a
+  # nested paragraph instead of a new list item and the bullet gets stuck).
+  # Unwrap the single-paragraph case back to `<li>text</li>`. The negative
+  # lookahead keeps the match to ONE paragraph so genuinely multi-block
+  # items (`<li><p>a</p><p>b</p></li>`, `<li><p>a</p><ul>…</ul></li>`) are
+  # left untouched. Runs before `apply_task_lists` so loose checklists are
+  # unwrapped here and still get their checkbox.
+  defp unwrap_loose_list_items(html) do
+    Regex.replace(
+      ~r/<li([^>]*)>\s*<p>((?:(?!<\/p>)[\s\S])*?)<\/p>\s*<\/li>/,
+      html,
+      "<li\\1>\\2</li>"
+    )
   end
 
   # A *loose* list (any blank line between items) wraps each item's content

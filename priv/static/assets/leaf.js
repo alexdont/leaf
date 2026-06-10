@@ -1073,6 +1073,13 @@
       this._syncFormInput(this.el.dataset.initialMarkdown || "");
 
       if (this._visualEl) {
+        // Server-rendered content is pretty-printed, so block containers
+        // hold whitespace-only text nodes between their block children —
+        // a cursor trap in contenteditable (see `_stripInterBlockWhitespace`).
+        // Loose lists (`<li><p>…</p></li>`) get the same normalization.
+        this._stripInterBlockWhitespace(this._visualEl);
+        this._unwrapLooseListItems(this._visualEl);
+
         document.execCommand("defaultParagraphSeparator", false, "p");
 
         this._visualEl.addEventListener(
@@ -1166,6 +1173,15 @@
         function (payload) {
           if (this._visualEl && payload.html !== undefined) {
             this._visualEl.innerHTML = payload.html || "<p><br></p>";
+            // Pretty-printed server HTML leaves whitespace-only text nodes
+            // between block children (e.g. between `<li>`s); strip them so
+            // a click can't land the caret in a `<ul>`-child text node,
+            // which would make Enter/Backspace unable to act on the item.
+            // Also unwrap loose list items (`<li><p>…</p></li>`) — markdown
+            // with blank lines between items round-trips through here, and
+            // the inner `<p>` otherwise traps Enter inside the item.
+            this._stripInterBlockWhitespace(this._visualEl);
+            this._unwrapLooseListItems(this._visualEl);
             // DOM was replaced — old block references are stale
             this._dragHandleBlock = null;
           }
@@ -4529,6 +4545,82 @@
         } else {
           first.textContent = first.textContent.slice(count);
           return;
+        }
+      }
+    },
+
+    // Remove whitespace-only text nodes that sit between the block
+    // children of structural containers (the editor root, `<ul>`/`<ol>`,
+    // table groups, blockquotes). Server-rendered markdown→HTML is
+    // pretty-printed, so these stray nodes appear between every `<li>`,
+    // `<tr>`, etc. In a contenteditable they're a cursor trap: a click
+    // near a list item can land the caret in a text node that's a direct
+    // child of the `<ul>`, so `_getCurrentBlock` resolves to the `<ul>`
+    // (not an `<li>`) and Enter/Backspace can't act on the item — the
+    // bullet looks permanently stuck. These nodes carry no meaning inside
+    // these containers (only element children are valid there), so
+    // dropping them is safe and leaves the markdown unchanged.
+    _stripInterBlockWhitespace: function (root) {
+      if (!root) return;
+      var containers = [root];
+      var nested = root.querySelectorAll(
+        "ul, ol, menu, table, thead, tbody, tfoot, tr, blockquote"
+      );
+      for (var i = 0; i < nested.length; i++) containers.push(nested[i]);
+      for (var c = 0; c < containers.length; c++) {
+        var parent = containers[c];
+        var child = parent.firstChild;
+        while (child) {
+          var next = child.nextSibling;
+          if (
+            child.nodeType === Node.TEXT_NODE &&
+            !/\S/.test(child.textContent)
+          ) {
+            parent.removeChild(child);
+          }
+          child = next;
+        }
+      }
+    },
+
+    // Unwrap "loose" list items. CommonMark renders a list whose items
+    // are separated by blank lines as `<li><p>text</p></li>` instead of
+    // `<li>text</li>`. The hybrid editor expects inline content directly
+    // in the `<li>`: with a `<p>` inside, a click lands the caret in that
+    // `<p>`, so `_getCurrentBlock` returns the `<p>` (not the `<li>`) and
+    // Enter inserts a nested paragraph inside the item instead of starting
+    // a new list item — the bullet gets stuck and can't be left. Unwrap
+    // the common single-paragraph case so list items behave tightly; a
+    // genuinely multi-paragraph item is left as-is.
+    _unwrapLooseListItems: function (root) {
+      if (!root) return;
+      var items = root.querySelectorAll("li");
+      for (var i = 0; i < items.length; i++) {
+        var li = items[i];
+        var directPs = [];
+        for (var k = 0; k < li.children.length; k++) {
+          if (li.children[k].tagName.toLowerCase() === "p") {
+            directPs.push(li.children[k]);
+          }
+        }
+        if (directPs.length === 1) {
+          var p = directPs[0];
+          while (p.firstChild) li.insertBefore(p.firstChild, p);
+          li.removeChild(p);
+        }
+        // Drop the pretty-printer's leading/trailing whitespace-only text
+        // nodes left around the (former) `<p>` so the item reads cleanly.
+        var child = li.firstChild;
+        while (child) {
+          var next = child.nextSibling;
+          if (
+            child.nodeType === Node.TEXT_NODE &&
+            !/\S/.test(child.textContent) &&
+            (child === li.firstChild || child === li.lastChild)
+          ) {
+            li.removeChild(child);
+          }
+          child = next;
         }
       }
     },
