@@ -4,7 +4,7 @@ defmodule Leaf do
 
   Visual mode uses a contenteditable div with vanilla JS (no npm dependencies).
   Markdown mode uses a plain textarea with toolbar support.
-  Content syncs between modes using Earmark (markdown→HTML) and client-side
+  Content syncs between modes using MDEx (markdown→HTML) and client-side
   HTML→markdown conversion.
 
   ## Usage
@@ -2404,7 +2404,7 @@ defmodule Leaf do
   # That breaks the hybrid auto-format helpers (`_maybeAutoFormatHeading`
   # & co.) which require the current block to be a `<p>`.
   # 2-arity variant: when `preserve_tags` is non-empty, custom/unknown tags
-  # (e.g. <Hero/>, <CTA/>) are pulled out of the markdown BEFORE Earmark
+  # (e.g. <Hero/>, <CTA/>) are pulled out of the markdown BEFORE MDEx
   # (which would otherwise mangle their form), rendered as atomic,
   # non-editable placeholder blocks, and restored verbatim. The client
   # serializes those placeholders straight back to their original source,
@@ -2444,7 +2444,7 @@ defmodule Leaf do
   end
 
   # Swap tokens back for atomic placeholder spans carrying the verbatim
-  # source in a `data-leaf-raw` attribute. A standalone token that Earmark
+  # source in a `data-leaf-raw` attribute. A standalone token that MDEx
   # wrapped in its own `<p>` stays a block; an inline token stays inline.
   defp restore_preserved_tags(html, store) do
     Enum.reduce(store, html, fn {token, raw}, acc ->
@@ -2471,17 +2471,17 @@ defmodule Leaf do
   defp markdown_to_html(""), do: "<p><br></p>"
 
   defp markdown_to_html(markdown) do
-    case Earmark.as_html(markdown, breaks: true) do
-      {:ok, html, _} ->
+    case MDEx.to_html(markdown, render: [hardbreaks: true, unsafe: true]) do
+      {:ok, html} ->
         clean_html(html)
 
-      {:error, _, _} ->
+      {:error, _} ->
         "<p>" <> Phoenix.HTML.safe_to_string(Phoenix.HTML.html_escape(markdown)) <> "</p>"
     end
   end
 
-  # Earmark outputs newlines after opening tags (e.g. "<h1>\nText</h1>\n").
-  # Collapse those so HTML mode shows clean single-line tags.
+  # MDEx/comrak occasionally adds newlines inside inline elements; collapse
+  # those so HTML mode shows clean single-line tags.
   defp clean_html(html) do
     html
     |> String.replace(~r/<(h[1-6]|p|li|blockquote|a)([^>]*)>\n/, "<\\1\\2>")
@@ -2493,7 +2493,7 @@ defmodule Leaf do
     |> String.trim()
   end
 
-  # GFM callouts: `> [!NOTE]` etc. Earmark leaves `[!NOTE]` as literal text
+  # GFM callouts: `> [!NOTE]` etc. MDEx/comrak leaves `[!NOTE]` as literal text
   # at the start of the blockquote's first paragraph. Promote the blockquote
   # to a styled callout with a derived (non-editable) title label; the client
   # serializes it back to `> [!NOTE]`.
@@ -2510,7 +2510,7 @@ defmodule Leaf do
     )
   end
 
-  # GFM task lists: Earmark leaves `[ ] text` / `[x] text` as literal text
+  # GFM task lists: MDEx/comrak leaves `[ ] text` / `[x] text` as literal text
   # inside `<li>`. Promote those to a clickable checkbox item that the
   # client serializes back to `- [ ] ` / `- [x] `.
   defp apply_task_lists(html) do
