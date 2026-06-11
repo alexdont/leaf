@@ -168,6 +168,7 @@ defmodule Leaf do
      |> assign_new(:sync_input_name, fn -> nil end)
      |> assign_new(:loading_preset, fn -> :random end)
      |> assign_new(:loading_text, fn -> nil end)
+     |> assign_new(:class, fn -> nil end)
      |> assign_new(:script_nonce, fn -> "" end)}
   end
 

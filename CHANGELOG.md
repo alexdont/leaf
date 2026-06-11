@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.24
+
+### Fixed
+
+- `<.live_component module={Leaf}>` invocations no longer crash with
+  `KeyError: key :class not found` when the caller omits `class=`. 0.2.23
+  added the `:class` attr and referenced `@class` in `render/1`, but the
+  matching `mount/1` `assign_new` was missed, so the default only worked for
+  function-component callers (`<.leaf_editor ... />`). Hosts that forward
+  assigns through `live_component/1` (e.g. wrapping Leaf in their own
+  LiveComponent) crashed on first render. Adding the seed in `mount/1`
+  restores the documented default for both invocation forms.
+
 ## 0.2.23
 
 A large feature release: GFM task lists & callouts, custom-tag round-trip
