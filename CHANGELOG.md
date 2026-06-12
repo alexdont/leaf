@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.3.0
+
+### Added
+
+- **Deny-list controls — `:deny` attr (#1):** opt out of specific editor
+  capabilities by passing a list of atoms: `:links`, `:images`, `:video`,
+  `:markdown_mode`, `:html_mode`. Denied controls are hidden from every
+  toolbar (advanced / simple / compact-overflow), the Ctrl/Cmd+K link
+  shortcut is blocked, and a denied mode falls back to `:visual`. Denied
+  content is stripped at both layers: server-side before every
+  `{:leaf_changed}` payload and on the `:set_content` action (the security
+  boundary), and client-side as paste-time DOM cleanup (UX). The regex/DOM
+  sanitization is a UX-level guard, not a substitute for an allowlist HTML
+  sanitizer at your persistence boundary. Thanks to @zoten.
+
+### Changed
+
+- **Markdown parser swapped from Earmark to MDEx (comrak).**
+  `markdown_to_html/1,2` now renders via `MDEx.to_html/2`. Callout,
+  task-list, custom-tag preservation, and link/image round-trips are
+  unchanged. Consumers gain a precompiled Rust NIF dependency (`mdex` →
+  `mdex_native` via `rustler_precompiled`); no application code changes are
+  required.
+
+### Fixed
+
+- `<.live_component module={Leaf}>` invocations no longer crash with
+  `KeyError: key :class not found` when the caller omits `class=` (see
+  0.2.24 below for the full account). Rolled into this release.
+
 ## 0.2.24
 
 ### Fixed
