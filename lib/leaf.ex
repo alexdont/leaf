@@ -4,7 +4,7 @@ defmodule Leaf do
 
   Visual mode uses a contenteditable div with vanilla JS (no npm dependencies).
   Markdown mode uses a plain textarea with toolbar support.
-  Content syncs between modes using Earmark (markdown→HTML) and client-side
+  Content syncs between modes using MDEx (markdown→HTML) and client-side
   HTML→markdown conversion.
 
   ## Usage
@@ -34,6 +34,11 @@ defmodule Leaf do
   - `{:leaf_changed, %{editor_id, markdown, html}}` — Content updated
   - `{:leaf_insert_request, %{editor_id, type: :image | :video}}` — Insert requested
   - `{:leaf_mode_changed, %{editor_id, mode: :visual | :markdown}}` — Mode switched
+
+  ## Security Note
+
+  The deny-list regex sanitization in this component is a UX layer only.
+  Consumers must still validate and allow-list content at the persistence boundary.
 
   ## Commands from Parent
 
@@ -86,6 +91,7 @@ defmodule Leaf do
   attr(:mode, :atom, default: :hybrid, values: [:visual, :hybrid, :markdown, :html])
   attr(:preset, :atom, default: :advanced, values: [:advanced, :simple])
   attr(:toolbar, :list, default: [])
+  attr(:deny, :list, default: [])
   attr(:placeholder, :string, default: "Write something...")
   attr(:readonly, :boolean, default: false)
   attr(:height, :string, default: "480px")
@@ -145,6 +151,7 @@ defmodule Leaf do
      |> assign_new(:content, fn -> "" end)
      |> assign_new(:preset, fn -> :advanced end)
      |> assign_new(:toolbar, fn -> [] end)
+     |> assign_new(:deny, fn -> [] end)
      |> assign_new(:placeholder, fn -> "Write something..." end)
      |> assign_new(:height, fn -> "480px" end)
      |> assign_new(:min_height, fn -> nil end)
@@ -185,21 +192,30 @@ defmodule Leaf do
   end
 
   def update(%{action: :set_content, content: content}, socket) do
-    html = markdown_to_html(content, preserve_tags(socket))
+    deny = Map.get(socket.assigns, :deny, [])
+    sanitized_markdown = sanitize_markdown(content, deny)
+
+    html =
+      sanitized_markdown
+      |> markdown_to_html(preserve_tags(socket))
+      |> sanitize_html(deny)
 
     {:ok,
      socket
-     |> assign(:content, content)
+     |> assign(:content, sanitized_markdown)
      |> assign(:visual_html, html)
      |> push_event("leaf-command:#{socket.assigns.id}", %{
        action: "set_content",
-       content: content,
+       content: sanitized_markdown,
        html: html
      })}
   end
 
   def update(%{action: :set_mode, mode: mode}, socket)
       when mode in [:visual, :hybrid, :markdown, :html] do
+    deny = Map.get(socket.assigns, :deny, [])
+    mode = normalize_mode(mode, deny)
+
     {:ok,
      socket
      |> assign(:mode, mode)
@@ -235,9 +251,17 @@ defmodule Leaf do
       |> assign(assigns)
       |> assign_new(:mode, fn -> parent_mode end)
 
+    deny = Map.get(socket.assigns, :deny, [])
+    mode = normalize_mode(socket.assigns.mode, deny)
+
+    socket = assign(socket, :mode, mode)
+
     socket =
       assign_new(socket, :visual_html, fn ->
-        markdown_to_html(socket.assigns.content, preserve_tags(socket))
+        socket.assigns.content
+        |> sanitize_markdown(deny)
+        |> markdown_to_html(preserve_tags(socket))
+        |> sanitize_html(deny)
       end)
 
     {:ok, socket}
@@ -272,6 +296,11 @@ defmodule Leaf do
       data-protect-navigation={to_string(@protect_navigation)}
       data-has-upload={to_string(@upload_handler != nil)}
       data-sync-input-name={@sync_input_name}
+      data-deny-links={to_string(:links in @deny)}
+      data-deny-images={to_string(:images in @deny)}
+      data-deny-video={to_string(:video in @deny)}
+      data-deny-markdown-mode={to_string(:markdown_mode in @deny)}
+      data-deny-html-mode={to_string(:html_mode in @deny)}
     >
       {loading_state_style_tag(@height, @script_nonce)}
 
@@ -526,24 +555,26 @@ defmodule Leaf do
                     <li class="menu-title text-xs px-2 pt-1 hidden" data-compact-overflow="insert-title">
                       {t("Insert")}
                     </li>
-                    <li class="hidden" data-compact-overflow="insert-link">
-                      <button type="button" data-toolbar-action="link">
-                        <span>{t("Link")}</span>
-                      </button>
-                    </li>
+                    <%= unless :links in @deny do %>
+                      <li class="hidden" data-compact-overflow="insert-link">
+                        <button type="button" data-toolbar-action="link">
+                          <span>{t("Link")}</span>
+                        </button>
+                      </li>
+                    <% end %>
                     <li class="hidden" data-compact-overflow="insert-emoji">
                       <button type="button" data-toolbar-action="emoji">
                         <span>{t("Emoji")}</span>
                       </button>
                     </li>
-                    <%= if @preset == :advanced and :image in @toolbar do %>
+                    <%= if @preset == :advanced and :image in @toolbar and :images not in @deny do %>
                       <li class="hidden" data-compact-overflow="insert-image">
                         <button type="button" data-toolbar-action="insert-image">
                           <span>{t("Image")}</span>
                         </button>
                       </li>
                     <% end %>
-                    <%= if @preset == :advanced and :video in @toolbar do %>
+                    <%= if @preset == :advanced and :video in @toolbar and :video not in @deny do %>
                       <li class="hidden" data-compact-overflow="insert-video">
                         <button type="button" data-toolbar-action="insert-video">
                           <span>{t("Video")}</span>
@@ -747,23 +778,25 @@ defmodule Leaf do
 
             <%!-- Insert --%>
             <div class="flex items-center gap-0.5 mr-2" data-toolbar-section="insert">
-              <button
-                type="button"
-                data-toolbar-action="link"
-                data-toolbar-overflow="insert-link"
-                class="btn btn-xs btn-ghost px-2"
-                title={t("Insert Link")}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  class="w-3.5 h-3.5"
+              <%= unless :links in @deny do %>
+                <button
+                  type="button"
+                  data-toolbar-action="link"
+                  data-toolbar-overflow="insert-link"
+                  class="btn btn-xs btn-ghost px-2"
+                  title={t("Insert Link")}
                 >
-                  <path d="M12.232 4.232a2.5 2.5 0 013.536 3.536l-1.225 1.224a.75.75 0 001.061 1.06l1.224-1.224a4 4 0 00-5.656-5.656l-3 3a4 4 0 00.225 5.865.75.75 0 00.977-1.138 2.5 2.5 0 01-.142-3.667l3-3z" />
-                  <path d="M11.603 7.963a.75.75 0 00-.977 1.138 2.5 2.5 0 01.142 3.667l-3 3a2.5 2.5 0 01-3.536-3.536l1.225-1.224a.75.75 0 00-1.061-1.06l-1.224 1.224a4 4 0 105.656 5.656l3-3a4 4 0 00-.225-5.865z" />
-                </svg>
-              </button>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    class="w-3.5 h-3.5"
+                  >
+                    <path d="M12.232 4.232a2.5 2.5 0 013.536 3.536l-1.225 1.224a.75.75 0 001.061 1.06l1.224-1.224a4 4 0 00-5.656-5.656l-3 3a4 4 0 00.225 5.865.75.75 0 00.977-1.138 2.5 2.5 0 01-.142-3.667l3-3z" />
+                    <path d="M11.603 7.963a.75.75 0 00-.977 1.138 2.5 2.5 0 01.142 3.667l-3 3a2.5 2.5 0 01-3.536-3.536l1.225-1.224a.75.75 0 00-1.061-1.06l-1.224 1.224a4 4 0 105.656 5.656l3-3a4 4 0 00-.225-5.865z" />
+                  </svg>
+                </button>
+              <% end %>
               <button
                 type="button"
                 data-toolbar-action="emoji"
@@ -784,7 +817,7 @@ defmodule Leaf do
                   />
                 </svg>
               </button>
-              <%= if @preset == :advanced and :image in @toolbar do %>
+              <%= if @preset == :advanced and :image in @toolbar and :images not in @deny do %>
                 <div class="relative inline-flex" data-image-split-btn data-toolbar-overflow="insert-image">
                   <button
                     type="button"
@@ -849,7 +882,7 @@ defmodule Leaf do
                   </ul>
                 </div>
               <% end %>
-              <%= if @preset == :advanced and :video in @toolbar do %>
+              <%= if @preset == :advanced and :video in @toolbar and :video not in @deny do %>
                 <button
                   type="button"
                   data-toolbar-action="insert-video"
@@ -1180,24 +1213,28 @@ defmodule Leaf do
               />
             </svg>
           </button>
-          <button
-            type="button"
-            data-mode-tab="markdown"
-            class={["btn btn-xs px-2", (@mode == :markdown && "btn-active") || "btn-ghost"]}
-            title={t("Markdown mode")}
-          >
-            <svg viewBox="0 0 208 128" fill="currentColor" class="w-4 h-3">
-              <path d="M30 98V30h20l20 25 20-25h20v68H90V59L70 84 50 59v39zm125 0l-30-33h20V30h20v35h20z" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            data-mode-tab="html"
-            class={["btn btn-xs px-2", (@mode == :html && "btn-active") || "btn-ghost"]}
-            title={t("HTML mode")}
-          >
-            &lt;/&gt;
-          </button>
+          <%= unless :markdown_mode in @deny do %>
+            <button
+              type="button"
+              data-mode-tab="markdown"
+              class={["btn btn-xs px-2", (@mode == :markdown && "btn-active") || "btn-ghost"]}
+              title={t("Markdown mode")}
+            >
+              <svg viewBox="0 0 208 128" fill="currentColor" class="w-4 h-3">
+                <path d="M30 98V30h20l20 25 20-25h20v68H90V59L70 84 50 59v39zm125 0l-30-33h20V30h20v35h20z" />
+              </svg>
+            </button>
+          <% end %>
+          <%= unless :html_mode in @deny do %>
+            <button
+              type="button"
+              data-mode-tab="html"
+              class={["btn btn-xs px-2", (@mode == :html && "btn-active") || "btn-ghost"]}
+              title={t("HTML mode")}
+            >
+              &lt;/&gt;
+            </button>
+          <% end %>
         </div>
 
         <%!-- Fullscreen toggle (advanced preset only) --%>
@@ -1346,22 +1383,24 @@ defmodule Leaf do
           >
             I
           </button>
-          <button
-            type="button"
-            data-toolbar-action="link"
-            class="btn btn-sm btn-ghost px-2.5"
-            title={t("Link")}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-              class="w-4 h-4"
+          <%= unless :links in @deny do %>
+            <button
+              type="button"
+              data-toolbar-action="link"
+              class="btn btn-sm btn-ghost px-2.5"
+              title={t("Link")}
             >
-              <path d="M12.232 4.232a2.5 2.5 0 013.536 3.536l-1.225 1.224a.75.75 0 001.061 1.06l1.224-1.224a4 4 0 00-5.656-5.656l-3 3a4 4 0 00.225 5.865.75.75 0 00.977-1.138 2.5 2.5 0 01-.142-3.667l3-3z" />
-              <path d="M11.603 7.963a.75.75 0 00-.977 1.138 2.5 2.5 0 01.142 3.667l-3 3a2.5 2.5 0 01-3.536-3.536l1.225-1.224a.75.75 0 00-1.061-1.06l-1.224 1.224a4 4 0 105.656 5.656l3-3a4 4 0 00-.225-5.865z" />
-            </svg>
-          </button>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+                class="w-4 h-4"
+              >
+                <path d="M12.232 4.232a2.5 2.5 0 013.536 3.536l-1.225 1.224a.75.75 0 001.061 1.06l1.224-1.224a4 4 0 00-5.656-5.656l-3 3a4 4 0 00.225 5.865.75.75 0 00.977-1.138 2.5 2.5 0 01-.142-3.667l3-3z" />
+                <path d="M11.603 7.963a.75.75 0 00-.977 1.138 2.5 2.5 0 01.142 3.667l-3 3a2.5 2.5 0 01-3.536-3.536l1.225-1.224a.75.75 0 00-1.061-1.06l-1.224 1.224a4 4 0 105.656 5.656l3-3a4 4 0 00-.225-5.865z" />
+              </svg>
+            </button>
+          <% end %>
           <button
             type="button"
             data-toolbar-action="bulletList"
@@ -1404,10 +1443,10 @@ defmodule Leaf do
                 <li><button type="button" data-toolbar-action="callout"><span>{t("Callout")}</span></button></li>
                 <li><button type="button" data-toolbar-action="detailsBlock"><span>{t("Details / Accordion")}</span></button></li>
                 <li><button type="button" data-toolbar-action="symbols"><span>{t("Symbols / Date")}</span></button></li>
-                <%= if :image in @toolbar do %>
+                <%= if :image in @toolbar and :images not in @deny do %>
                   <li><button type="button" data-toolbar-action="insert-image"><span>{t("Image")}</span></button></li>
                 <% end %>
-                <%= if :video in @toolbar do %>
+                <%= if :video in @toolbar and :video not in @deny do %>
                   <li><button type="button" data-toolbar-action="insert-video"><span>{t("Video")}</span></button></li>
                 <% end %>
               <% end %>
@@ -1590,39 +1629,63 @@ defmodule Leaf do
 
   @impl true
   def handle_event("content_changed", %{"markdown" => markdown, "html" => html} = params, socket) do
+    sanitized_markdown = sanitize_markdown(markdown, socket.assigns.deny)
+    sanitized_html = sanitize_html(html, socket.assigns.deny)
+
     send(
       self(),
       {:leaf_changed,
        %{
          editor_id: socket.assigns.id,
-         markdown: markdown,
-         html: html,
+         markdown: sanitized_markdown,
+         html: sanitized_html,
          dirty: Map.get(params, "dirty", true)
        }}
     )
 
-    {:noreply, socket |> assign(:content, markdown) |> assign(:visual_html, html)}
+    socket =
+      socket
+      |> assign(:content, sanitized_markdown)
+      |> assign(:visual_html, sanitized_html)
+
+    # If a denied element was stripped from the HTML, push the clean version
+    # back to the client so the hybrid contenteditable doesn't keep showing it.
+    socket =
+      if sanitized_html != html do
+        push_event(socket, "leaf-set-html:#{socket.assigns.id}", %{html: sanitized_html})
+      else
+        socket
+      end
+
+    {:noreply, socket}
   end
 
   def handle_event("markdown_content_changed", %{"content" => content} = params, socket) do
-    html = markdown_to_html(content, preserve_tags(socket))
+    sanitized_markdown = sanitize_markdown(content, socket.assigns.deny)
+
+    html =
+      sanitized_markdown
+      |> markdown_to_html(preserve_tags(socket))
+      |> sanitize_html(socket.assigns.deny)
 
     send(
       self(),
       {:leaf_changed,
        %{
          editor_id: socket.assigns.id,
-         markdown: content,
+         markdown: sanitized_markdown,
          html: html,
          dirty: Map.get(params, "dirty", true)
        }}
     )
 
-    {:noreply, assign(socket, :content, content)}
+    {:noreply, assign(socket, :content, sanitized_markdown)}
   end
 
   def handle_event("mode_changed", %{"mode" => mode} = params, socket) do
     mode_atom = String.to_existing_atom(mode)
+    deny = Map.get(socket.assigns, :deny, [])
+    mode_atom = normalize_mode(mode_atom, deny)
     content = Map.get(params, "content", socket.assigns.content)
 
     send(
@@ -1653,32 +1716,44 @@ defmodule Leaf do
   end
 
   def handle_event("html_content_changed", %{"content" => html} = params, socket) do
+    sanitized_html = sanitize_html(html, socket.assigns.deny)
+
     send(
       self(),
       {:leaf_changed,
        %{
          editor_id: socket.assigns.id,
          markdown: socket.assigns.content,
-         html: html,
+         html: sanitized_html,
          dirty: Map.get(params, "dirty", true)
        }}
     )
 
-    {:noreply, socket}
+    {:noreply, assign(socket, :visual_html, sanitized_html)}
   end
 
   def handle_event("sync_markdown_to_visual", %{"markdown" => markdown}, socket) do
-    html = markdown_to_html(markdown, preserve_tags(socket))
+    html =
+      markdown
+      |> sanitize_markdown(socket.assigns.deny)
+      |> markdown_to_html(preserve_tags(socket))
+      |> sanitize_html(socket.assigns.deny)
 
     {:noreply, push_event(socket, "leaf-set-html:#{socket.assigns.id}", %{html: html})}
   end
 
   def handle_event("sync_html_to_visual", %{"html" => html}, socket) do
-    {:noreply, push_event(socket, "leaf-set-html:#{socket.assigns.id}", %{html: html})}
+    sanitized_html = sanitize_html(html, socket.assigns.deny)
+
+    {:noreply, push_event(socket, "leaf-set-html:#{socket.assigns.id}", %{html: sanitized_html})}
   end
 
   def handle_event("convert_markdown_to_html", %{"markdown" => markdown}, socket) do
-    html = markdown_to_html(markdown)
+    html =
+      markdown
+      |> sanitize_markdown(socket.assigns.deny)
+      |> markdown_to_html()
+      |> sanitize_html(socket.assigns.deny)
 
     {:noreply, push_event(socket, "leaf-set-html-textarea:#{socket.assigns.id}", %{html: html})}
   end
@@ -2334,7 +2409,7 @@ defmodule Leaf do
   # That breaks the hybrid auto-format helpers (`_maybeAutoFormatHeading`
   # & co.) which require the current block to be a `<p>`.
   # 2-arity variant: when `preserve_tags` is non-empty, custom/unknown tags
-  # (e.g. <Hero/>, <CTA/>) are pulled out of the markdown BEFORE Earmark
+  # (e.g. <Hero/>, <CTA/>) are pulled out of the markdown BEFORE MDEx
   # (which would otherwise mangle their form), rendered as atomic,
   # non-editable placeholder blocks, and restored verbatim. The client
   # serializes those placeholders straight back to their original source,
@@ -2374,7 +2449,7 @@ defmodule Leaf do
   end
 
   # Swap tokens back for atomic placeholder spans carrying the verbatim
-  # source in a `data-leaf-raw` attribute. A standalone token that Earmark
+  # source in a `data-leaf-raw` attribute. A standalone token that MDEx
   # wrapped in its own `<p>` stays a block; an inline token stays inline.
   defp restore_preserved_tags(html, store) do
     Enum.reduce(store, html, fn {token, raw}, acc ->
@@ -2401,14 +2476,17 @@ defmodule Leaf do
   defp markdown_to_html(""), do: "<p><br></p>"
 
   defp markdown_to_html(markdown) do
-    case Earmark.as_html(markdown, breaks: true) do
-      {:ok, html, _} -> clean_html(html)
-      {:error, _, _} -> "<p>#{Phoenix.HTML.html_escape(markdown)}</p>"
+    case MDEx.to_html(markdown, render: [hardbreaks: true, unsafe: true]) do
+      {:ok, html} ->
+        clean_html(html)
+
+      {:error, _} ->
+        "<p>" <> Phoenix.HTML.safe_to_string(Phoenix.HTML.html_escape(markdown)) <> "</p>"
     end
   end
 
-  # Earmark outputs newlines after opening tags (e.g. "<h1>\nText</h1>\n").
-  # Collapse those so HTML mode shows clean single-line tags.
+  # MDEx/comrak occasionally adds newlines inside inline elements; collapse
+  # those so HTML mode shows clean single-line tags.
   defp clean_html(html) do
     html
     |> String.replace(~r/<(h[1-6]|p|li|blockquote|a)([^>]*)>\n/, "<\\1\\2>")
@@ -2420,7 +2498,7 @@ defmodule Leaf do
     |> String.trim()
   end
 
-  # GFM callouts: `> [!NOTE]` etc. Earmark leaves `[!NOTE]` as literal text
+  # GFM callouts: `> [!NOTE]` etc. MDEx/comrak leaves `[!NOTE]` as literal text
   # at the start of the blockquote's first paragraph. Promote the blockquote
   # to a styled callout with a derived (non-editable) title label; the client
   # serializes it back to `> [!NOTE]`.
@@ -2437,7 +2515,7 @@ defmodule Leaf do
     )
   end
 
-  # GFM task lists: Earmark leaves `[ ] text` / `[x] text` as literal text
+  # GFM task lists: MDEx/comrak leaves `[ ] text` / `[x] text` as literal text
   # inside `<li>`. Promote those to a clickable checkbox item that the
   # client serializes back to `- [ ] ` / `- [x] `.
   defp apply_task_lists(html) do
@@ -2498,4 +2576,58 @@ defmodule Leaf do
       end
     end)
   end
+
+  defp sanitize_html(html, deny) when is_binary(html) and is_list(deny) do
+    html
+    |> maybe_strip_html_links(deny)
+    |> maybe_strip_html_images(deny)
+  end
+
+  defp sanitize_markdown(markdown, deny) when is_binary(markdown) and is_list(deny) do
+    markdown
+    |> maybe_strip_markdown_images(deny)
+    |> maybe_strip_markdown_links(deny)
+  end
+
+  defp maybe_strip_html_links(html, deny) do
+    if :links in deny do
+      String.replace(html, ~r/<a\b[^>]*>(.*?)<\/a>/is, "\\1")
+    else
+      html
+    end
+  end
+
+  defp maybe_strip_html_images(html, deny) do
+    if :images in deny do
+      String.replace(html, ~r/<img\b[^>]*\/?\s*>/is, "")
+    else
+      html
+    end
+  end
+
+  defp maybe_strip_markdown_images(markdown, deny) do
+    if :images in deny do
+      String.replace(markdown, ~r/!\[(.*?)\]\((.*?)\)/, "")
+    else
+      markdown
+    end
+  end
+
+  defp maybe_strip_markdown_links(markdown, deny) do
+    if :links in deny do
+      String.replace(markdown, ~r/(?<!!)\[(.*?)\]\((.*?)\)/, "\\1")
+    else
+      markdown
+    end
+  end
+
+  defp normalize_mode(mode, deny)
+       when mode in [:visual, :hybrid, :markdown, :html] and is_list(deny) do
+    if mode_denied?(mode, deny), do: :visual, else: mode
+  end
+
+  defp mode_denied?(:hybrid, _deny), do: false
+  defp mode_denied?(:markdown, deny), do: :markdown_mode in deny
+  defp mode_denied?(:html, deny), do: :html_mode in deny
+  defp mode_denied?(:visual, _deny), do: false
 end

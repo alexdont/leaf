@@ -31,7 +31,7 @@ defmodule Leaf.MixProject do
     [
       {:phoenix_live_view, "~> 1.0"},
       {:phoenix_html, "~> 4.0"},
-      {:earmark, "~> 1.4"},
+      {:mdex, "~> 0.13"},
       {:gettext, "~> 0.26 or ~> 1.0", optional: true},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
