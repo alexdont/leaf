@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Hybrid mode: Shift+Enter soft line breaks survive source mode.**
+  Clicking into a formatted run inside a multi-line paragraph flattened it
+  to one long line: the source view rendered "\n" as collapsing whitespace,
+  Earmark's pretty-print text node after each `<br>` doubled the break into
+  a paragraph-splitting "\n\n", and exiting source mode left "\n" as
+  collapsed text instead of restoring `<br>`s — so the breaks were gone and
+  new Shift+Enters showed up as "just a space". Source blocks now render
+  `white-space: pre-wrap`, the block serializer skips the post-`<br>`
+  pretty-print newline, and source→rendered conversion turns "\n" back into
+  real `<br>` elements. Breaks survive enter/exit round-trips and new
+  Shift+Enter breaks work inside source mode.
+- **Hybrid mode: drag-selecting across formatted text no longer resets the
+  selection.** When a selection endpoint entered a `**bold**` / `*italic*`
+  / other formatted run, the source-mode markers popped in, and the DOM
+  mutation collapsed the selection mid-drag. Source-mode transitions and
+  delimiter decorations are now frozen while a non-collapsed selection is
+  active — markers reveal only for a caret — so selecting, and applying
+  toolbar formatting to the selection, work across any mix of formatted
+  runs.
+
 ## 0.3.1
 
 ### Fixed

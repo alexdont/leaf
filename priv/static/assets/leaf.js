@@ -400,6 +400,13 @@
     // block — see loading_state_css/1 in lib/leaf.ex — so they apply on
     // first paint, before this CSS is injected by mounted().)
 
+    // Hybrid source mode: the block's markdown source is plain text in
+    // which soft line breaks are literal "\n" chars — pre-wrap renders
+    // them as real line breaks (a normal <p> collapses them to a single
+    // space, which visually destroyed every Shift+Enter break the moment
+    // the block entered source mode).
+    "[data-leaf-source] { white-space: pre-wrap; }",
+
     // Sticky toolbar
     "[data-visual-toolbar].leaf-toolbar-sticky {",
     "  position: fixed;",
@@ -3532,6 +3539,9 @@
         this._clearSyntaxDecoration();
         return;
       }
+      // Same freeze as _updateSourceBlock: adding/removing delimiter
+      // spans under a live non-collapsed selection collapses it.
+      if (!sel.isCollapsed) return;
       var newChain = this._findFormattingChainForCursor(sel);
       var oldChain = this._decoratedAncestors || [];
       if (this._chainsEqual(oldChain, newChain)) return;
@@ -4011,6 +4021,23 @@
       return document.createElement(pattern.tag);
     },
 
+    // Plain text → nodes, turning literal "\n" into real <br> elements.
+    // Rendered blocks collapse newline characters to a single space, so
+    // leaving them as text silently destroyed soft line breaks whenever
+    // a block round-tripped through source mode.
+    _textWithLineBreaks: function (text) {
+      if (text.indexOf("\n") === -1) {
+        return [document.createTextNode(text)];
+      }
+      var out = [];
+      var parts = text.split("\n");
+      for (var i = 0; i < parts.length; i++) {
+        if (i > 0) out.push(document.createElement("br"));
+        if (parts[i]) out.push(document.createTextNode(parts[i]));
+      }
+      return out;
+    },
+
     _buildFormattedFragment: function (text) {
       // Returns an array of DOM nodes representing `text` with every
       // matched delimiter pair wrapped in its corresponding element.
@@ -4032,7 +4059,7 @@
         }
       }
       if (!earliest) {
-        return [document.createTextNode(text)];
+        return this._textWithLineBreaks(text);
       }
 
       var beforeText = text.slice(0, earliest.index);
@@ -5730,6 +5757,16 @@
         this._exitAllSourceMode();
         return;
       }
+
+      // An active (non-collapsed) selection must never be disturbed:
+      // entering, exiting, or refreshing source mode replaces the
+      // block's text nodes, which collapses a selection the user is
+      // mid-way through dragging (selecting across a formatted run made
+      // its markers pop in and reset the selection). Freeze every
+      // source-mode transition until the selection collapses again —
+      // markers only reveal for a caret, never during a selection.
+      if (!sel.isCollapsed) return;
+
       var anchor = sel.anchorNode;
       if (!anchor || !this._visualEl.contains(anchor)) return;
 
@@ -7350,6 +7387,7 @@
         var isElementCursor =
           node === cursorNode && node.nodeType === Node.ELEMENT_NODE;
         var children = node.childNodes;
+        var prevWasBr = false;
         for (var i = 0; i < children.length; i++) {
           // Element-offset cursor lives BEFORE the child at this index.
           // Record source.length right before we serialize that child.
@@ -7370,8 +7408,16 @@
             // eating the space). `_scanSource` normalizes NBSP→space
             // for heading detection, and `_renderBlockFromSource` does
             // the same on exit, so the markdown output stays clean.
-            source += c.textContent
-              .replace(/​/g, "");
+            var textPiece = c.textContent.replace(/​/g, "");
+            // Earmark pretty-prints a literal "\n" text node after every
+            // <br>; the <br> itself already emitted "\n", so keeping this
+            // one doubles the break ("\n\n" splits the paragraph on
+            // round-trip). Same guard as nodeToMarkdown's.
+            if (prevWasBr) {
+              textPiece = textPiece.replace(/^[\n\r\t]+/, "");
+            }
+            source += textPiece;
+            prevWasBr = false;
             continue;
           }
 
@@ -7405,8 +7451,11 @@
               continue;
             }
             source += "\n";
+            prevWasBr = true;
             continue;
           }
+
+          prevWasBr = false;
 
           if (tag === "a") {
             var href = c.getAttribute("href") || "";
