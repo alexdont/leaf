@@ -629,16 +629,31 @@
 
       case "strong":
       case "b":
+        // Hybrid source mode: the wrapper already contains its literal
+        // `**` markers as `.leaf-source-marker` spans — wrapping again
+        // would double them (`****bold****`). Same guard as <a> below.
+        if (hasSourceMarkerChild(node)) return inner;
         return wrapInline(inner, "**");
 
       case "em":
       case "i":
+        if (hasSourceMarkerChild(node)) return inner;
         return wrapInline(inner, "*");
 
       case "s":
       case "del":
       case "strike":
+        if (hasSourceMarkerChild(node)) return inner;
         return wrapInline(inner, "~~");
+
+      case "sup":
+        // Markdown has no superscript syntax — pass through as inline
+        // HTML (Earmark/MDEx keep it) so the formatting survives saves
+        // and mode switches.
+        return "<sup>" + inner + "</sup>";
+
+      case "sub":
+        return "<sub>" + inner + "</sub>";
 
       case "code":
         if (
@@ -647,6 +662,7 @@
         ) {
           return inner;
         }
+        if (hasSourceMarkerChild(node)) return inner;
         return "`" + inner + "`";
 
       case "pre":
@@ -784,6 +800,7 @@
           node.classList &&
           node.classList.contains("leaf-spoiler")
         ) {
+          if (hasSourceMarkerChild(node)) return inner;
           return "||" + inner + "||";
         }
         return inner;
@@ -793,23 +810,80 @@
     }
   }
 
-  function convertList(listNode, type) {
+  // True when `li` carries its own literal list marker ("- ", "N. ",
+  // "- [ ] ") as a hybrid source-mode `.leaf-list-marker` span. In that
+  // state the marker text is already part of the item's content, so
+  // convertList must not synthesize a second one ("2. 2.").
+  function hasListMarkerChild(li) {
+    if (!li || !li.children) return false;
+    for (var i = 0; i < li.children.length; i++) {
+      var c = li.children[i];
+      if (c.classList && c.classList.contains("leaf-list-marker")) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function convertList(listNode, type, indent) {
+    indent = indent || "";
+    // Nested content must be indented past the parent marker ("- " → 2
+    // chars, "1. " → 3) for CommonMark to treat it as nested.
+    var childIndent = indent + (type === "ol" ? "   " : "  ");
     var items = [];
     var index = 1;
     for (var i = 0; i < listNode.children.length; i++) {
       var child = listNode.children[i];
-      if (child.tagName.toLowerCase() === "li") {
-        var content = nodeToMarkdown(child).trim();
-        var prefix;
-        if (child.classList && child.classList.contains("leaf-task")) {
-          var checked = child.getAttribute("data-checked") === "true";
-          prefix = "- [" + (checked ? "x" : " ") + "] ";
-        } else {
-          prefix = type === "ol" ? index + ". " : "- ";
-        }
-        items.push(prefix + content);
-        index++;
+      var childTag = child.tagName.toLowerCase();
+
+      if (childTag === "ul" || childTag === "ol") {
+        // execCommand("indent") nests a list as a SIBLING of the item it
+        // came from (invalid HTML, but what Chrome produces). Serialize
+        // it as nested under the previous item instead of dropping it.
+        items.push(convertList(child, childTag, childIndent));
+        continue;
       }
+
+      if (childTag !== "li") {
+        // Chrome's editing commands sometimes drop other blocks (e.g. a
+        // <p>) directly into a list. Serialize them as continuation
+        // content of the previous item rather than silently losing them.
+        var stray = convertNode(child).trim();
+        if (stray) {
+          items.push(childIndent + stray.replace(/\n/g, "\n" + childIndent));
+        }
+        continue;
+      }
+
+      // Pull nested lists out of the item and serialize them indented on
+      // their own lines — inlining them into the item's content flattens
+      // (and previously lost) the nesting.
+      var li = child.cloneNode(true);
+      var nestedOut = [];
+      var liKids = Array.prototype.slice.call(li.children);
+      for (var n = 0; n < liKids.length; n++) {
+        var kidTag = liKids[n].tagName ? liKids[n].tagName.toLowerCase() : "";
+        if (kidTag === "ul" || kidTag === "ol") {
+          nestedOut.push(convertList(liKids[n], kidTag, childIndent));
+          li.removeChild(liKids[n]);
+        }
+      }
+
+      var content = nodeToMarkdown(li).trim();
+      var prefix;
+      if (hasListMarkerChild(child)) {
+        prefix = "";
+      } else if (child.classList && child.classList.contains("leaf-task")) {
+        var checked = child.getAttribute("data-checked") === "true";
+        prefix = "- [" + (checked ? "x" : " ") + "] ";
+      } else {
+        prefix = type === "ol" ? index + ". " : "- ";
+      }
+      items.push(indent + prefix + content);
+      for (var m = 0; m < nestedOut.length; m++) {
+        items.push(nestedOut[m]);
+      }
+      index++;
     }
     return items.join("\n");
   }
@@ -983,14 +1057,14 @@
     if (pushFn) pushFn(textarea.value);
   }
 
-  function markdownLink(textarea, pushFn) {
+  // `url` is supplied by the caller (the hook opens its own inline prompt
+  // dialog) — window.prompt blocked the whole page here.
+  function markdownLink(textarea, pushFn, url) {
+    if (url == null || url === "") return;
     var start = textarea.selectionStart;
     var end = textarea.selectionEnd;
     var text = textarea.value;
     var selected = text.substring(start, end);
-
-    var url = prompt("Enter URL:", "https://");
-    if (url === null) return;
 
     var linkText = selected || "link text";
     var md = "[" + linkText + "](" + url + ")";
@@ -1275,6 +1349,9 @@
     },
 
     destroyed() {
+      if (this._closeTextPrompt) {
+        this._closeTextPrompt();
+      }
       if (this._debounceTimer) {
         clearTimeout(this._debounceTimer);
       }
@@ -1388,9 +1465,9 @@
         if (ta) markdownLinePrefix(ta, prefix, pushFn);
       };
 
-      window["markdownLink_" + gid] = function () {
+      window["markdownLink_" + gid] = function (url) {
         var ta = self._getMarkdownTextarea();
-        if (ta) markdownLink(ta, pushFn);
+        if (ta) markdownLink(ta, pushFn, url);
       };
 
       window["markdownEditorInsert_" + gid] = function (snippet) {
@@ -1627,6 +1704,23 @@
       if (this._readonly) return;
 
       var mod = e.ctrlKey || e.metaKey;
+
+      // Select-all + Backspace/Delete: Chrome's native deletion leaves
+      // empty shells of non-text elements behind (custom preserved-tag
+      // elements, task boxes, heading wrappers) that survive further
+      // deletes and pollute later serialization. When the selection
+      // covers the editor's entire content, reset wholesale instead.
+      if (
+        (e.key === "Backspace" || e.key === "Delete") &&
+        this._selectionCoversAllContent()
+      ) {
+        e.preventDefault();
+        this._visualEl.innerHTML = "<p><br></p>";
+        this._placeCaretIn(this._visualEl.firstChild);
+        this._dragHandleBlock = null;
+        this._debouncedPushVisualChange();
+        return;
+      }
 
       // Ctrl/Cmd+Shift+V arms a one-shot "paste as plain text" for the
       // paste event that immediately follows (read + cleared in _onPaste).
@@ -7689,10 +7783,19 @@
           document.execCommand("insertOrderedList", false, null);
           break;
         case "indent":
-          document.execCommand("indent", false, null);
+          // execCommand("indent") on a list item produces invalid DOM
+          // (nested list as sibling of the li, or a bare <p> inside the
+          // list) that used to lose the item on serialization. Build the
+          // valid li > list nesting ourselves; non-list blocks keep the
+          // native behavior.
+          if (!this._indentListItem()) {
+            document.execCommand("indent", false, null);
+          }
           break;
         case "outdent":
-          document.execCommand("outdent", false, null);
+          if (!this._outdentListItem()) {
+            document.execCommand("outdent", false, null);
+          }
           break;
         case "blockquote":
           this._toggleBlockquote();
@@ -7832,7 +7935,19 @@
         case "taskList": if (pfx) pfx("- [ ] "); break;
         case "callout": if (ins) ins("\n> [!NOTE]\n> \n"); break;
         case "table": if (ins) ins("\n| Header 1 | Header 2 |\n| --- | --- |\n| Cell 1 | Cell 2 |\n| Cell 3 | Cell 4 |\n"); break;
-        case "link": if (lnk && !this._denyLinks) lnk(); break;
+        case "link":
+          if (lnk && !this._denyLinks) {
+            this._openTextPrompt({
+              label: "Link URL",
+              value: "https://",
+              anchor: this._toolbarAnchor("link"),
+              onSubmit: function (url) {
+                url = url.trim();
+                if (url) lnk(url);
+              },
+            });
+          }
+          break;
         case "emoji": this._openEmojiPicker(); break;
         case "symbols": this._openSymbolPicker(); break;
         case "insert-image":
@@ -7884,7 +7999,97 @@
     // Insert a code block (one click, no prompt — same as before). The
     // language is set afterwards via the hover overlay's language button,
     // stored as `data-language`, and round-trips as a ```lang fence.
+    // Nest the caret's list item under its previous sibling, producing
+    // valid `li > ol/ul > li` structure. Returns false when the caret
+    // isn't in an indentable list item (caller falls back to execCommand).
+    _indentListItem: function () {
+      var block = this._getCurrentBlock();
+      if (!block || !block.tagName || block.tagName.toLowerCase() !== "li") {
+        return false;
+      }
+      var list = block.parentElement;
+      if (!list || !/^(ul|ol)$/i.test(list.tagName)) return false;
+
+      var prev = block.previousElementSibling;
+      while (prev && prev.tagName.toLowerCase() !== "li") {
+        prev = prev.previousElementSibling;
+      }
+      if (!prev) return false; // first item — nothing to nest under
+
+      var listTag = list.tagName.toLowerCase();
+      var nested = null;
+      var last = prev.lastElementChild;
+      if (last && last.tagName.toLowerCase() === listTag) {
+        nested = last;
+      } else {
+        nested = document.createElement(listTag);
+        prev.appendChild(nested);
+      }
+
+      var saved = this._captureEditorRange();
+      nested.appendChild(block);
+      this._savedRange = saved;
+      this._restoreSavedRange();
+      this._debouncedPushVisualChange();
+      return true;
+    },
+
+    // Inverse of _indentListItem: lift a nested item back into the outer
+    // list, right after the item that hosted it.
+    _outdentListItem: function () {
+      var block = this._getCurrentBlock();
+      if (!block || !block.tagName || block.tagName.toLowerCase() !== "li") {
+        return false;
+      }
+      var list = block.parentElement;
+      if (!list || !/^(ul|ol)$/i.test(list.tagName)) return false;
+      var hostLi = list.parentElement;
+      if (!hostLi || hostLi.tagName.toLowerCase() !== "li") return false;
+      var outerList = hostLi.parentElement;
+      if (!outerList || !/^(ul|ol)$/i.test(outerList.tagName)) return false;
+
+      var saved = this._captureEditorRange();
+      outerList.insertBefore(block, hostLi.nextSibling);
+      if (list.children.length === 0) {
+        list.parentNode.removeChild(list);
+      }
+      this._savedRange = saved;
+      this._restoreSavedRange();
+      this._debouncedPushVisualChange();
+      return true;
+    },
+
     _insertCodeBlock: function () {
+      // formatBlock inside a list item converts only the item's text and
+      // strands the item chrome (e.g. a task checkbox) in the list.
+      // Convert the whole item instead: move its text into a <pre> placed
+      // after the list (replacing the list when it was the only item).
+      var block = this._getCurrentBlock();
+      if (block && block.tagName && block.tagName.toLowerCase() === "li") {
+        var list = block.parentElement;
+        if (list && list.parentNode) {
+          var pre = document.createElement("pre");
+          // Take the item's text minus its chrome: the task checkbox and
+          // any hybrid source-mode marker span ("- [ ] " as literal text).
+          var liClone = block.cloneNode(true);
+          var chrome = liClone.querySelectorAll(
+            ".leaf-task-box, .leaf-list-marker"
+          );
+          for (var ci = 0; ci < chrome.length; ci++) {
+            chrome[ci].parentNode.removeChild(chrome[ci]);
+          }
+          pre.textContent = liClone.textContent.replace(/​/g, "");
+          if (list.children.length === 1) {
+            list.parentNode.replaceChild(pre, list);
+          } else {
+            list.parentNode.insertBefore(pre, list.nextSibling);
+            list.removeChild(block);
+          }
+          this._placeCaretIn(pre);
+          this._debouncedPushVisualChange();
+          return;
+        }
+      }
       document.execCommand("formatBlock", false, "pre");
     },
 
@@ -7952,27 +8157,78 @@
       return null;
     },
 
+    // Insert `el` as a top-level block AFTER the block holding the caret.
+    // execCommand("insertHTML") splits the current paragraph at the caret
+    // (mid-word) and Chrome additionally mangles structures like
+    // <details><summary> during the split — explicit DOM insertion avoids
+    // both. An empty current paragraph is replaced instead of kept.
+    _insertBlockAfterCurrent: function (el) {
+      var block = this._getCurrentBlock();
+      while (
+        block &&
+        block.parentElement &&
+        block.parentElement !== this._visualEl
+      ) {
+        block = block.parentElement;
+      }
+      if (block && block.parentElement === this._visualEl) {
+        var isEmptyPara =
+          block.tagName &&
+          block.tagName.toLowerCase() === "p" &&
+          block.textContent.replace(/[​ \s]/g, "") === "";
+        if (isEmptyPara) {
+          block.parentNode.replaceChild(el, block);
+        } else {
+          block.parentNode.insertBefore(el, block.nextSibling);
+        }
+      } else {
+        this._visualEl.appendChild(el);
+      }
+      return el;
+    },
+
+    _placeCaretIn: function (el, selectContents) {
+      var range = document.createRange();
+      range.selectNodeContents(el);
+      if (!selectContents) range.collapse(false);
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    },
+
     _insertTaskList: function () {
       if (!this._visualEl) return;
       this._visualEl.focus();
-      document.execCommand(
-        "insertHTML",
-        false,
-        '<ul><li class="leaf-task" data-checked="false" data-task-new="1">' +
-          '<span class="leaf-task-box" contenteditable="false"></span>​</li></ul>'
-      );
-      // Drop the caret inside the new item (after the box) so typing fills
-      // in the task text instead of landing after the list.
-      var li = this._visualEl.querySelector('li[data-task-new="1"]');
-      if (li) {
-        li.removeAttribute("data-task-new");
-        var range = document.createRange();
-        range.selectNodeContents(li);
-        range.collapse(false);
-        var sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
+
+      var li = document.createElement("li");
+      li.className = "leaf-task";
+      li.setAttribute("data-checked", "false");
+      var box = document.createElement("span");
+      box.className = "leaf-task-box";
+      box.setAttribute("contenteditable", "false");
+      li.appendChild(box);
+
+      var ul = document.createElement("ul");
+      ul.appendChild(li);
+
+      // Convert the current line into a task item — same behavior as the
+      // bullet/numbered list buttons — instead of splitting the paragraph
+      // at the caret and inserting an empty item between the halves.
+      var block = this._getCurrentBlock();
+      var isPlainBlock =
+        block &&
+        block.parentElement === this._visualEl &&
+        /^(p|h[1-6]|div)$/i.test(block.tagName || "");
+
+      if (isPlainBlock) {
+        while (block.firstChild) li.appendChild(block.firstChild);
+        block.parentNode.replaceChild(ul, block);
+      } else {
+        li.appendChild(document.createTextNode("​"));
+        this._insertBlockAfterCurrent(ul);
       }
+
+      this._placeCaretIn(li);
       this._debouncedPushVisualChange();
     },
 
@@ -7981,24 +8237,49 @@
     _insertCallout: function (type) {
       type = type || "note";
       var title = type.charAt(0).toUpperCase() + type.slice(1);
-      var html =
-        '<blockquote class="leaf-callout leaf-callout-' +
-        type +
-        '" data-callout="' +
-        type +
-        '"><p class="leaf-callout-title" contenteditable="false">' +
-        title +
-        "</p><p>​</p></blockquote><p><br></p>";
-      document.execCommand("insertHTML", false, html);
+      var bq = document.createElement("blockquote");
+      bq.className = "leaf-callout leaf-callout-" + type;
+      bq.setAttribute("data-callout", type);
+      var titleP = document.createElement("p");
+      titleP.className = "leaf-callout-title";
+      titleP.setAttribute("contenteditable", "false");
+      titleP.textContent = title;
+      var bodyP = document.createElement("p");
+      bodyP.appendChild(document.createTextNode("​"));
+      bq.appendChild(titleP);
+      bq.appendChild(bodyP);
+
+      this._insertBlockAfterCurrent(bq);
+      if (!bq.nextSibling) {
+        var tail = document.createElement("p");
+        tail.appendChild(document.createElement("br"));
+        bq.parentNode.appendChild(tail);
+      }
+      this._placeCaretIn(bodyP);
+      this._debouncedPushVisualChange();
     },
 
     // Insert a collapsible <details> block with an editable summary + body.
     _insertDetailsBlock: function () {
-      var html =
-        "<details open><summary>" +
-        "Summary" +
-        "</summary><p><br></p></details><p><br></p>";
-      document.execCommand("insertHTML", false, html);
+      if (!this._visualEl) return;
+      var details = document.createElement("details");
+      details.setAttribute("open", "");
+      var summary = document.createElement("summary");
+      summary.textContent = "Summary";
+      var body = document.createElement("p");
+      body.appendChild(document.createElement("br"));
+      details.appendChild(summary);
+      details.appendChild(body);
+
+      this._insertBlockAfterCurrent(details);
+      if (!details.nextSibling) {
+        var tail = document.createElement("p");
+        tail.appendChild(document.createElement("br"));
+        details.parentNode.appendChild(tail);
+      }
+      // Select the placeholder summary so typing renames it immediately.
+      this._placeCaretIn(summary, true);
+      this._debouncedPushVisualChange();
     },
 
     // -- Emoji Picker --
@@ -8066,6 +8347,145 @@
       "🟡":"yellow circle","🟢":"green circle","🔵":"blue circle","🟣":"purple circle","⚫":"black circle","⚪":"white circle"
     },
 
+    // Minimal inline replacement for window.prompt (which blocks the whole
+    // page and can't be styled): a small floating dialog with one text
+    // input and Cancel/OK. Enter/OK submit (the raw value, possibly "");
+    // Escape/Cancel/outside-click dismiss without calling onSubmit.
+    // opts: { label, value, placeholder, anchor, onSubmit(value), onCancel() }
+    _openTextPrompt: function (opts) {
+      var self = this;
+      this._closeTextPrompt();
+
+      var dialog = document.createElement("div");
+      dialog.className = "leaf-text-prompt";
+      dialog.setAttribute("contenteditable", "false");
+      dialog.style.cssText =
+        "position:absolute;z-index:60;background:var(--color-base-200,#e5e7eb);color:var(--color-base-content,#1f2937);border:1px solid var(--color-base-300,#d1d5db);border-radius:0.5rem;box-shadow:0 4px 16px rgba(0,0,0,0.12),0 1px 4px rgba(0,0,0,0.08);padding:0.5rem;width:280px;";
+
+      var label = document.createElement("div");
+      label.textContent = opts.label || "";
+      label.style.cssText =
+        "font-size:0.72rem;font-weight:600;margin-bottom:0.3rem;opacity:0.8;";
+      dialog.appendChild(label);
+
+      var input = document.createElement("input");
+      input.type = "text";
+      input.value = opts.value || "";
+      input.placeholder = opts.placeholder || "";
+      input.className = "input input-xs input-bordered w-full";
+      input.style.cssText = "font-size:0.8rem;width:100%;";
+      dialog.appendChild(input);
+
+      var row = document.createElement("div");
+      row.style.cssText =
+        "display:flex;justify-content:flex-end;gap:0.375rem;margin-top:0.45rem;";
+      var cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.textContent = "Cancel";
+      cancel.className = "btn btn-xs";
+      var ok = document.createElement("button");
+      ok.type = "button";
+      ok.textContent = "OK";
+      ok.className = "btn btn-xs btn-primary";
+      row.appendChild(cancel);
+      row.appendChild(ok);
+      dialog.appendChild(row);
+
+      var finished = false;
+      var finish = function (submit) {
+        if (finished) return;
+        finished = true;
+        var value = input.value;
+        self._closeTextPrompt();
+        if (submit) {
+          if (opts.onSubmit) opts.onSubmit(value);
+        } else if (opts.onCancel) {
+          opts.onCancel();
+        }
+      };
+      ok.addEventListener("click", function (e) {
+        e.preventDefault();
+        finish(true);
+      });
+      cancel.addEventListener("click", function (e) {
+        e.preventDefault();
+        finish(false);
+      });
+      input.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.stopPropagation();
+          finish(true);
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          finish(false);
+        }
+      });
+      dialog.addEventListener("mousedown", function (e) {
+        e.stopPropagation();
+      });
+
+      // Anchor under the triggering control (same pattern as the emoji /
+      // symbol pickers); default to the toolbar's left edge.
+      var host = this.el.querySelector("[data-visual-toolbar]") || this.el;
+      host.style.position = "relative";
+      var hostRect = host.getBoundingClientRect();
+      var left = 8;
+      var top = hostRect.height + 4;
+      if (opts.anchor && opts.anchor.getBoundingClientRect) {
+        var r = opts.anchor.getBoundingClientRect();
+        if (r.width || r.height) {
+          left = Math.max(
+            0,
+            Math.min(r.left - hostRect.left, hostRect.width - 288)
+          );
+          top = r.bottom - hostRect.top + 4;
+        }
+      }
+      dialog.style.left = left + "px";
+      dialog.style.top = top + "px";
+      host.appendChild(dialog);
+      this._textPrompt = dialog;
+
+      this._textPromptCloser = function (e) {
+        if (!dialog.contains(e.target)) finish(false);
+      };
+      setTimeout(function () {
+        if (self._textPrompt === dialog) {
+          document.addEventListener("mousedown", self._textPromptCloser);
+        }
+      }, 0);
+      setTimeout(function () {
+        input.focus();
+        input.select();
+      }, 0);
+    },
+
+    _closeTextPrompt: function () {
+      if (this._textPromptCloser) {
+        document.removeEventListener("mousedown", this._textPromptCloser);
+        this._textPromptCloser = null;
+      }
+      if (this._textPrompt && this._textPrompt.parentNode) {
+        this._textPrompt.parentNode.removeChild(this._textPrompt);
+      }
+      this._textPrompt = null;
+    },
+
+    // Preferred anchor for _openTextPrompt: the visible toolbar button
+    // for `action` (there are inline + overflow copies; hidden ones have
+    // no box to anchor to).
+    _toolbarAnchor: function (action) {
+      var btns = this.el.querySelectorAll(
+        '[data-toolbar-action="' + action + '"]'
+      );
+      for (var i = 0; i < btns.length; i++) {
+        if (btns[i].offsetParent !== null) return btns[i];
+      }
+      return btns[0] || null;
+    },
+
     _openEmojiPicker: function () {
       var self = this;
 
@@ -8075,11 +8495,13 @@
         return;
       }
 
-      // Save selection so we can restore it after picking
-      var sel = window.getSelection();
-      if (sel.rangeCount > 0) {
-        this._savedRange = sel.getRangeAt(0).cloneRange();
-      }
+      // Save selection so we can restore it after picking — but only a
+      // selection that actually lives inside the visual editor. A stale
+      // range from another surface (markdown textarea select-all, a
+      // previous document state) restored blindly makes the insert
+      // REPLACE whatever that range happened to cover — up to the whole
+      // document.
+      this._savedRange = this._captureEditorRange();
 
       var btn = this.el.querySelector('[data-toolbar-action="emoji"]');
       if (!btn) return;
@@ -8242,8 +8664,7 @@
         return;
       }
 
-      var sel = window.getSelection();
-      if (sel.rangeCount > 0) this._savedRange = sel.getRangeAt(0).cloneRange();
+      this._savedRange = this._captureEditorRange();
 
       var anchor =
         this.el.querySelector("[data-insert-more-trigger]") ||
@@ -8349,21 +8770,137 @@
       // Visual mode: restore saved selection and insert
       if (this._visualEl) {
         this._visualEl.focus();
-        if (this._savedRange) {
-          var sel = window.getSelection();
-          sel.removeAllRanges();
-          sel.addRange(this._savedRange);
-          this._savedRange = null;
-        }
+        this._restoreSavedRange();
         document.execCommand("insertText", false, emoji);
         this._debouncedPushVisualChange();
       }
+    },
+
+    // Clone the current selection range, but only when it lives inside
+    // the visual editor — anything else is a stale/foreign range that
+    // must not be restored later (restoring it makes the next insert
+    // replace whatever it covered).
+    _captureEditorRange: function () {
+      if (!this._visualEl) return null;
+      var sel = window.getSelection();
+      if (!sel.rangeCount) return null;
+      var range = sel.getRangeAt(0);
+      if (!this._visualEl.contains(range.commonAncestorContainer)) {
+        return null;
+      }
+      return range.cloneRange();
+    },
+
+    // Richer capture for flows that must survive a hybrid source-mode
+    // re-render (opening a dialog blurs the editor, the decorated block
+    // re-renders, and a cloned Range silently collapses even though its
+    // container stays connected). Alongside the range we remember the
+    // selected text + block so the selection can be re-found by content.
+    _captureEditorSelection: function () {
+      var range = this._captureEditorRange();
+      if (!range) return null;
+      var sel = window.getSelection();
+      return {
+        range: range,
+        text: sel.isCollapsed ? "" : sel.toString(),
+        block: this._getCurrentBlock(),
+      };
+    },
+
+    // Restore a _captureEditorSelection snapshot. Prefer the cloned range;
+    // when it comes back collapsed/dead but text was selected, re-find
+    // that text (nearest occurrence in the original block, then anywhere
+    // in the editor). Returns true when a non-collapsed selection was
+    // wanted and re-established.
+    _restoreEditorSelection: function (snap) {
+      if (!snap) return false;
+      this._savedRange = snap.range;
+      this._restoreSavedRange();
+      if (!snap.text) return true;
+      var sel = window.getSelection();
+      if (sel.rangeCount && !sel.isCollapsed && sel.toString() === snap.text) {
+        return true;
+      }
+      var scopes = [];
+      if (snap.block && snap.block.isConnected) scopes.push(snap.block);
+      scopes.push(this._visualEl);
+      for (var s = 0; s < scopes.length; s++) {
+        var walker = document.createTreeWalker(
+          scopes[s],
+          NodeFilter.SHOW_TEXT
+        );
+        var n;
+        while ((n = walker.nextNode())) {
+          var i = n.textContent.indexOf(snap.text);
+          if (i >= 0) {
+            var r = document.createRange();
+            r.setStart(n, i);
+            r.setEnd(n, i + snap.text.length);
+            sel.removeAllRanges();
+            sel.addRange(r);
+            return true;
+          }
+        }
+      }
+      return false;
+    },
+
+    // Restore a range captured by _captureEditorRange if it is still
+    // valid; otherwise fall back to a collapsed caret at the end of the
+    // editor so inserts append instead of replacing stale selections.
+    _restoreSavedRange: function () {
+      var range = this._savedRange;
+      this._savedRange = null;
+      var sel = window.getSelection();
+      if (
+        range &&
+        range.commonAncestorContainer &&
+        range.commonAncestorContainer.isConnected &&
+        this._visualEl.contains(range.commonAncestorContainer)
+      ) {
+        sel.removeAllRanges();
+        sel.addRange(range);
+        return;
+      }
+      if (sel.rangeCount && this._visualEl.contains(sel.anchorNode)) {
+        return; // current caret is already in the editor — keep it
+      }
+      var fallback = document.createRange();
+      fallback.selectNodeContents(this._visualEl);
+      fallback.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(fallback);
     },
 
     _isInsideHeading: function () {
       var block = this._getCurrentBlock();
       if (!block || !block.tagName) return false;
       return /^h[1-6]$/i.test(block.tagName);
+    },
+
+    // True when the current selection spans all of the visual editor's
+    // content — the cmd+A state. Compared on range boundaries: text
+    // comparison is unreliable because non-editable chrome (chip labels,
+    // callout titles) renders in textContent but not always in
+    // selection.toString().
+    _selectionCoversAllContent: function () {
+      if (!this._visualEl) return false;
+      var sel = window.getSelection();
+      if (!sel.rangeCount || sel.isCollapsed) return false;
+      var range = sel.getRangeAt(0);
+      if (!this._visualEl.contains(range.commonAncestorContainer)) {
+        return false;
+      }
+      var full = document.createRange();
+      full.selectNodeContents(this._visualEl);
+      try {
+        return (
+          range.compareBoundaryPoints(Range.START_TO_START, full) <= 0 &&
+          range.compareBoundaryPoints(Range.END_TO_END, full) >= 0
+        );
+      } catch (_e) {
+        return false;
+      }
     },
 
     _getCurrentBlock: function () {
@@ -8383,6 +8920,7 @@
     },
 
     _insertLink: function () {
+      var self = this;
       var selection = window.getSelection();
       var currentHref = "";
 
@@ -8397,14 +8935,27 @@
         }
       }
 
-      var url = prompt("Enter URL:", currentHref || "https://");
-      if (url === null) return;
+      // The popover steals focus (unlike the modal prompt), so capture
+      // the selection now and restore it before applying the command.
+      var saved = this._captureEditorSelection();
 
-      if (url === "") {
-        document.execCommand("unlink", false, null);
-      } else {
-        document.execCommand("createLink", false, url);
-      }
+      this._openTextPrompt({
+        label: "Link URL",
+        value: currentHref || "https://",
+        anchor: this._toolbarAnchor("link"),
+        onSubmit: function (url) {
+          url = url.trim();
+          self._visualEl.focus({ preventScroll: true });
+          self._restoreEditorSelection(saved);
+          if (url === "") {
+            document.execCommand("unlink", false, null);
+          } else {
+            document.execCommand("createLink", false, url);
+          }
+          if (self._mode === "hybrid") self._refreshSourceBlock();
+          self._debouncedPushVisualChange();
+        },
+      });
     },
 
     _wrapSelectionWith: function (tagName) {
@@ -9094,9 +9645,22 @@
       } else if (action === "code") {
         this._wrapSelectionWith("code");
       } else if (action === "link") {
-        var url = prompt("Enter URL:", "https://");
-        if (url === null || url === "") return;
-        document.execCommand("createLink", false, url);
+        var saved = this._captureEditorSelection();
+        this._openTextPrompt({
+          label: "Link URL",
+          value: "https://",
+          anchor: this._toolbarAnchor("link"),
+          onSubmit: function (url) {
+            url = url.trim();
+            if (url === "") return;
+            self._visualEl.focus({ preventScroll: true });
+            self._restoreEditorSelection(saved);
+            document.execCommand("createLink", false, url);
+            self._syncSelectionToolbarState();
+            self._visualEl.dispatchEvent(new Event("input", { bubbles: true }));
+          },
+        });
+        return;
       }
       // Refresh the on/off state for the buttons after the toggle.
       this._syncSelectionToolbarState();
@@ -9218,19 +9782,25 @@
       editBtn.addEventListener("click", function (e) {
         e.preventDefault();
         e.stopPropagation();
-        var newUrl = prompt("Edit URL:", href);
-        if (newUrl === null) return;
-        if (newUrl === "") {
-          self._unwrapLink(anchorEl);
-          self._dismissLinkPopover();
-        } else {
-          anchorEl.setAttribute("href", newUrl);
-          urlLink.href = newUrl;
-          urlLink.textContent = newUrl;
-          urlLink.title = newUrl;
-          href = newUrl;
-        }
-        self._debouncedPushVisualChange();
+        self._openTextPrompt({
+          label: "Edit link URL",
+          value: href,
+          anchor: editBtn,
+          onSubmit: function (newUrl) {
+            newUrl = newUrl.trim();
+            if (newUrl === "") {
+              self._unwrapLink(anchorEl);
+              self._dismissLinkPopover();
+            } else {
+              anchorEl.setAttribute("href", newUrl);
+              urlLink.href = newUrl;
+              urlLink.textContent = newUrl;
+              urlLink.title = newUrl;
+              href = newUrl;
+            }
+            self._debouncedPushVisualChange();
+          },
+        });
       });
       actions.appendChild(editBtn);
 
@@ -9606,17 +10176,23 @@
       editSrcBtn.addEventListener("click", function (e) {
         e.preventDefault();
         e.stopPropagation();
-        var newSrc = prompt("Edit image URL:", src);
-        if (newSrc === null) {
-          self._showImagePopover(imgEl);
-          return;
-        }
-        newSrc = newSrc.trim();
-        if (newSrc) {
-          imgEl.setAttribute("src", newSrc);
-          src = newSrc;
-        }
-        self._showImagePopover(imgEl);
+        self._openTextPrompt({
+          label: "Image URL",
+          value: src,
+          anchor: editSrcBtn,
+          onSubmit: function (newSrc) {
+            newSrc = newSrc.trim();
+            if (newSrc) {
+              imgEl.setAttribute("src", newSrc);
+              src = newSrc;
+              self._debouncedPushVisualChange();
+            }
+            self._showImagePopover(imgEl);
+          },
+          onCancel: function () {
+            self._showImagePopover(imgEl);
+          },
+        });
       });
       actions.appendChild(editSrcBtn);
 
@@ -10113,7 +10689,20 @@
     },
 
     _ensureCodeTools: function () {
-      if (this._codeTools) return this._codeTools;
+      // A LiveView DOM patch can wipe or detach the cached bar (leaving a
+      // ghost element with no buttons) — validate before reusing it.
+      if (
+        this._codeTools &&
+        this._codeTools.isConnected &&
+        this._codeTools.querySelectorAll("button").length >= 2
+      ) {
+        return this._codeTools;
+      }
+      if (this._codeTools && this._codeTools.parentNode) {
+        this._codeTools.parentNode.removeChild(this._codeTools);
+      }
+      this._codeTools = null;
+      this._codeToolsPre = null;
       var self = this;
       var bar = document.createElement("div");
       bar.className = "leaf-code-tools";
@@ -10133,14 +10722,24 @@
         e.preventDefault();
         e.stopPropagation();
         if (!self._codeToolsPre) return;
-        var cur = self._codeToolsPre.getAttribute("data-language") || "";
-        var lang = window.prompt("Language (e.g. javascript):", cur);
-        if (lang === null) return;
-        lang = lang.trim();
-        if (lang) self._codeToolsPre.setAttribute("data-language", lang);
-        else self._codeToolsPre.removeAttribute("data-language");
-        label.textContent = lang || "code";
-        self._debouncedPushVisualChange();
+        // _codeToolsPre is cleared when the pointer leaves the block —
+        // capture the target <pre> now, before the popover opens.
+        var pre = self._codeToolsPre;
+        var cur = pre.getAttribute("data-language") || "";
+        self._openTextPrompt({
+          label: "Code language",
+          value: cur,
+          placeholder: "e.g. javascript",
+          anchor: label,
+          onSubmit: function (lang) {
+            lang = lang.trim();
+            if (!pre.isConnected) return;
+            if (lang) pre.setAttribute("data-language", lang);
+            else pre.removeAttribute("data-language");
+            label.textContent = lang || "code";
+            self._debouncedPushVisualChange();
+          },
+        });
       });
       bar.appendChild(label);
 
@@ -10267,7 +10866,10 @@
         if (blocks[k] !== this._dragSourceBlock) {
           var firstRect = blocks[k].getBoundingClientRect();
           if (clientY < firstRect.top) {
-            return { element: blocks[k], position: "before" };
+            return this._normalizeDropTarget({
+              element: blocks[k],
+              position: "before",
+            });
           }
           break;
         }
@@ -10278,13 +10880,45 @@
         if (blocks[l] !== this._dragSourceBlock) {
           var lastRect = blocks[l].getBoundingClientRect();
           if (clientY > lastRect.bottom) {
-            return { element: blocks[l], position: "after" };
+            return this._normalizeDropTarget({
+              element: blocks[l],
+              position: "after",
+            });
           }
           break;
         }
       }
 
-      return best;
+      return this._normalizeDropTarget(best);
+    },
+
+    // A drop slot immediately adjacent to the dragged block ("before its
+    // next sibling" / "after its previous sibling") is a no-op — the
+    // block would land exactly where it already is. Rendering the
+    // indicator there reads as a pending move that then does nothing on
+    // release. Normalize those slots to the source block itself, so the
+    // line stays parked on the block's current position until the
+    // pointer genuinely crosses into another block's territory.
+    _normalizeDropTarget: function (target) {
+      var source = this._dragSourceBlock;
+      if (!target || !source || target.element === source) return target;
+
+      var next = source.nextSibling;
+      while (next && next.nodeType !== Node.ELEMENT_NODE) {
+        next = next.nextSibling;
+      }
+      var prev = source.previousSibling;
+      while (prev && prev.nodeType !== Node.ELEMENT_NODE) {
+        prev = prev.previousSibling;
+      }
+
+      if (
+        (target.position === "before" && target.element === next) ||
+        (target.position === "after" && target.element === prev)
+      ) {
+        return { element: source, position: "before" };
+      }
+      return target;
     },
 
     _positionDropIndicator: function (target) {

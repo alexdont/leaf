@@ -1,5 +1,53 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **List indent no longer loses items.** Indent/outdent on a list item now
+  builds valid `li > ol/ul` nesting instead of Chrome's `execCommand`
+  structures (nested list as a sibling of the `li`, or a bare `<p>` inside
+  the list) — and the markdown serializer handles all three shapes, emitting
+  properly indented nested-list markdown instead of silently dropping the
+  nested item.
+- **Hybrid mode no longer emits corrupted markdown while the caret is inside
+  a formatted run.** Serialization respects source-mode marker spans on
+  bold/italic/strike/inline-code/spoiler wrappers (previously only links),
+  so `{:leaf_changed}` payloads no longer double delimiters
+  (`****bold****`, `~~~~str~~~~`, `||||spoil||||`) or duplicate list
+  markers (`2. 2.`) when an autosave fires mid-edit.
+- **Superscript/subscript survive saves.** `<sup>`/`<sub>` serialize to
+  inline HTML in the markdown instead of being dropped.
+- **Details/Accordion inserts correctly.** The `<summary>` is created inside
+  the `<details>` element (previously Chrome's `insertHTML` stranded the
+  "Summary" text in the adjacent paragraph and the block serialized without
+  its summary).
+- **Block inserts no longer split the current paragraph mid-word.** Task
+  List converts the current line (matching the bullet/numbered list
+  buttons); Callout and Details insert after the current block. Code Block
+  with the caret in a list item converts the whole item — no more orphaned
+  task checkbox.
+- **Select-all + Delete fully clears the editor.** Previously empty shells
+  of preserved custom-tag elements survived the deletion and polluted later
+  edits.
+- **`window.prompt` is gone.** Link insert/edit (visual, markdown, and
+  selection toolbar), image URL edit, and code-block language now use a
+  small inline dialog instead of the page-blocking native prompt. Link
+  selections survive the dialog's focus steal, including across hybrid
+  source-mode re-renders.
+- **Emoji/symbol inserts can no longer replace unrelated content.** The
+  saved selection is only captured when it lives inside the editor and is
+  validated before restoring; a stale range falls back to a caret at the
+  end instead of overwriting whatever the range used to cover.
+- The floating code-block CODE/Copy bar rebuilds itself if a LiveView DOM
+  patch wipes its buttons.
+- **Drag-reorder indicator no longer suggests no-op drops.** Dragging a
+  block slightly up or down used to move the drop line to the slot directly
+  adjacent to the block — a drop there changes nothing. Adjacent slots now
+  keep the line parked on the block's current position; it only jumps once
+  the pointer crosses another block's midline (a drop that actually moves
+  the block).
+
 ## 0.3.0
 
 ### Added
