@@ -505,6 +505,31 @@
     "  opacity: 1; transform: translateY(0);",
     "}",
 
+    // Toolbar dropdown rows. Kept here rather than in Tailwind classes on
+    // the markup so they don't depend on the host's build picking up
+    // arbitrary variants from leaf's lib/ directory.
+    //
+    // `nowrap` pairs with the `min-w-max` on the menu: the widest row sizes
+    // the menu instead of long labels ("Details / Accordion") wrapping to
+    // two lines inside a fixed width.
+    "[data-leaf-menu] li > * {",
+    "  white-space: nowrap;",
+    "  gap: 0.5rem;",
+    "}",
+    // Touch targets. Desktop keeps the compact rows; a coarse pointer gets
+    // rows and toolbar buttons near the 44px guidance.
+    "@media (pointer: coarse) {",
+    "  [data-leaf-menu] li > * { min-height: 2.75rem; }",
+    "  [data-mobile-toolbar] .btn,",
+    "  [data-mobile-toolbar] summary.btn {",
+    "    min-height: 2.75rem; min-width: 2.75rem;",
+    "  }",
+    "}",
+    // The mobile menus are <details>; remove the default disclosure marker
+    // so the summary renders as a plain button.
+    "[data-mobile-toolbar] summary { list-style: none; }",
+    "[data-mobile-toolbar] summary::-webkit-details-marker { display: none; }",
+
     // Inline-suggestion popup (#tag / @user / :emoji / …). Portaled to
     // <body> while open, so it can't be clipped by a scrollable panel or
     // covered by a sticky admin header. Colors come from the daisyUI CSS
@@ -1396,6 +1421,7 @@
       this._setupMarkdownTextarea();
       this._setupHtmlTextarea();
       this._setupGripDoubleClick();
+      this._setupMenuPlacement();
       // Entirely inert unless the host passed `suggestions` — see
       // `_setupSuggestions`: no configs means no state, no listeners and no
       // server-event registration.
@@ -1650,6 +1676,7 @@
       delete window["markdownIndent_" + gid];
 
       this._teardownSuggestions();
+      this._teardownMenuPlacement();
     },
 
     // -- Markdown textarea setup --
@@ -2937,6 +2964,147 @@
     _insertAtTextarea: function (ta, text) {
       var start = ta.selectionStart;
       replaceRange(ta, start, ta.selectionEnd, text, start + text.length);
+    },
+
+    // =====================================================================
+    // Toolbar dropdown placement + dismissal
+    // =====================================================================
+    //
+    // The menus are `position: absolute` inside their trigger's wrapper, so
+    // nothing stops them running off the right edge or the bottom of the
+    // screen — most visible on a phone, where the tools menu is twenty rows
+    // tall. This clamps them into the viewport and flips them above the
+    // trigger when there's more room up there.
+    //
+    // Placement is driven by a MutationObserver rather than by hooking each
+    // open path: menus are opened in three different ways (the JS dropdowns
+    // toggle `hidden`, the mobile menus are `<details>`, and the responsive
+    // toolbar reveals rows), and observing the resulting attribute change
+    // catches all of them without touching that code.
+
+    _setupMenuPlacement: function () {
+      var self = this;
+
+      this._placeMenu = function (menu) {
+        if (!menu || menu.classList.contains("hidden")) return;
+
+        // Clear last run's adjustments before measuring, or the clamp
+        // compounds every time the menu is reopened.
+        menu.style.left = "";
+        menu.style.right = "";
+        menu.style.top = "";
+        menu.style.bottom = "";
+        menu.style.maxHeight = "";
+
+        var pad = 8;
+        var vw = document.documentElement.clientWidth;
+        var vh = window.visualViewport
+          ? window.visualViewport.height
+          : window.innerHeight;
+        var rect = menu.getBoundingClientRect();
+
+        // Horizontal: pull back inside the right edge, then the left. Both
+        // are expressed as `left` against the same offset parent the
+        // Tailwind `left-0` / `right-0` resolved against.
+        if (rect.right > vw - pad) {
+          menu.style.left = menu.offsetLeft - (rect.right - (vw - pad)) + "px";
+          menu.style.right = "auto";
+          rect = menu.getBoundingClientRect();
+        }
+        if (rect.left < pad) {
+          menu.style.left = menu.offsetLeft + (pad - rect.left) + "px";
+          menu.style.right = "auto";
+          rect = menu.getBoundingClientRect();
+        }
+
+        // Vertical: flip above the trigger when that's roomier, otherwise
+        // just cap the height so the menu scrolls instead of overflowing.
+        if (rect.bottom > vh - pad) {
+          var anchor = menu.parentElement.getBoundingClientRect();
+          var roomAbove = anchor.top - pad;
+          var roomBelow = vh - rect.top - pad;
+
+          if (roomAbove > roomBelow) {
+            menu.style.top = "auto";
+            menu.style.bottom = "100%";
+            menu.style.maxHeight = Math.max(120, roomAbove - 4) + "px";
+          } else {
+            menu.style.maxHeight = Math.max(120, roomBelow) + "px";
+          }
+        }
+      };
+
+      this._menuObserver = new MutationObserver(function (records) {
+        for (var i = 0; i < records.length; i++) {
+          var target = records[i].target;
+          if (!target || target.nodeType !== Node.ELEMENT_NODE) continue;
+
+          if (target.matches("[data-leaf-menu]")) {
+            self._placeMenu(target);
+          } else if (target.tagName === "DETAILS" && target.open) {
+            self._placeMenu(target.querySelector("[data-leaf-menu]"));
+          }
+        }
+      });
+
+      // Inline styles don't touch class/open, so placing a menu can't
+      // re-trigger the observer.
+      this._menuObserver.observe(this.el, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["class", "open"],
+      });
+
+      // The <details> menus have no dismissal of their own: without this
+      // they stay open until the summary is tapped again, which on a phone
+      // means a 20-row menu sitting over the text you're trying to read.
+      this._onMenuOutside = function (e) {
+        var open = self.el.querySelectorAll("details[open]");
+        for (var i = 0; i < open.length; i++) {
+          if (!open[i].contains(e.target)) open[i].removeAttribute("open");
+        }
+      };
+
+      this._onMenuEscape = function (e) {
+        if (e.key !== "Escape") return;
+        var open = self.el.querySelectorAll("details[open]");
+        for (var i = 0; i < open.length; i++) open[i].removeAttribute("open");
+      };
+
+      // Picking an item should close the menu it came from.
+      this._onMenuItemClick = function (e) {
+        var item = e.target.closest(
+          "[data-toolbar-action],[data-host-action],[data-mode-tab]"
+        );
+        if (!item) return;
+        var details = item.closest("details[open]");
+        if (details) details.removeAttribute("open");
+      };
+
+      document.addEventListener("mousedown", this._onMenuOutside, true);
+      document.addEventListener("touchstart", this._onMenuOutside, true);
+      document.addEventListener("keydown", this._onMenuEscape);
+      this.el.addEventListener("click", this._onMenuItemClick);
+    },
+
+    _teardownMenuPlacement: function () {
+      if (this._menuObserver) {
+        this._menuObserver.disconnect();
+        this._menuObserver = null;
+      }
+      if (this._onMenuOutside) {
+        document.removeEventListener("mousedown", this._onMenuOutside, true);
+        document.removeEventListener("touchstart", this._onMenuOutside, true);
+        this._onMenuOutside = null;
+      }
+      if (this._onMenuEscape) {
+        document.removeEventListener("keydown", this._onMenuEscape);
+        this._onMenuEscape = null;
+      }
+      if (this._onMenuItemClick) {
+        this.el.removeEventListener("click", this._onMenuItemClick);
+        this._onMenuItemClick = null;
+      }
     },
 
     // =====================================================================

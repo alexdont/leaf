@@ -540,7 +540,8 @@ defmodule Leaf do
                   <span data-heading-trigger-label>H</span>
                 </button>
                 <ul
-                  class="hidden absolute top-full left-0 menu bg-base-200 rounded-box z-50 w-28 p-1 shadow-sm"
+                  class={leaf_menu_class("hidden left-0")}
+                  data-leaf-menu
                   data-heading-menu
                 >
                   <li>
@@ -632,57 +633,31 @@ defmodule Leaf do
                     title={t("More formatting")}
                     data-inline-more-trigger
                   >
-                    <span class="text-base font-bold leading-none">...</span>
+                    <.tool_icon name="ellipsis" />
                   </button>
                   <ul
-                    class="hidden absolute top-full left-0 menu bg-base-200 rounded-box z-50 w-44 p-1 shadow-sm"
+                    class={leaf_menu_class("hidden left-0")}
+                    data-leaf-menu
                     data-inline-more-menu
                   >
                     <li>
-                      <button
-                        type="button"
-                        data-toolbar-action="superscript"
-                      >
-                        <span class="text-xs">X<sup class="text-[0.5rem]">2</sup></span>
-                        <span>{t("Superscript")}</span>
+                      <button type="button" data-toolbar-action="superscript">
+                        <.tool_icon name="superscript" /><span>{t("Superscript")}</span>
                       </button>
                     </li>
                     <li>
-                      <button
-                        type="button"
-                        data-toolbar-action="subscript"
-                      >
-                        <span class="text-xs">X<sub class="text-[0.5rem]">2</sub></span>
-                        <span>{t("Subscript")}</span>
+                      <button type="button" data-toolbar-action="subscript">
+                        <.tool_icon name="subscript" /><span>{t("Subscript")}</span>
                       </button>
                     </li>
                     <li>
-                      <button
-                        type="button"
-                        data-toolbar-action="code"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 20 20"
-                          fill="currentColor"
-                          class="w-3.5 h-3.5"
-                        >
-                          <path
-                            fill-rule="evenodd"
-                            d="M6.28 5.22a.75.75 0 010 1.06L2.56 10l3.72 3.72a.75.75 0 01-1.06 1.06L.97 10.53a.75.75 0 010-1.06l4.25-4.25a.75.75 0 011.06 0zm7.44 0a.75.75 0 011.06 0l4.25 4.25a.75.75 0 010 1.06l-4.25 4.25a.75.75 0 01-1.06-1.06L17.44 10l-3.72-3.72a.75.75 0 010-1.06z"
-                            clip-rule="evenodd"
-                          />
-                        </svg>
-                        <span>{t("Inline Code")}</span>
+                      <button type="button" data-toolbar-action="code">
+                        <.tool_icon name="code" /><span>{t("Inline Code")}</span>
                       </button>
                     </li>
                     <li>
-                      <button
-                        type="button"
-                        data-toolbar-action="spoiler"
-                      >
-                        <span class="inline-block w-3.5 h-2.5 bg-current rounded-sm" aria-hidden="true"></span>
-                        <span>{t("Spoiler")}</span>
+                      <button type="button" data-toolbar-action="spoiler">
+                        <.tool_icon name="spoiler" /><span>{t("Spoiler")}</span>
                       </button>
                     </li>
                     <li class="menu-title text-xs px-2 pt-1 hidden" data-compact-overflow="lists-title">
@@ -690,34 +665,23 @@ defmodule Leaf do
                     </li>
                     <li class="hidden" data-compact-overflow="list-bullet">
                       <button type="button" data-toolbar-action="bulletList">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
-                          <path fill-rule="evenodd" d="M6 4.75A.75.75 0 016.75 4h10.5a.75.75 0 010 1.5H6.75A.75.75 0 016 4.75zM6 10a.75.75 0 01.75-.75h10.5a.75.75 0 010 1.5H6.75A.75.75 0 016 10zm0 5.25a.75.75 0 01.75-.75h10.5a.75.75 0 010 1.5H6.75a.75.75 0 01-.75-.75zM1.99 4.75a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1v-.01zM1.99 15.25a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1v-.01zM1.99 10a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1V10z" clip-rule="evenodd" />
-                        </svg>
-                        <span>{t("Bullet List")}</span>
+                        <.tool_icon name="bullet-list" /><span>{t("Bullet List")}</span>
                       </button>
                     </li>
                     <li class="hidden" data-compact-overflow="list-ordered">
                       <button type="button" data-toolbar-action="orderedList">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
-                          <path d="M3.0002 1.25C2.58599 1.25 2.2502 1.58579 2.2502 2C2.2502 2.41421 2.58599 2.75 3.0002 2.75H3.2502V5.25C3.2502 5.66421 3.58599 6 4.0002 6C4.41441 6 4.7502 5.66421 4.7502 5.25V2C4.7502 1.58579 4.41441 1.25 4.0002 1.25H3.0002Z" />
-                          <path d="M2.97049 8.65372C3.29513 8.55397 3.64067 8.5 4.0002 8.5C4.16835 8.5 4.33333 8.5118 4.49444 8.53453C4.49127 8.53922 4.48691 8.54312 4.48165 8.54575L2.41479 9.57918C2.1607 9.70622 2.0002 9.96592 2.0002 10.25V11.25C2.0002 11.6642 2.33599 12 2.7502 12H5.2502C5.66441 12 6.0002 11.6642 6.0002 11.25C6.0002 10.8358 5.66441 10.5 5.2502 10.5H3.92725L5.15247 9.88739C5.67202 9.62762 6.0002 9.09661 6.0002 8.51574C6.0002 7.86944 5.57097 7.18897 4.80714 7.06489C4.54401 7.02215 4.27442 7 4.0002 7C3.48967 7 2.99569 7.07676 2.52991 7.21988C2.13397 7.34154 1.91162 7.76115 2.03328 8.15709C2.15494 8.55303 2.57455 8.77538 2.97049 8.65372Z" />
-                          <path d="M7.75 3C7.33579 3 7 3.33579 7 3.75C7 4.16421 7.33579 4.5 7.75 4.5H17.25C17.6642 4.5 18 4.16421 18 3.75C18 3.33579 17.6642 3 17.25 3H7.75Z" />
-                          <path d="M7.75 9.25C7.33579 9.25 7 9.58579 7 10C7 10.4142 7.33579 10.75 7.75 10.75H17.25C17.6642 10.75 18 10.4142 18 10C18 9.58579 17.6642 9.25 17.25 9.25H7.75Z" />
-                          <path d="M7.75 15.5C7.33579 15.5 7 15.8358 7 16.25C7 16.6642 7.33579 17 7.75 17H17.25C17.6642 17 18 16.6642 18 16.25C18 15.8358 17.6642 15.5 17.25 15.5H7.75Z" />
-                          <path d="M2.625 13.875C2.21079 13.875 1.875 14.2108 1.875 14.625C1.875 15.0392 2.21079 15.375 2.625 15.375H4.125C4.19404 15.375 4.25 15.431 4.25 15.5C4.25 15.569 4.19404 15.625 4.125 15.625H3.5C3.08579 15.625 2.75 15.9608 2.75 16.375C2.75 16.7892 3.08579 17.125 3.5 17.125H4.125C4.19404 17.125 4.25 17.181 4.25 17.25C4.25 17.319 4.19404 17.375 4.125 17.375H2.625C2.21079 17.375 1.875 17.7108 1.875 18.125C1.875 18.5392 2.21079 18.875 2.625 18.875H4.125C5.02246 18.875 5.75 18.1475 5.75 17.25C5.75 16.9278 5.65625 16.6276 5.49454 16.375C5.65625 16.1224 5.75 15.8222 5.75 15.5C5.75 14.6025 5.02246 13.875 4.125 13.875H2.625Z" />
-                        </svg>
-                        <span>{t("Numbered List")}</span>
+                        <.tool_icon name="ordered-list" /><span>{t("Numbered List")}</span>
                       </button>
                     </li>
                     <%= if @preset == :advanced do %>
                       <li class="hidden" data-compact-overflow="list-indent">
                         <button type="button" data-toolbar-action="indent">
-                          <span>{t("Increase Indent")}</span>
+                          <.tool_icon name="indent" /><span>{t("Increase Indent")}</span>
                         </button>
                       </li>
                       <li class="hidden" data-compact-overflow="list-outdent">
                         <button type="button" data-toolbar-action="outdent">
-                          <span>{t("Decrease Indent")}</span>
+                          <.tool_icon name="outdent" /><span>{t("Decrease Indent")}</span>
                         </button>
                       </li>
                     <% end %>
@@ -727,82 +691,74 @@ defmodule Leaf do
                     <%= unless :links in @deny do %>
                       <li class="hidden" data-compact-overflow="insert-link">
                         <button type="button" data-toolbar-action="link">
-                          <span>{t("Link")}</span>
+                          <.tool_icon name="link" /><span>{t("Link")}</span>
                         </button>
                       </li>
                     <% end %>
                     <li class="hidden" data-compact-overflow="insert-emoji">
                       <button type="button" data-toolbar-action="emoji">
-                        <span>{t("Emoji")}</span>
+                        <.tool_icon name="emoji" /><span>{t("Emoji")}</span>
                       </button>
                     </li>
                     <%= if @preset == :advanced and :image in @toolbar and :images not in @deny do %>
                       <li class="hidden" data-compact-overflow="insert-image">
                         <button type="button" data-toolbar-action="insert-image">
-                          <span>{t("Image")}</span>
+                          <.tool_icon name="image" /><span>{t("Image")}</span>
                         </button>
                       </li>
                     <% end %>
                     <%= if @preset == :advanced and :video in @toolbar and :video not in @deny do %>
                       <li class="hidden" data-compact-overflow="insert-video">
                         <button type="button" data-toolbar-action="insert-video">
-                          <span>{t("Video")}</span>
+                          <.tool_icon name="video" /><span>{t("Video")}</span>
                         </button>
                       </li>
                     <% end %>
                     <%= if @preset == :advanced do %>
                       <li class="hidden" data-compact-overflow="insert-table">
                         <button type="button" data-toolbar-action="table">
-                          <span>{t("Table")}</span>
+                          <.tool_icon name="table" /><span>{t("Table")}</span>
                         </button>
                       </li>
                       <li class="hidden" data-compact-overflow="insert-blockquote">
                         <button type="button" data-toolbar-action="blockquote">
-                          <span>{t("Blockquote")}</span>
+                          <.tool_icon name="blockquote" /><span>{t("Blockquote")}</span>
                         </button>
                       </li>
                       <li class="hidden" data-compact-overflow="insert-codeblock">
                         <button type="button" data-toolbar-action="codeBlock">
-                          <span>{t("Code Block")}</span>
+                          <.tool_icon name="code-block" /><span>{t("Code Block")}</span>
                         </button>
                       </li>
                       <li class="hidden" data-compact-overflow="insert-hr">
                         <button type="button" data-toolbar-action="horizontalRule">
-                          <span>{t("Horizontal Rule")}</span>
+                          <.tool_icon name="horizontal-rule" /><span>{t("Horizontal Rule")}</span>
                         </button>
                       </li>
                       <li class="hidden" data-compact-overflow="insert-more-extra">
                         <button type="button" data-toolbar-action="taskList">
-                          <span>{t("Task List")}</span>
+                          <.tool_icon name="task-list" /><span>{t("Task List")}</span>
                         </button>
                       </li>
                       <li class="hidden" data-compact-overflow="insert-more-extra">
                         <button type="button" data-toolbar-action="callout">
-                          <span>{t("Callout")}</span>
+                          <.tool_icon name="callout" /><span>{t("Callout")}</span>
                         </button>
                       </li>
                       <li class="hidden" data-compact-overflow="insert-more-extra">
                         <button type="button" data-toolbar-action="detailsBlock">
-                          <span>{t("Details / Accordion")}</span>
+                          <.tool_icon name="details" /><span>{t("Details / Accordion")}</span>
                         </button>
                       </li>
                       <li class="hidden" data-compact-overflow="insert-more-extra">
                         <button type="button" data-toolbar-action="symbols">
-                          <span>{t("Symbols / Date")}</span>
+                          <.tool_icon name="symbols" /><span>{t("Symbols / Date")}</span>
                         </button>
                       </li>
                     <% end %>
                     <li class="hidden" data-compact-overflow="remove-format">
                       <button type="button" data-toolbar-action="removeFormat">
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 20 20"
-                          fill="currentColor"
-                          class="w-3.5 h-3.5"
-                        >
-                          <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-                        </svg>
-                        <span>{t("Remove Formatting")}</span>
+                        <.tool_icon name="remove-format" /><span>{t("Remove Formatting")}</span>
                       </button>
                     </li>
                     <%= if @toolbar_extra != [] and not @readonly do %>
@@ -812,6 +768,7 @@ defmodule Leaf do
                       <%= for btn <- @toolbar_extra do %>
                         <li class="hidden" data-compact-overflow="extra">
                           <button type="button" data-host-action={efetch(btn, :id)}>
+                            <.tool_icon name={efetch(btn, :glyph) || "squares-plus"} />
                             <span>{efetch(btn, :label) || efetch(btn, :title) || efetch(btn, :id)}</span>
                           </button>
                         </li>
@@ -822,13 +779,19 @@ defmodule Leaf do
                         {t("Export")}
                       </li>
                       <li class="hidden" data-compact-overflow="export">
-                        <button type="button" data-toolbar-action="copyMarkdown"><span>{t("Copy as Markdown")}</span></button>
+                        <button type="button" data-toolbar-action="copyMarkdown">
+                          <.tool_icon name="clipboard" /><span>{t("Copy as Markdown")}</span>
+                        </button>
                       </li>
                       <li class="hidden" data-compact-overflow="export">
-                        <button type="button" data-toolbar-action="copyHtml"><span>{t("Copy as HTML")}</span></button>
+                        <button type="button" data-toolbar-action="copyHtml">
+                          <.tool_icon name="clipboard" /><span>{t("Copy as HTML")}</span>
+                        </button>
                       </li>
                       <li class="hidden" data-compact-overflow="export">
-                        <button type="button" data-toolbar-action="downloadMarkdown"><span>{t("Download .md")}</span></button>
+                        <button type="button" data-toolbar-action="downloadMarkdown">
+                          <.tool_icon name="download" /><span>{t("Download .md")}</span>
+                        </button>
                       </li>
                     <% end %>
                   </ul>
@@ -1027,7 +990,8 @@ defmodule Leaf do
                     </svg>
                   </button>
                   <ul
-                    class="hidden absolute top-full left-0 menu bg-base-200 rounded-box z-[10000] w-40 p-1 shadow-sm"
+                    class={leaf_menu_class("hidden left-0 !z-[10000]")}
+                    data-leaf-menu
                     data-image-dropdown-menu
                   >
                     <li>
@@ -1091,7 +1055,8 @@ defmodule Leaf do
                   </svg>
                 </button>
                 <ul
-                  class="hidden absolute top-full left-0 menu bg-base-200 rounded-box z-50 w-44 p-1 shadow-sm"
+                  class={leaf_menu_class("hidden left-0")}
+                  data-leaf-menu
                   data-table-menu
                 >
                   <li>
@@ -1167,101 +1132,49 @@ defmodule Leaf do
                   title={t("More inserts")}
                   data-insert-more-trigger
                 >
-                  <span class="text-base font-bold leading-none">...</span>
+                  <%!-- Same ellipsis as "More formatting": every overflow
+                       trigger means "more of this section", and the section
+                       dividers already tell them apart. --%>
+                  <.tool_icon name="ellipsis" />
                 </button>
                 <ul
-                  class="hidden absolute top-full left-0 menu bg-base-200 rounded-box z-50 w-40 p-1 shadow-sm"
+                  class={leaf_menu_class("hidden left-0")}
+                  data-leaf-menu
                   data-insert-more-menu
                 >
                   <li>
-                    <button
-                      type="button"
-                      data-toolbar-action="blockquote"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                        class="w-3.5 h-3.5"
-                      >
-                        <path
-                          fill-rule="evenodd"
-                          d="M2 3.75A.75.75 0 012.75 3h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 3.75zm3 4A.75.75 0 015.75 7h8.5a.75.75 0 010 1.5h-8.5A.75.75 0 015 7.75zm0 4A.75.75 0 015.75 11h8.5a.75.75 0 010 1.5h-8.5a.75.75 0 01-.75-.75zm-3 4A.75.75 0 012.75 15h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75z"
-                          clip-rule="evenodd"
-                        />
-                      </svg>
-                      <span>{t("Blockquote")}</span>
+                    <button type="button" data-toolbar-action="blockquote">
+                      <.tool_icon name="blockquote" /><span>{t("Blockquote")}</span>
                     </button>
                   </li>
                   <li>
-                    <button
-                      type="button"
-                      data-toolbar-action="codeBlock"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                        class="w-3.5 h-3.5"
-                      >
-                        <path
-                          fill-rule="evenodd"
-                          d="M6.28 5.22a.75.75 0 010 1.06L2.56 10l3.72 3.72a.75.75 0 01-1.06 1.06L.97 10.53a.75.75 0 010-1.06l4.25-4.25a.75.75 0 011.06 0zm7.44 0a.75.75 0 011.06 0l4.25 4.25a.75.75 0 010 1.06l-4.25 4.25a.75.75 0 01-1.06-1.06L17.44 10l-3.72-3.72a.75.75 0 010-1.06zM11.377 2.011a.75.75 0 01.612.867l-2.5 14.5a.75.75 0 01-1.478-.255l2.5-14.5a.75.75 0 01.866-.612z"
-                          clip-rule="evenodd"
-                        />
-                      </svg>
-                      <span>{t("Code Block")}</span>
+                    <button type="button" data-toolbar-action="codeBlock">
+                      <.tool_icon name="code-block" /><span>{t("Code Block")}</span>
                     </button>
                   </li>
                   <li>
-                    <button
-                      type="button"
-                      data-toolbar-action="horizontalRule"
-                    >
-                      <span class="text-lg font-bold">&mdash;</span>
-                      <span>{t("Horizontal Rule")}</span>
+                    <button type="button" data-toolbar-action="horizontalRule">
+                      <.tool_icon name="horizontal-rule" /><span>{t("Horizontal Rule")}</span>
                     </button>
                   </li>
                   <li>
-                    <button
-                      type="button"
-                      data-toolbar-action="detailsBlock"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
-                        <path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" />
-                      </svg>
-                      <span>{t("Details / Accordion")}</span>
+                    <button type="button" data-toolbar-action="detailsBlock">
+                      <.tool_icon name="details" /><span>{t("Details / Accordion")}</span>
                     </button>
                   </li>
                   <li>
-                    <button
-                      type="button"
-                      data-toolbar-action="taskList"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
-                        <path fill-rule="evenodd" d="M7.53 4.97a.75.75 0 0 1 0 1.06L5.06 8.5 7.53 10.97a.75.75 0 0 1-1.06 1.06l-3-3a.75.75 0 0 1 0-1.06l3-3a.75.75 0 0 1 1.06 0ZM10.75 7.5a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5Z" clip-rule="evenodd" />
-                      </svg>
-                      <span>{t("Task List")}</span>
+                    <button type="button" data-toolbar-action="taskList">
+                      <.tool_icon name="task-list" /><span>{t("Task List")}</span>
                     </button>
                   </li>
                   <li>
-                    <button
-                      type="button"
-                      data-toolbar-action="callout"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
-                        <path fill-rule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM9 9a.75.75 0 0 0 0 1.5h.253a.25.25 0 0 1 .244.304l-.459 2.066A1.75 1.75 0 0 0 10.747 15H11a.75.75 0 0 0 0-1.5h-.253a.25.25 0 0 1-.244-.304l.459-2.066A1.75 1.75 0 0 0 9.253 9H9Z" clip-rule="evenodd" />
-                      </svg>
-                      <span>{t("Callout")}</span>
+                    <button type="button" data-toolbar-action="callout">
+                      <.tool_icon name="callout" /><span>{t("Callout")}</span>
                     </button>
                   </li>
                   <li>
-                    <button
-                      type="button"
-                      data-toolbar-action="symbols"
-                    >
-                      <span class="text-sm font-semibold w-3.5 text-center">Ω</span>
-                      <span>{t("Symbols / Date")}</span>
+                    <button type="button" data-toolbar-action="symbols">
+                      <.tool_icon name="symbols" /><span>{t("Symbols / Date")}</span>
                     </button>
                   </li>
                 </ul>
@@ -1280,14 +1193,7 @@ defmodule Leaf do
                 class="btn btn-xs btn-ghost px-2"
                 title={t("Remove Formatting")}
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  class="w-3.5 h-3.5"
-                >
-                  <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-                </svg>
+                <.tool_icon name="remove-format" />
               </button>
             </div>
           </div>
@@ -1461,7 +1367,8 @@ defmodule Leaf do
             <span class="text-base font-bold leading-none">&#8942;</span>
           </summary>
           <ul
-            class="absolute top-full right-0 menu bg-base-200 rounded-box z-50 w-36 p-1 shadow-sm"
+            class={leaf_menu_class("right-0")}
+            data-leaf-menu
             data-mode-menu
           >
             <li class="menu-title text-xs px-2 pt-1">{t("Mode")}</li>
@@ -1596,27 +1503,75 @@ defmodule Leaf do
               title={t("More formatting")}
               aria-label={t("More formatting")}
             >
-              <span class="text-base font-bold leading-none">...</span>
+              <.tool_icon name="ellipsis" class="w-4 h-4" />
             </summary>
-            <ul class="absolute top-full left-0 menu bg-base-200 rounded-box z-50 w-44 p-1 shadow-sm">
+            <ul class={leaf_menu_class("left-0")} data-leaf-menu>
               <li class="menu-title text-xs px-2 pt-1">{t("Format")}</li>
-              <li><button type="button" data-toolbar-action="heading2"><span>{t("Heading")}</span></button></li>
-              <li><button type="button" data-toolbar-action="orderedList"><span>{t("Numbered List")}</span></button></li>
-              <li><button type="button" data-toolbar-action="code"><span>{t("Inline Code")}</span></button></li>
+              <li>
+                <button type="button" data-toolbar-action="heading2">
+                  <.tool_icon name="heading" /><span>{t("Heading")}</span>
+                </button>
+              </li>
+              <li>
+                <button type="button" data-toolbar-action="orderedList">
+                  <.tool_icon name="ordered-list" /><span>{t("Numbered List")}</span>
+                </button>
+              </li>
+              <li>
+                <button type="button" data-toolbar-action="code">
+                  <.tool_icon name="code" /><span>{t("Inline Code")}</span>
+                </button>
+              </li>
               <%= if @preset == :advanced do %>
-                <li><button type="button" data-toolbar-action="blockquote"><span>{t("Blockquote")}</span></button></li>
-                <li><button type="button" data-toolbar-action="codeBlock"><span>{t("Code Block")}</span></button></li>
+                <li>
+                  <button type="button" data-toolbar-action="blockquote">
+                    <.tool_icon name="blockquote" /><span>{t("Blockquote")}</span>
+                  </button>
+                </li>
+                <li>
+                  <button type="button" data-toolbar-action="codeBlock">
+                    <.tool_icon name="code-block" /><span>{t("Code Block")}</span>
+                  </button>
+                </li>
                 <li class="menu-title text-xs px-2 pt-1">{t("Insert")}</li>
-                <li><button type="button" data-toolbar-action="horizontalRule"><span>{t("Horizontal Rule")}</span></button></li>
-                <li><button type="button" data-toolbar-action="taskList"><span>{t("Task List")}</span></button></li>
-                <li><button type="button" data-toolbar-action="callout"><span>{t("Callout")}</span></button></li>
-                <li><button type="button" data-toolbar-action="detailsBlock"><span>{t("Details / Accordion")}</span></button></li>
-                <li><button type="button" data-toolbar-action="symbols"><span>{t("Symbols / Date")}</span></button></li>
+                <li>
+                  <button type="button" data-toolbar-action="horizontalRule">
+                    <.tool_icon name="horizontal-rule" /><span>{t("Horizontal Rule")}</span>
+                  </button>
+                </li>
+                <li>
+                  <button type="button" data-toolbar-action="taskList">
+                    <.tool_icon name="task-list" /><span>{t("Task List")}</span>
+                  </button>
+                </li>
+                <li>
+                  <button type="button" data-toolbar-action="callout">
+                    <.tool_icon name="callout" /><span>{t("Callout")}</span>
+                  </button>
+                </li>
+                <li>
+                  <button type="button" data-toolbar-action="detailsBlock">
+                    <.tool_icon name="details" /><span>{t("Details / Accordion")}</span>
+                  </button>
+                </li>
+                <li>
+                  <button type="button" data-toolbar-action="symbols">
+                    <.tool_icon name="symbols" /><span>{t("Symbols / Date")}</span>
+                  </button>
+                </li>
                 <%= if :image in @toolbar and :images not in @deny do %>
-                  <li><button type="button" data-toolbar-action="insert-image"><span>{t("Image")}</span></button></li>
+                  <li>
+                    <button type="button" data-toolbar-action="insert-image">
+                      <.tool_icon name="image" /><span>{t("Image")}</span>
+                    </button>
+                  </li>
                 <% end %>
                 <%= if :video in @toolbar and :video not in @deny do %>
-                  <li><button type="button" data-toolbar-action="insert-video"><span>{t("Video")}</span></button></li>
+                  <li>
+                    <button type="button" data-toolbar-action="insert-video">
+                      <.tool_icon name="video" /><span>{t("Video")}</span>
+                    </button>
+                  </li>
                 <% end %>
               <% end %>
               <%= if @toolbar_extra != [] and not @readonly do %>
@@ -1624,6 +1579,7 @@ defmodule Leaf do
                 <%= for btn <- @toolbar_extra do %>
                   <li>
                     <button type="button" data-host-action={efetch(btn, :id)}>
+                      <.tool_icon name={efetch(btn, :glyph) || "squares-plus"} />
                       <span>{efetch(btn, :label) || efetch(btn, :title) || efetch(btn, :id)}</span>
                     </button>
                   </li>
@@ -1631,12 +1587,28 @@ defmodule Leaf do
               <% end %>
               <%= if @export and not @readonly do %>
                 <li class="menu-title text-xs px-2 pt-1">{t("Export")}</li>
-                <li><button type="button" data-toolbar-action="copyMarkdown"><span>{t("Copy as Markdown")}</span></button></li>
-                <li><button type="button" data-toolbar-action="copyHtml"><span>{t("Copy as HTML")}</span></button></li>
-                <li><button type="button" data-toolbar-action="downloadMarkdown"><span>{t("Download .md")}</span></button></li>
+                <li>
+                  <button type="button" data-toolbar-action="copyMarkdown">
+                    <.tool_icon name="clipboard" /><span>{t("Copy as Markdown")}</span>
+                  </button>
+                </li>
+                <li>
+                  <button type="button" data-toolbar-action="copyHtml">
+                    <.tool_icon name="clipboard" /><span>{t("Copy as HTML")}</span>
+                  </button>
+                </li>
+                <li>
+                  <button type="button" data-toolbar-action="downloadMarkdown">
+                    <.tool_icon name="download" /><span>{t("Download .md")}</span>
+                  </button>
+                </li>
               <% end %>
               <li class="menu-title text-xs px-2 pt-1">{t("Clean up")}</li>
-              <li><button type="button" data-toolbar-action="removeFormat"><span>{t("Remove Formatting")}</span></button></li>
+              <li>
+                <button type="button" data-toolbar-action="removeFormat">
+                  <.tool_icon name="remove-format" /><span>{t("Remove Formatting")}</span>
+                </button>
+              </li>
             </ul>
           </details>
 
@@ -1650,15 +1622,51 @@ defmodule Leaf do
             >
               <span class="text-base font-bold leading-none">&#8942;</span>
             </summary>
-            <ul class="absolute top-full right-0 menu bg-base-200 rounded-box z-50 w-36 p-1 shadow-sm">
+            <ul class={leaf_menu_class("right-0")} data-leaf-menu>
               <li class="menu-title text-xs px-2 pt-1">{t("Mode")}</li>
-              <li><button type="button" data-mode-tab="hybrid" class={(@mode == :hybrid && "btn-active") || "btn-ghost"}><span>{t("Hybrid")}</span></button></li>
-              <li><button type="button" data-mode-tab="visual" class={(@mode == :visual && "btn-active") || "btn-ghost"}><span>{t("Visual")}</span></button></li>
-              <li><button type="button" data-mode-tab="markdown" class={(@mode == :markdown && "btn-active") || "btn-ghost"}><span>{t("Markdown")}</span></button></li>
-              <li><button type="button" data-mode-tab="html" class={(@mode == :html && "btn-active") || "btn-ghost"}><span>{t("HTML")}</span></button></li>
+              <li>
+                <button
+                  type="button"
+                  data-mode-tab="hybrid"
+                  class={(@mode == :hybrid && "btn-active") || "btn-ghost"}
+                >
+                  <.tool_icon name="sparkles" /><span>{t("Hybrid")}</span>
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  data-mode-tab="visual"
+                  class={(@mode == :visual && "btn-active") || "btn-ghost"}
+                >
+                  <.tool_icon name="eye" /><span>{t("Visual")}</span>
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  data-mode-tab="markdown"
+                  class={(@mode == :markdown && "btn-active") || "btn-ghost"}
+                >
+                  <.tool_icon name="markdown" /><span>{t("Markdown")}</span>
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  data-mode-tab="html"
+                  class={(@mode == :html && "btn-active") || "btn-ghost"}
+                >
+                  <.tool_icon name="html" /><span>{t("HTML")}</span>
+                </button>
+              </li>
               <%= if @preset == :advanced do %>
                 <li class="menu-title text-xs px-2 pt-1">{t("View")}</li>
-                <li><button type="button" data-toolbar-action="fullscreen"><span>{t("Fullscreen")}</span></button></li>
+                <li>
+                  <button type="button" data-toolbar-action="fullscreen">
+                    <.tool_icon name="fullscreen" /><span>{t("Fullscreen")}</span>
+                  </button>
+                </li>
               <% end %>
             </ul>
           </details>
@@ -1793,6 +1801,241 @@ defmodule Leaf do
   defp save_status_dot(:saving), do: "background:#eab308;"
   defp save_status_dot(:unsaved), do: "background:#9ca3af;"
   defp save_status_dot(_), do: "background:transparent;"
+
+  # Shared geometry for every toolbar dropdown.
+  #
+  # `min-w-max` lets the widest row size the menu, instead of the old fixed
+  # `w-40`/`w-44` that clipped or wrapped labels like "Details / Accordion"
+  # once they gained a leading icon. The max-width clamps to the viewport on
+  # a phone, and the max-height keeps a twenty-row menu scrollable instead
+  # of running off the bottom of the screen.
+  #
+  # Row height, nowrap and the flip/clamp behaviour live in the injected CSS
+  # + the `data-leaf-menu` handling in the hook, so they don't depend on the
+  # host's Tailwind picking up arbitrary variants from this file.
+  defp leaf_menu_class(extra) do
+    [
+      "absolute top-full menu bg-base-200 rounded-box z-50 p-1 shadow-lg",
+      "min-w-max max-w-[min(20rem,calc(100vw-1.5rem))]",
+      # `flex-nowrap` is load-bearing: daisyUI's `.menu` sets `flex-wrap:
+      # wrap`, so capping the height below the content height makes rows
+      # spill into a SECOND COLUMN instead of scrolling.
+      "flex-col flex-nowrap max-h-[min(70vh,28rem)] overflow-y-auto",
+      extra
+    ]
+  end
+
+  # -- Toolbar icons --
+
+  # One fixed-size slot for every menu row and compact button, so a menu
+  # mixing icon rows with text-glyph rows (Ω, X², H) still has a straight
+  # left edge. Rows with no icon at all pass an unknown name and get an
+  # empty slot of the same width rather than shifting their label left.
+  #
+  # Glyphs are either a list of SVG path `d` strings or a short string
+  # rendered as text. Framed icons (code block, details) put the frame and
+  # its contents in a SINGLE `d` so `fill-rule="evenodd"` punches the inner
+  # shape out — separate `<path>` elements would each fill independently
+  # and the frame would come out solid.
+  attr(:name, :string, required: true)
+  attr(:class, :string, default: "w-3.5 h-3.5")
+
+  defp tool_icon(assigns) do
+    assigns = assign(assigns, :glyph, tool_glyph(assigns.name))
+
+    ~H"""
+    <span
+      class="inline-flex w-4 h-4 shrink-0 items-center justify-center"
+      aria-hidden="true"
+    >
+      <svg
+        :if={is_list(@glyph)}
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 20 20"
+        fill="currentColor"
+        class={@class}
+      >
+        <path :for={d <- @glyph} fill-rule="evenodd" clip-rule="evenodd" d={d} />
+      </svg>
+      <span :if={is_binary(@glyph)} class="text-[0.7rem] font-semibold leading-none">
+        {@glyph}
+      </span>
+    </span>
+    """
+  end
+
+  # Text glyphs — conventional enough that a drawn icon would be worse.
+  defp tool_glyph("superscript"), do: "X²"
+  defp tool_glyph("subscript"), do: "X₂"
+  defp tool_glyph("symbols"), do: "Ω"
+  defp tool_glyph("heading"), do: "H"
+  defp tool_glyph("markdown"), do: "M"
+  defp tool_glyph("html"), do: "<>"
+
+  defp tool_glyph("bold"), do: "B"
+  defp tool_glyph("italic"), do: "I"
+
+  # Inline code: bare chevrons. Deliberately distinct from "code-block"
+  # below, which frames them — the two used to be near-identical.
+  defp tool_glyph("code"),
+    do: [
+      "M6.28 5.22a.75.75 0 010 1.06L2.56 10l3.72 3.72a.75.75 0 01-1.06 1.06L.97 10.53a.75.75 0 010-1.06l4.25-4.25a.75.75 0 011.06 0zm7.44 0a.75.75 0 011.06 0l4.25 4.25a.75.75 0 010 1.06l-4.25 4.25a.75.75 0 01-1.06-1.06L17.44 10l-3.72-3.72a.75.75 0 010-1.06z"
+    ]
+
+  defp tool_glyph("code-block"),
+    do: [
+      "M4.25 2A2.25 2.25 0 0 0 2 4.25v11.5A2.25 2.25 0 0 0 4.25 18h11.5A2.25 2.25 0 0 0 18 15.75V4.25A2.25 2.25 0 0 0 15.75 2H4.25Zm3.03 5.22a.75.75 0 0 1 0 1.06L5.56 10l1.72 1.72a.75.75 0 1 1-1.06 1.06l-2.25-2.25a.75.75 0 0 1 0-1.06l2.25-2.25a.75.75 0 0 1 1.06 0Zm5.44 0a.75.75 0 0 1 1.06 0l2.25 2.25a.75.75 0 0 1 0 1.06l-2.25 2.25a.75.75 0 1 1-1.06-1.06L14.44 10l-1.72-1.72a.75.75 0 0 1 0-1.06Z"
+    ]
+
+  # Task list: two ticks + two lines. The old glyph here was a chevron-left
+  # with a bar — an outdent icon that had nothing to do with checkboxes.
+  defp tool_glyph("task-list"),
+    do: [
+      "M2.22 5.03a.75.75 0 0 1 1.06 0l.72.72 1.97-1.97a.75.75 0 1 1 1.06 1.06L4.53 7.34a.75.75 0 0 1-1.06 0L2.22 6.09a.75.75 0 0 1 0-1.06Z",
+      "M9.75 5a.75.75 0 0 0 0 1.5h7.5a.75.75 0 0 0 0-1.5h-7.5Z",
+      "M2.22 12.03a.75.75 0 0 1 1.06 0l.72.72 1.97-1.97a.75.75 0 1 1 1.06 1.06l-2.5 2.5a.75.75 0 0 1-1.06 0l-1.25-1.25a.75.75 0 0 1 0-1.06Z",
+      "M9.75 12a.75.75 0 0 0 0 1.5h7.5a.75.75 0 0 0 0-1.5h-7.5Z"
+    ]
+
+  # Remove formatting: a backspace, not the bare ✕ it used to be — an ✕
+  # reads as "close this menu", not "strip the styling".
+  defp tool_glyph("remove-format"),
+    do: [
+      "M7.22 3.22A.75.75 0 0 1 7.75 3h8.5A2.75 2.75 0 0 1 19 5.75v8.5A2.75 2.75 0 0 1 16.25 17h-8.5a.75.75 0 0 1-.53-.22l-5.5-5.5a1.75 1.75 0 0 1 0-2.47l5.5-5.59Zm3.06 4.28a.75.75 0 0 0-1.06 1.06L10.94 10l-1.72 1.72a.75.75 0 1 0 1.06 1.06L12 11.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L13.06 10l1.72-1.72a.75.75 0 1 0-1.06-1.06L12 8.94l-1.72-1.72Z"
+    ]
+
+  # Blockquote: the conventional bar-plus-lines, instead of the bars-3 that
+  # was indistinguishable from the list and indent glyphs.
+  defp tool_glyph("blockquote"),
+    do: [
+      "M3 4a1 1 0 0 1 1-1h.5a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4Z",
+      "M8.75 5a.75.75 0 0 0 0 1.5h8.5a.75.75 0 0 0 0-1.5h-8.5Z",
+      "M8.75 9.25a.75.75 0 0 0 0 1.5h8.5a.75.75 0 0 0 0-1.5h-8.5Z",
+      "M8.75 13.5a.75.75 0 0 0 0 1.5h5.5a.75.75 0 0 0 0-1.5h-5.5Z"
+    ]
+
+  # Details / accordion: a framed chevron, so it no longer collides with
+  # the bare chevron used by the image-options dropdown.
+  defp tool_glyph("details"),
+    do: [
+      "M4.25 3A2.25 2.25 0 0 0 2 5.25v9.5A2.25 2.25 0 0 0 4.25 17h11.5A2.25 2.25 0 0 0 18 14.75v-9.5A2.25 2.25 0 0 0 15.75 3H4.25Zm2.47 4.97a.75.75 0 0 1 1.06 0L10 10.19l2.22-2.22a.75.75 0 1 1 1.06 1.06l-2.75 2.75a.75.75 0 0 1-1.06 0L6.72 9.03a.75.75 0 0 1 0-1.06Z"
+    ]
+
+  defp tool_glyph("horizontal-rule"),
+    do: ["M3 10a.75.75 0 0 1 .75-.75h12.5a.75.75 0 0 1 0 1.5H3.75A.75.75 0 0 1 3 10Z"]
+
+  # Spoiler: eye-slash reads as "hidden until revealed"; the old filled bar
+  # was ambiguous with the horizontal rule.
+  defp tool_glyph("spoiler"),
+    do: [
+      "M3.28 2.22a.75.75 0 0 0-1.06 1.06l14.5 14.5a.75.75 0 1 0 1.06-1.06l-1.745-1.745a10.029 10.029 0 0 0 3.3-4.38 1.651 1.651 0 0 0 0-1.185A10.004 10.004 0 0 0 9.999 3a9.956 9.956 0 0 0-4.744 1.194L3.28 2.22Zm4.472 4.47 1.092 1.092a2.5 2.5 0 0 1 3.374 3.373l1.091 1.092a4 4 0 0 0-5.557-5.557Z",
+      "M10.748 13.93l2.523 2.523a9.987 9.987 0 0 1-3.27.547c-4.258 0-7.894-2.66-9.337-6.41a1.651 1.651 0 0 1 0-1.186A10.007 10.007 0 0 1 2.839 6.02L6.07 9.252a4 4 0 0 0 4.678 4.678Z"
+    ]
+
+  defp tool_glyph("bullet-list"),
+    do: [
+      "M6 4.75A.75.75 0 016.75 4h10.5a.75.75 0 010 1.5H6.75A.75.75 0 016 4.75zM6 10a.75.75 0 01.75-.75h10.5a.75.75 0 010 1.5H6.75A.75.75 0 016 10zm0 5.25a.75.75 0 01.75-.75h10.5a.75.75 0 010 1.5H6.75a.75.75 0 01-.75-.75zM1.99 4.75a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1v-.01zM1.99 15.25a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1v-.01zM1.99 10a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1V10z"
+    ]
+
+  defp tool_glyph("ordered-list"),
+    do: [
+      "M3.0002 1.25C2.58599 1.25 2.2502 1.58579 2.2502 2C2.2502 2.41421 2.58599 2.75 3.0002 2.75H3.2502V5.25C3.2502 5.66421 3.58599 6 4.0002 6C4.41441 6 4.7502 5.66421 4.7502 5.25V2C4.7502 1.58579 4.41441 1.25 4.0002 1.25H3.0002Z",
+      "M2.97049 8.65372C3.29513 8.55397 3.64067 8.5 4.0002 8.5C4.16835 8.5 4.33333 8.5118 4.49444 8.53453C4.49127 8.53922 4.48691 8.54312 4.48165 8.54575L2.41479 9.57918C2.1607 9.70622 2.0002 9.96592 2.0002 10.25V11.25C2.0002 11.6642 2.33599 12 2.7502 12H5.2502C5.66441 12 6.0002 11.6642 6.0002 11.25C6.0002 10.8358 5.66441 10.5 5.2502 10.5H3.92725L5.15247 9.88739C5.67202 9.62762 6.0002 9.09661 6.0002 8.51574C6.0002 7.86944 5.57097 7.18897 4.80714 7.06489C4.54401 7.02215 4.27442 7 4.0002 7C3.48967 7 2.99569 7.07676 2.52991 7.21988C2.13397 7.34154 1.91162 7.76115 2.03328 8.15709C2.15494 8.55303 2.57455 8.77538 2.97049 8.65372Z",
+      "M7.75 3C7.33579 3 7 3.33579 7 3.75C7 4.16421 7.33579 4.5 7.75 4.5H17.25C17.6642 4.5 18 4.16421 18 3.75C18 3.33579 17.6642 3 17.25 3H7.75Z",
+      "M7.75 9.25C7.33579 9.25 7 9.58579 7 10C7 10.4142 7.33579 10.75 7.75 10.75H17.25C17.6642 10.75 18 10.4142 18 10C18 9.58579 17.6642 9.25 17.25 9.25H7.75Z",
+      "M7.75 15.5C7.33579 15.5 7 15.8358 7 16.25C7 16.6642 7.33579 17 7.75 17H17.25C17.6642 17 18 16.6642 18 16.25C18 15.8358 17.6642 15.5 17.25 15.5H7.75Z",
+      "M2.625 13.875C2.21079 13.875 1.875 14.2108 1.875 14.625C1.875 15.0392 2.21079 15.375 2.625 15.375H4.125C4.19404 15.375 4.25 15.431 4.25 15.5C4.25 15.569 4.19404 15.625 4.125 15.625H3.5C3.08579 15.625 2.75 15.9608 2.75 16.375C2.75 16.7892 3.08579 17.125 3.5 17.125H4.125C4.19404 17.125 4.25 17.181 4.25 17.25C4.25 17.319 4.19404 17.375 4.125 17.375H2.625C2.21079 17.375 1.875 17.7108 1.875 18.125C1.875 18.5392 2.21079 18.875 2.625 18.875H4.125C5.02246 18.875 5.75 18.1475 5.75 17.25C5.75 16.9278 5.65625 16.6276 5.49454 16.375C5.65625 16.1224 5.75 15.8222 5.75 15.5C5.75 14.6025 5.02246 13.875 4.125 13.875H2.625Z"
+    ]
+
+  defp tool_glyph("indent"),
+    do: [
+      "M2 4.75A.75.75 0 0 1 2.75 4h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 4.75Zm6 5A.75.75 0 0 1 8.75 9h8.5a.75.75 0 0 1 0 1.5h-8.5A.75.75 0 0 1 8 9.75Zm-6 5a.75.75 0 0 1 .75-.75h14.5a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1-.75-.75Z",
+      "M2.22 8.22a.75.75 0 0 1 1.06 0L5 9.94l-1.72 1.72a.75.75 0 1 1-1.06-1.06l.69-.69-.69-.69a.75.75 0 0 1 0-1Z"
+    ]
+
+  defp tool_glyph("outdent"),
+    do: [
+      "M2 4.75A.75.75 0 0 1 2.75 4h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 4.75Zm6 5A.75.75 0 0 1 8.75 9h8.5a.75.75 0 0 1 0 1.5h-8.5A.75.75 0 0 1 8 9.75Zm-6 5a.75.75 0 0 1 .75-.75h14.5a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1-.75-.75Z",
+      "M5.03 8.22a.75.75 0 0 0-1.06 0L2.25 9.94l1.72 1.72a.75.75 0 1 0 1.06-1.06l-.69-.69.69-.69a.75.75 0 0 0 0-1Z"
+    ]
+
+  defp tool_glyph("link"),
+    do: [
+      "M12.232 4.232a2.5 2.5 0 013.536 3.536l-1.225 1.224a.75.75 0 001.061 1.06l1.224-1.224a4 4 0 00-5.656-5.656l-3 3a4 4 0 00.225 5.865.75.75 0 00.977-1.138 2.5 2.5 0 01-.142-3.667l3-3z",
+      "M11.603 7.963a.75.75 0 00-.977 1.138 2.5 2.5 0 01.142 3.667l-3 3a2.5 2.5 0 01-3.536-3.536l1.225-1.224a.75.75 0 00-1.061-1.06l-1.224 1.224a4 4 0 105.656 5.656l3-3a4 4 0 00-.225-5.865z"
+    ]
+
+  defp tool_glyph("emoji"),
+    do: [
+      "M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM7 8.5a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm7-1a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm-7.536 4.036a.75.75 0 0 1 1.06 0 3.5 3.5 0 0 0 4.95 0 .75.75 0 1 1 1.061 1.06 5 5 0 0 1-7.07 0 .75.75 0 0 1 0-1.06Z"
+    ]
+
+  defp tool_glyph("image"),
+    do: [
+      "M1 5.25A2.25 2.25 0 0 1 3.25 3h13.5A2.25 2.25 0 0 1 19 5.25v9.5A2.25 2.25 0 0 1 16.75 17H3.25A2.25 2.25 0 0 1 1 14.75v-9.5Zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 0 0 .75-.75v-2.69l-2.22-2.219a.75.75 0 0 0-1.06 0l-1.91 1.909.47.47a.75.75 0 1 1-1.06 1.06L6.53 8.091a.75.75 0 0 0-1.06 0l-2.97 2.97ZM12 7a1 1 0 1 1 2 0 1 1 0 0 1-2 0Z"
+    ]
+
+  defp tool_glyph("video"),
+    do: [
+      "M3.25 4A2.25 2.25 0 001 6.25v7.5A2.25 2.25 0 003.25 16h7.5A2.25 2.25 0 0013 13.75v-7.5A2.25 2.25 0 0010.75 4h-7.5z",
+      "M19 4.75a.75.75 0 0 0-1.28-.53l-3.22 3.22v5.12l3.22 3.22a.75.75 0 0 0 1.28-.53V4.75Z"
+    ]
+
+  defp tool_glyph("table"),
+    do: [
+      "M.99 5.24A2.25 2.25 0 013.25 3h13.5A2.25 2.25 0 0119 5.25v9.5A2.25 2.25 0 0116.75 17H3.25A2.25 2.25 0 011 14.75v-9.5l-.01-.01ZM2.5 7.5V9h5V7.5h-5Zm6.5 0V9h8.5V7.5H9Zm8.5 3H9V12h8.5v-1.5Zm0 3H9V15h7.75a.75.75 0 0 0 .75-.75v-.75Zm-10 1.5V13.5h-5v.75c0 .414.336.75.75.75H7.5Zm-5-3h5V10.5h-5V12Z"
+    ]
+
+  defp tool_glyph("callout"),
+    do: [
+      "M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM9 9a.75.75 0 0 0 0 1.5h.253a.25.25 0 0 1 .244.304l-.459 2.066A1.75 1.75 0 0 0 10.747 15H11a.75.75 0 0 0 0-1.5h-.253a.25.25 0 0 1-.244-.304l.459-2.066A1.75 1.75 0 0 0 9.253 9H9Z"
+    ]
+
+  defp tool_glyph("clipboard"),
+    do: [
+      "M13.887 3.182c.396.037.79.083 1.183.138C16.194 3.482 17 4.464 17 5.578V16.25A2.75 2.75 0 0 1 14.25 19h-8.5A2.75 2.75 0 0 1 3 16.25V5.578c0-1.114.806-2.096 1.93-2.258.393-.055.787-.101 1.183-.138A3.001 3.001 0 0 1 9 1h2c1.373 0 2.531.923 2.887 2.182ZM7.5 4A1.5 1.5 0 0 1 9 2.5h2A1.5 1.5 0 0 1 12.5 4v.5h-5V4Z"
+    ]
+
+  defp tool_glyph("download"),
+    do: [
+      "M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z",
+      "M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z"
+    ]
+
+  defp tool_glyph("fullscreen"),
+    do: [
+      "M3 4.25A1.25 1.25 0 0 1 4.25 3h3a.75.75 0 0 1 0 1.5h-2.5a.25.25 0 0 0-.25.25v2.5a.75.75 0 0 1-1.5 0v-3Zm10-.5a.75.75 0 0 1 .75-.75h3A1.25 1.25 0 0 1 18 4.25v3a.75.75 0 0 1-1.5 0v-2.5a.25.25 0 0 0-.25-.25h-2.5a.75.75 0 0 1-.75-.75ZM3.75 12.25a.75.75 0 0 1 .75.75v2.5c0 .138.112.25.25.25h2.5a.75.75 0 0 1 0 1.5h-3A1.25 1.25 0 0 1 3 16v-3a.75.75 0 0 1 .75-.75Zm13 0a.75.75 0 0 1 .75.75v3A1.25 1.25 0 0 1 16.25 17h-3a.75.75 0 0 1 0-1.5h2.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 .75-.75Z"
+    ]
+
+  defp tool_glyph("eye"),
+    do: [
+      "M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z",
+      "M.664 10.59a1.651 1.651 0 0 1 0-1.186A10.004 10.004 0 0 1 10 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0 1 10 17c-4.257 0-7.893-2.66-9.336-6.41ZM14 10a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z"
+    ]
+
+  defp tool_glyph("sparkles"),
+    do: [
+      "M15.98 1.804a1 1 0 0 0-1.96 0l-.24 1.192a1 1 0 0 1-.784.785l-1.192.238a1 1 0 0 0 0 1.962l1.192.238a1 1 0 0 1 .785.785l.238 1.192a1 1 0 0 0 1.962 0l.238-1.192a1 1 0 0 1 .785-.785l1.192-.238a1 1 0 0 0 0-1.962l-1.192-.238a1 1 0 0 1-.785-.785l-.238-1.192ZM6.949 5.684a1 1 0 0 0-1.898 0l-.683 2.051a1 1 0 0 1-.633.633l-2.051.683a1 1 0 0 0 0 1.898l2.051.684a1 1 0 0 1 .633.632l.683 2.051a1 1 0 0 0 1.898 0l.683-2.051a1 1 0 0 1 .633-.633l2.051-.683a1 1 0 0 0 0-1.898l-2.051-.683a1 1 0 0 1-.633-.633L6.95 5.684Z"
+    ]
+
+  # Every overflow trigger uses the ellipsis — they all mean "more of this
+  # section", and the toolbar's section dividers are what distinguish them.
+  defp tool_glyph("ellipsis"),
+    do: [
+      "M3 10a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0Zm5.5 0a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0Zm5.5 0a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0Z"
+    ]
+
+  defp tool_glyph("squares-plus"),
+    do: [
+      "M3.75 3A1.75 1.75 0 0 0 2 4.75v3.5C2 9.216 2.784 10 3.75 10h3.5A1.75 1.75 0 0 0 9 8.25v-3.5A1.75 1.75 0 0 0 7.25 3h-3.5Z",
+      "M3.75 11A1.75 1.75 0 0 0 2 12.75v3.5c0 .966.784 1.75 1.75 1.75h3.5A1.75 1.75 0 0 0 9 16.25v-3.5A1.75 1.75 0 0 0 7.25 11h-3.5Z",
+      "M12.75 3A1.75 1.75 0 0 0 11 4.75v3.5c0 .966.784 1.75 1.75 1.75h3.5A1.75 1.75 0 0 0 18 8.25v-3.5A1.75 1.75 0 0 0 16.25 3h-3.5Z",
+      "M14.5 12.5a.75.75 0 0 0-1.5 0v1.75h-1.75a.75.75 0 0 0 0 1.5H13v1.75a.75.75 0 0 0 1.5 0V15.75h1.75a.75.75 0 0 0 0-1.5H14.5V12.5Z"
+    ]
+
+  # Unknown name → an empty slot of the same width, so a row without an
+  # icon still lines its label up with the rest.
+  defp tool_glyph(_), do: nil
 
   # -- Events from JS Hook --
 

@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.4.1
+
+### Fixed
+
+- **Toolbar icons that didn't match their tool.** Task List used a
+  chevron-left-plus-bar (an outdent glyph, nothing to do with checkboxes);
+  Remove Formatting used a bare ✕, which reads as "close this" rather than
+  "strip the styling"; Code Block was near-identical to Inline Code at
+  14px; Details/Accordion used the same bare chevron as the image-options
+  dropdown; and Blockquote used a `bars-3` that was hard to tell apart from
+  the list and indent glyphs. Spoiler moved from a filled bar to an
+  eye-slash.
+- **Dropdown menus could run off the screen.** They were plain
+  `position: absolute` with no clamping, so near a right edge or the bottom
+  of the viewport they overflowed — worst on a phone, where the tools menu
+  is twenty rows tall. Menus now clamp horizontally and flip above their
+  trigger when there's more room there, capping their height so they scroll
+  instead of overflowing.
+- **The mobile menus had no way to dismiss them.** Both are `<details>`
+  elements and stayed open until the summary was tapped again, leaving a
+  full-height menu covering the text. They now close on Escape, on an
+  outside tap, and when an item is picked.
+
+### Changed
+
+- **Every dropdown row has an icon, and they line up.** The desktop "More
+  formatting" menu had icons on 7 of its 25 rows and the mobile tools menu
+  had none at all, so labels started at a different x on almost every row —
+  most visible exactly when the responsive toolbar pushed the most items
+  into the menu. All rows now render through a shared icon component with a
+  fixed-width slot, so a row whose glyph is text (X², Ω, H) or absent still
+  aligns with the rest.
+- **Menus size to their content** (`min-w-max`) instead of the fixed
+  `w-28`/`w-36`/`w-40`/`w-44` that truncated longer labels such as
+  "Details / Accordion" once they gained a leading icon. Width is clamped
+  to the viewport on small screens.
+- **Larger touch targets on coarse pointers.** Menu rows and mobile toolbar
+  buttons go to 44px under `@media (pointer: coarse)`; desktop keeps its
+  compact rows.
+
 ## 0.4.0
 
 ### Added
