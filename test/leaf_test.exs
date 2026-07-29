@@ -150,6 +150,118 @@ defmodule LeafTest do
     assert new_socket.assigns.mode == :visual
   end
 
+  describe "inline suggestions" do
+    test "no suggestion markup when the host configures none" do
+      rendered = render_component(&Leaf.leaf_editor/1, id: "editor-1", content: "")
+
+      refute rendered =~ "data-leaf-suggestions"
+      refute rendered =~ "data-leaf-suggest"
+    end
+
+    test "trigger config renders with defaults filled in" do
+      rendered =
+        render_component(&Leaf.leaf_editor/1,
+          id: "editor-1",
+          content: "",
+          suggestions: [%{trigger: "#", label: "Tags", allow_create: true}]
+        )
+
+      assert rendered =~ "data-leaf-suggestions"
+      assert rendered =~ ~s(data-trigger="#")
+      assert rendered =~ ~s(data-label="Tags")
+      assert rendered =~ ~s(data-allow-create="true")
+      assert rendered =~ ~s(data-boundary="word_start")
+      assert rendered =~ ~s(data-min-chars="0")
+      assert rendered =~ ~s(data-debounce="150")
+      assert rendered =~ ~s(data-max-results="10")
+      assert rendered =~ ~s(data-exclude="code,link")
+    end
+
+    test "token/first_char accept a Regex or a raw character class" do
+      rendered =
+        render_component(&Leaf.leaf_editor/1,
+          id: "editor-1",
+          content: "",
+          suggestions: [%{trigger: "@", token: ~r/[a-z0-9_]/u, first_char: "[a-z]"}]
+        )
+
+      assert rendered =~ ~s(data-token="[a-z0-9_]")
+      assert rendered =~ ~s(data-first-char="[a-z]")
+    end
+
+    test "string keys work and entries without a trigger are dropped" do
+      rendered =
+        render_component(&Leaf.leaf_editor/1,
+          id: "editor-1",
+          content: "",
+          suggestions: [%{"trigger" => "/", "label" => "Components"}, %{label: "nope"}]
+        )
+
+      assert rendered =~ ~s(data-trigger="/")
+      assert rendered =~ ~s(data-label="Components")
+      refute rendered =~ ~s(data-label="nope")
+    end
+
+    test "multiple triggers survive normalization in order" do
+      configs = Leaf.normalized_suggestions([%{trigger: "#"}, %{trigger: "@"}])
+
+      assert Enum.map(configs, & &1.trigger) == ["#", "@"]
+    end
+
+    test "an explicit empty insert_suffix is kept, a missing one defaults to a space" do
+      assert [%{insert_suffix: ""}] =
+               Leaf.normalized_suggestions([%{trigger: "#", insert_suffix: ""}])
+
+      assert [%{insert_suffix: " "}] = Leaf.normalized_suggestions([%{trigger: "#"}])
+    end
+
+    test "suggest event forwards trigger, query and seq to the host" do
+      socket = base_socket([])
+
+      assert {:noreply, _socket} =
+               Leaf.handle_event(
+                 "suggest",
+                 %{"trigger" => "#", "query" => "eli", "seq" => 7},
+                 socket
+               )
+
+      assert_received {:leaf_suggest,
+                       %{editor_id: "editor-1", trigger: "#", query: "eli", seq: 7}}
+    end
+
+    test ":suggestions reply echoes the request and normalizes results" do
+      socket = base_socket([])
+
+      assert {:ok, new_socket} =
+               Leaf.update(
+                 %{
+                   action: :suggestions,
+                   trigger: "#",
+                   query: "eli",
+                   seq: 7,
+                   results: [
+                     %{value: "elixir", label: "#elixir", sublabel: "12 posts"},
+                     "phoenix",
+                     %{"label" => "erlang", "icon" => "hero-hashtag"},
+                     %{sublabel: "no value at all"}
+                   ]
+                 },
+                 socket
+               )
+
+      assert [["leaf-suggestions:editor-1", payload]] =
+               new_socket.private.live_temp.push_events
+
+      assert %{trigger: "#", query: "eli", seq: 7} = payload
+
+      assert payload.results == [
+               %{value: "elixir", label: "#elixir", sublabel: "12 posts", icon: ""},
+               %{value: "phoenix", label: "phoenix", sublabel: "", icon: ""},
+               %{value: "erlang", label: "erlang", sublabel: "", icon: "hero-hashtag"}
+             ]
+    end
+  end
+
   defp base_socket(opts) do
     %Socket{
       assigns: %{

@@ -24,7 +24,7 @@ Add `leaf` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:leaf, "~> 0.2.0"}
+    {:leaf, "~> 0.4.0"}
   ]
 end
 ```
@@ -51,7 +51,7 @@ If you prefer not to use the `deps/` import path (e.g., non-standard project str
 ```javascript
 // Load Leaf from CDN
 const script = document.createElement("script");
-script.src = "https://cdn.jsdelivr.net/gh/alexdont/leaf@v0.3.2/priv/static/assets/leaf.js";
+script.src = "https://cdn.jsdelivr.net/gh/alexdont/leaf@v0.4.0/priv/static/assets/leaf.js";
 script.onload = () => {
   // Leaf is now available at window.LeafHooks
 };
@@ -122,8 +122,67 @@ Then use it in your templates:
 | `loading_preset` | atom | `:random` | Pre-mount loading label preset: `:random` picks from `:unpuzzling`, `:brewing`, `:polishing`, `:composing`, `:crafting`, `:tidying`. `:default` shows plain `"Loading…"` |
 | `loading_text` | string | `nil` | Custom loading label; takes precedence over `loading_preset` when set |
 | `upload_handler` | any | `nil` | Hint that the consumer supports uploads. When set, the main image button asks the parent for an upload via `:leaf_insert_request`; when `nil`, it opens the by-URL dialog directly |
+| `suggestions` | list | `[]` | Inline-suggestion trigger configs — see [Inline suggestions](#inline-suggestions) |
 | `class` | string | `nil` | Extra classes for the wrapper |
 | `script_nonce` | string | `""` | CSP nonce for the inline `<style>` block |
+
+### Inline suggestions
+
+The editor can offer a popup as the writer types a trigger character — `#` for
+tags, `@` for people, `/` for components, `:` for emoji. It knows nothing about
+any of those: it detects a configured trigger, asks the host what matches,
+renders the list and inserts the pick. Works in all four modes.
+
+```heex
+<.leaf_editor
+  id="post-editor"
+  content={@content}
+  suggestions={[
+    %{
+      trigger: "#",
+      boundary: :word_start,
+      token: ~r/[\p{L}\p{N}_-]/u,
+      first_char: ~r/\p{L}/u,
+      max_length: 30,
+      allow_create: true,
+      insert_suffix: " ",
+      label: "Tags"
+    }
+  ]}
+/>
+```
+
+```elixir
+def handle_info({:leaf_suggest, %{editor_id: id, trigger: "#", query: q, seq: seq}}, socket) do
+  results =
+    Enum.map(my_tag_source(q), fn tag ->
+      %{value: tag.name, label: "##{tag.name}", sublabel: "#{tag.count} posts", icon: "hero-hashtag"}
+    end)
+
+  send_update(Leaf, id: id, action: :suggestions, trigger: "#", query: q, seq: seq, results: results)
+  {:noreply, socket}
+end
+```
+
+Every config key but `:trigger` is optional; keys may be atoms or strings.
+`:boundary` (`:word_start` / `:line_start` / `:any`), `:token`, `:first_char`,
+`:min_chars`, `:max_length`, `:debounce`, `:max_results`, `:allow_create`,
+`:keep_trigger`, `:insert_suffix`, `:label` and `:exclude` are documented in
+full in the `Leaf` moduledoc.
+
+Two rules matter more than the shape: **echo `trigger`, `query` and `seq` back
+unchanged** so the client can drop replies a later keystroke superseded, and
+know that **typing is never blocked** — a host that never answers gets a short
+spinner and then the popup closes on its own.
+
+By default the popup stays shut inside fenced/inline code, inside a markdown
+link destination (`[jump](#section)`) and after a non-space character (URL
+fragments like `/page#section`). ↑/↓ move, Enter and Tab accept, Escape
+dismisses; while it is open Enter neither inserts a newline, nor continues a
+list, nor submits the surrounding form.
+
+A runnable two-trigger example (`#` tags and `/` components) lives in the
+demo app's `HomeLive`.
 
 ### Messages to Parent
 
@@ -144,6 +203,11 @@ def handle_info({:leaf_mode_changed, %{editor_id: id, mode: mode}}, socket) do
   # Mode switched between :visual and :markdown
   {:noreply, socket}
 end
+
+def handle_info({:leaf_suggest, %{editor_id: id, trigger: t, query: q, seq: seq}}, socket) do
+  # Only sent when `suggestions` is configured — see "Inline suggestions"
+  {:noreply, socket}
+end
 ```
 
 ### Commands from Parent
@@ -157,6 +221,16 @@ send_update(Leaf, id: "my-editor", action: :set_content, content: "# New content
 
 # Switch mode programmatically
 send_update(Leaf, id: "my-editor", action: :set_mode, mode: :markdown)
+
+# Answer a {:leaf_suggest, …} request (echo trigger/query/seq back unchanged)
+send_update(Leaf,
+  id: "my-editor",
+  action: :suggestions,
+  trigger: "#",
+  query: "eli",
+  seq: 7,
+  results: [%{value: "elixir", label: "#elixir", sublabel: "12 posts", icon: "hero-hashtag"}]
+)
 ```
 
 ## Gettext (optional)

@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.4.0
+
+### Added
+
+- **Inline suggestions (`suggestions` assign).** The editor can offer a popup
+  as the writer types a trigger character — `#` for tags, `@` for people, `/`
+  for components, `:` for emoji. It knows nothing about any of those: it
+  detects a configured trigger, asks the host what matches via
+  `{:leaf_suggest, %{editor_id, trigger, query, seq}}`, and the host replies
+  with `send_update(Leaf, action: :suggestions, ...)`. Works in all four
+  modes. Per-trigger config covers `:boundary`, `:token`, `:first_char`,
+  `:min_chars`, `:max_length`, `:debounce`, `:max_results`, `:allow_create`,
+  `:keep_trigger`, `:insert_suffix`, `:label` and `:exclude`; several
+  triggers can run in one editor, nearest-to-caret wins. Omitting
+  `suggestions` adds no markup, no listeners and no event registration.
+
+  Stale replies are dropped by matching trigger + query + seq, because
+  keystrokes routinely outrun a round trip. Typing is never blocked: a host
+  that never answers gets a short spinner and then the popup closes on its
+  own. The popup is portaled to `<body>`, anchored to the caret (hidden
+  mirror for the textareas, `Range` rects for the contenteditable), flips
+  above when there is no room below, and never fires mid-IME-composition.
+  ↑/↓ wrap, Enter and Tab accept, Escape dismisses; while it is open Enter
+  neither inserts a newline, nor continues a list, nor submits the
+  surrounding form. Full ARIA combobox wiring with a polite live region,
+  applied only while the popup is open. By default it stays shut inside
+  fenced and inline code, inside a markdown link destination, and after a
+  non-space character.
+
+### Fixed
+
+- **Toolbar and programmatic edits no longer destroy the browser's undo
+  stack.** The markdown-mode helpers assigned `textarea.value` directly,
+  which clears undo history wholesale — after any toolbar action, Ctrl/Cmd+Z
+  restored neither the action nor the typing that preceded it. They now go
+  through `document.execCommand("insertText")` over a selected range, with
+  the old assignment plus a synthetic `input` event as a fallback. Type,
+  apply a toolbar action, undo: the action is reverted and the typed text
+  survives.
+- **`#hashtag` at the start of a line is no longer eaten by heading
+  detection.** The hybrid engine treated the space after `#` as optional, so
+  `#elixir` previewed as `<h1>elixir</h1>` while the server stored a plain
+  paragraph — and leaving the block serialized it back out as a real
+  `# elixir` heading, silently destroying the tag.
+
+### Changed
+
+- **Heading formatting now appears only once the space is typed.** `# Notes`
+  is a heading; `#`, `##` and `#notes` are paragraphs. Previously a bare hash
+  run retagged the block immediately, which made every hashtag flash into h1
+  styling on its first keystroke and back out on the second. One consequence:
+  a line holding nothing but hashes previews as a paragraph while MDEx still
+  renders it as an (empty, invisible) heading.
+
 ## 0.3.2
 
 ### Fixed

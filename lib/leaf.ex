@@ -34,6 +34,125 @@ defmodule Leaf do
   - `{:leaf_changed, %{editor_id, markdown, html}}` — Content updated
   - `{:leaf_insert_request, %{editor_id, type: :image | :video}}` — Insert requested
   - `{:leaf_mode_changed, %{editor_id, mode: :visual | :markdown}}` — Mode switched
+  - `{:leaf_suggest, %{editor_id, trigger, query, seq}}` — Inline suggestion
+    requested (only when `suggestions` is configured; see below)
+
+  ## Inline Suggestions
+
+  The editor can offer a popup as the writer types a trigger character —
+  `#` for tags, `@` for people, `/` for components, `:` for emoji. It knows
+  nothing about any of those: it detects a configured trigger, asks the host
+  what matches, renders the list and inserts the pick.
+
+      <.leaf_editor
+        id="post-content-editor"
+        content={@content}
+        suggestions={[
+          %{
+            trigger: "#",
+            boundary: :word_start,
+            token: ~r/[\\p{L}\\p{N}_-]/u,
+            first_char: ~r/\\p{L}/u,
+            max_length: 30,
+            min_chars: 0,
+            debounce: 150,
+            max_results: 10,
+            allow_create: true,
+            insert_suffix: " ",
+            label: "Tags"
+          }
+        ]}
+      />
+
+  Every key but `:trigger` is optional. Keys may be atoms or strings, and
+  `:token` / `:first_char` take either a `Regex` or a raw character-class
+  string.
+
+  | Key | Default | Meaning |
+  | --- | --- | --- |
+  | `:trigger` | — | Required. The character(s) that open the popup. |
+  | `:boundary` | `:word_start` | Where a token may start: `:word_start` (start of input, whitespace or `(`), `:line_start`, or `:any`. |
+  | `:token` | `~r/[\\p{L}\\p{N}_-]/u` | Characters that continue the token. Typing anything else closes the popup. |
+  | `:first_char` | none | Extra constraint on the first character after the trigger. |
+  | `:min_chars` | `0` | Query length before the popup opens. `0` opens on the bare trigger. |
+  | `:max_length` | unlimited | Longest token that still counts. |
+  | `:debounce` | `150` | Milliseconds before the query goes to the host. |
+  | `:max_results` | `10` | Rows rendered from the host's reply. |
+  | `:allow_create` | `false` | Adds a "Create …" row when nothing matches exactly. |
+  | `:keep_trigger` | `true` | Whether the accepted text keeps the trigger. `#` and `@` keep it; a `/` command menu sets `false` so `/im` becomes `<Image />`, not `/<Image />`. |
+  | `:insert_suffix` | `" "` | Appended after the accepted value. |
+  | `:label` | none | Heading shown above the list. |
+  | `:exclude` | `[:code, :link]` | Contexts where the popup must not open. |
+
+  ### The round trip
+
+  A request arrives as a message to the host LiveView, and the reply goes
+  back through `send_update/2` — the same shape as every other Leaf command:
+
+      def handle_info({:leaf_suggest, %{editor_id: id, trigger: "#", query: q, seq: seq}}, socket) do
+        results =
+          Enum.map(Hashtags.suggest(socket.assigns.group, q, limit: 10), fn tag ->
+            %{value: tag.name, label: "#" <> tag.name, sublabel: "\#{tag.count} posts", icon: "hero-hashtag"}
+          end)
+
+        send_update(Leaf, id: id, action: :suggestions, trigger: "#", query: q, seq: seq, results: results)
+        {:noreply, socket}
+      end
+
+  Results may also be plain strings (`["elixir", "phoenix"]`). `:icon` is a
+  CSS class name (the heroicons convention) and is rendered only when given,
+  so an app without that plugin never shows an empty gutter.
+
+  Two rules outrank the shape of any of this:
+
+  - **Stale replies are dropped.** Keystrokes routinely outrun a round trip,
+    so echo `trigger`, `query` and `seq` back unchanged — the client matches
+    on all three and ignores anything superseded.
+  - **Typing is never blocked.** A host that never answers gets a short
+    spinner and then the popup closes on its own. A hand-typed `#tag` is
+    already valid; this is an enhancement over something that works without
+    it.
+
+  ### What the popup will not do
+
+  With `exclude: [:code, :link]` (the default) the popup stays shut inside
+  fenced and inline code, inside a markdown link/image destination
+  (`[jump](#section)`), and — via the `:word_start` boundary — after a
+  non-space character, which covers URL fragments like `/page#section`.
+  The checks are client-side approximations: in the visual and hybrid modes
+  they ask the DOM for `<code>` / `<pre>` / `<a>` ancestors, in the markdown
+  and HTML modes they count delimiters. A stray popup is cosmetic — nothing
+  is ever written to the document except by accepting a row.
+
+  One case worth knowing about `#` specifically. In markdown a heading is
+  `#` followed by a **space** — `# Notes` is a heading, `#notes` is a
+  paragraph containing a tag, and the editor's hybrid preview agrees with
+  MDEx on this. But a lone `#` on an otherwise empty line is a valid (empty)
+  heading, so with `min_chars: 0` that single keystroke both renders as a
+  heading and opens the tag popup. It resolves itself on the next character:
+  a letter makes it a tag, a space makes it a heading. Set `min_chars: 1` if
+  you would rather the popup never appear in that ambiguous moment.
+
+  ### Interaction
+
+  ↑/↓ move (wrapping), Enter and Tab accept, Escape dismisses. While the
+  popup is open Enter neither inserts a newline, nor continues a list, nor
+  submits the surrounding form. Clicking a row does not steal focus from the
+  editor. The popup is portaled to `<body>`, anchored to the caret, flips
+  above it when there is no room below, and never opens mid-IME-composition.
+
+  ### Testing a trigger
+
+  The popup lives entirely on the client, so a LiveView test drives the
+  server half directly:
+
+      render_hook(view, "suggest", %{"trigger" => "#", "query" => "eli", "seq" => 1})
+      assert_receive {:leaf_suggest, %{trigger: "#", query: "eli", seq: 1}}
+
+  Popup DOM carries stable hooks for browser-level tests: the popup is
+  `#\#{editor_id}-suggest`, rows are `[data-leaf-suggest-index]` and carry
+  `data-leaf-suggest-value` and `data-leaf-suggest-kind`
+  (`"result"` / `"create"`).
 
   ## Security Note
 
@@ -115,6 +234,7 @@ defmodule Leaf do
     values: [nil, :saved, :saving, :unsaved]
   )
 
+  attr(:suggestions, :list, default: [])
   attr(:gettext_backend, :any, default: nil)
   attr(:upload_handler, :any, default: nil)
   attr(:sync_input_name, :string, default: nil)
@@ -169,6 +289,7 @@ defmodule Leaf do
      |> assign_new(:export, fn -> false end)
      |> assign_new(:protect_navigation, fn -> false end)
      |> assign_new(:save_status, fn -> nil end)
+     |> assign_new(:suggestions, fn -> [] end)
      |> assign_new(:gettext_backend, fn -> nil end)
      |> assign_new(:readonly, fn -> false end)
      |> assign_new(:upload_handler, fn -> nil end)
@@ -235,6 +356,19 @@ defmodule Leaf do
      })}
   end
 
+  # Reply to a `{:leaf_suggest, …}` request. `trigger`, `query` and `seq` are
+  # echoed straight back so the client can drop replies that a later keystroke
+  # already superseded — keystrokes routinely outrun a server round trip.
+  def update(%{action: :suggestions} = assigns, socket) do
+    {:ok,
+     push_event(socket, "leaf-suggestions:#{socket.assigns.id}", %{
+       trigger: to_string(Map.get(assigns, :trigger, "")),
+       query: to_string(Map.get(assigns, :query, "")),
+       seq: Map.get(assigns, :seq),
+       results: normalize_suggestion_results(Map.get(assigns, :results, []))
+     })}
+  end
+
   def update(%{action: :flush}, socket) do
     {:ok, push_event(socket, "leaf-command:#{socket.assigns.id}", %{action: "flush"})}
   end
@@ -271,6 +405,9 @@ defmodule Leaf do
   def render(assigns) do
     Process.put(:leaf_gettext_backend, assigns[:gettext_backend])
 
+    assigns =
+      assign(assigns, :suggest_configs, normalized_suggestions(assigns[:suggestions] || []))
+
     ~H"""
     <div
       id={@id}
@@ -303,6 +440,38 @@ defmodule Leaf do
       data-deny-html-mode={to_string(:html_mode in @deny)}
     >
       {loading_state_style_tag(@height, @script_nonce)}
+
+      <%!-- Inline-suggestion trigger configs. Rendered only when the host
+           passes `suggestions`, so an editor without them gets exactly the
+           markup (and exactly the listeners) it got before this existed. --%>
+      <div
+        :if={@suggest_configs != []}
+        hidden
+        data-leaf-suggestions
+        data-t-searching={t("Searching…")}
+        data-t-no-matches={t("No matches")}
+        data-t-create={t("Create")}
+        data-t-results={t("results")}
+      >
+        <span
+          :for={s <- @suggest_configs}
+          data-leaf-suggest
+          data-trigger={s.trigger}
+          data-boundary={s.boundary}
+          data-token={s.token}
+          data-first-char={s.first_char}
+          data-min-chars={s.min_chars}
+          data-max-length={s.max_length}
+          data-debounce={s.debounce}
+          data-max-results={s.max_results}
+          data-allow-create={s.allow_create}
+          data-keep-trigger={s.keep_trigger}
+          data-insert-suffix={s.insert_suffix}
+          data-label={s.label}
+          data-exclude={s.exclude}
+        >
+        </span>
+      </div>
 
       <%!-- Toolbar --%>
       <div
@@ -1700,6 +1869,21 @@ defmodule Leaf do
     {:noreply, socket |> assign(:mode, mode_atom) |> assign(:content, content)}
   end
 
+  def handle_event("suggest", %{"trigger" => trigger, "query" => query} = params, socket) do
+    send(
+      self(),
+      {:leaf_suggest,
+       %{
+         editor_id: socket.assigns.id,
+         trigger: trigger,
+         query: query,
+         seq: Map.get(params, "seq")
+       }}
+    )
+
+    {:noreply, socket}
+  end
+
   def handle_event("insert_request", %{"type" => type}, socket) do
     type_atom = String.to_existing_atom(type)
 
@@ -1820,6 +2004,119 @@ defmodule Leaf do
   # component, etc.) without the LiveView crashing on an unmatched event.
   def handle_event("media_ui_opened", _params, socket), do: {:noreply, socket}
   def handle_event("media_ui_closed", _params, socket), do: {:noreply, socket}
+
+  # -- Inline suggestions --
+
+  @default_suggestion_token "[\\p{L}\\p{N}_-]"
+  @suggestion_boundaries ~w(word_start line_start any)
+
+  @doc false
+  # Turn the host's `suggestions` list into the flat string map the template
+  # writes out as data attributes. Everything is optional but `:trigger`;
+  # entries without one are dropped rather than shipped half-configured.
+  #
+  # Keys may be atoms or strings, and `:token` / `:first_char` accept either a
+  # `Regex` (whose source is extracted) or a raw character-class string, so
+  # `token: ~r/[\p{L}\p{N}_-]/u` and `token: "[a-z]"` both work.
+  def normalized_suggestions(list) when is_list(list) do
+    list
+    |> Enum.map(&normalize_suggestion/1)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  def normalized_suggestions(_), do: []
+
+  defp normalize_suggestion(spec) when is_map(spec) do
+    case to_string(efetch(spec, :trigger) || "") do
+      "" ->
+        nil
+
+      trigger ->
+        %{
+          trigger: trigger,
+          boundary: suggestion_boundary(efetch(spec, :boundary)),
+          token: char_class(efetch(spec, :token), @default_suggestion_token),
+          first_char: char_class(efetch(spec, :first_char), nil),
+          min_chars: non_neg_int(efetch(spec, :min_chars), 0),
+          max_length: non_neg_int(efetch(spec, :max_length), 0),
+          debounce: non_neg_int(efetch(spec, :debounce), 150),
+          max_results: non_neg_int(efetch(spec, :max_results), 10),
+          allow_create: to_string(efetch(spec, :allow_create) == true),
+          keep_trigger: to_string(efetch(spec, :keep_trigger) != false),
+          insert_suffix: suggestion_suffix(efetch(spec, :insert_suffix)),
+          label: to_string(efetch(spec, :label) || ""),
+          exclude: suggestion_exclusions(efetch(spec, :exclude))
+        }
+    end
+  end
+
+  defp normalize_suggestion(_), do: nil
+
+  defp suggestion_boundary(nil), do: "word_start"
+
+  defp suggestion_boundary(value) do
+    string = to_string(value)
+    if string in @suggestion_boundaries, do: string, else: "word_start"
+  end
+
+  # `nil` means "not configured"; an explicit "" means "no suffix".
+  defp suggestion_suffix(nil), do: " "
+  defp suggestion_suffix(value), do: to_string(value)
+
+  # Default exclusions match what a markdown parser would ignore anyway:
+  # fenced/inline code and markdown link/image destinations. URL fragments
+  # (`…/page#section`) are already excluded by the `:word_start` boundary.
+  defp suggestion_exclusions(nil), do: "code,link"
+
+  defp suggestion_exclusions(list) when is_list(list),
+    do: Enum.map_join(list, ",", &to_string/1)
+
+  defp suggestion_exclusions(value), do: to_string(value)
+
+  defp char_class(nil, default), do: default
+  defp char_class(%Regex{} = regex, _default), do: Regex.source(regex)
+  defp char_class(value, _default) when is_binary(value), do: value
+  defp char_class(_, default), do: default
+
+  defp non_neg_int(value, _default) when is_integer(value) and value >= 0, do: value
+  defp non_neg_int(_, default), do: default
+
+  # Host replies may be plain strings (`["elixir"]`) or maps with any mix of
+  # atom/string keys. Normalize to the shape the client renders, dropping
+  # anything without a usable value.
+  defp normalize_suggestion_results(results) when is_list(results) do
+    results
+    |> Enum.map(&normalize_suggestion_result/1)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp normalize_suggestion_results(_), do: []
+
+  defp normalize_suggestion_result(value) when is_binary(value) do
+    %{value: value, label: value, sublabel: "", icon: ""}
+  end
+
+  defp normalize_suggestion_result(result) when is_map(result) do
+    value = efetch(result, :value) || efetch(result, :label)
+
+    case value && to_string(value) do
+      nil ->
+        nil
+
+      "" ->
+        nil
+
+      value ->
+        %{
+          value: value,
+          label: to_string(efetch(result, :label) || value),
+          sublabel: to_string(efetch(result, :sublabel) || ""),
+          icon: to_string(efetch(result, :icon) || "")
+        }
+    end
+  end
+
+  defp normalize_suggestion_result(_), do: nil
 
   # -- Helpers --
 

@@ -504,6 +504,68 @@
     ".leaf-grip-tooltip.leaf-grip-tooltip-visible {",
     "  opacity: 1; transform: translateY(0);",
     "}",
+
+    // Inline-suggestion popup (#tag / @user / :emoji / …). Portaled to
+    // <body> while open, so it can't be clipped by a scrollable panel or
+    // covered by a sticky admin header. Colors come from the daisyUI CSS
+    // variables the rest of the editor uses, with plain-CSS fallbacks, so
+    // it themes and dark-modes with the host without a Tailwind build.
+    ".leaf-suggest-popup {",
+    "  position: fixed; z-index: 100001;",
+    "  min-width: 12rem; max-width: 22rem;",
+    "  background: var(--color-base-100, #ffffff);",
+    "  color: var(--color-base-content, #1f2937);",
+    "  border: 1px solid var(--color-base-300, #d1d5db);",
+    "  border-radius: 0.5rem;",
+    "  box-shadow: 0 8px 24px rgba(0,0,0,0.16), 0 2px 6px rgba(0,0,0,0.08);",
+    "  overflow: hidden;",
+    "  font: 400 0.8125rem/1.4 ui-sans-serif, system-ui, -apple-system, sans-serif;",
+    "}",
+    ".leaf-suggest-list { max-height: 14rem; overflow-y: auto; }",
+    ".leaf-suggest-heading {",
+    "  padding: 0.3rem 0.6rem; font-size: 0.6875rem; font-weight: 600;",
+    "  text-transform: uppercase; letter-spacing: 0.04em;",
+    "  opacity: 0.55;",
+    "  border-bottom: 1px solid var(--color-base-300, #d1d5db);",
+    "}",
+    ".leaf-suggest-row {",
+    "  display: flex; align-items: center; gap: 0.45rem;",
+    "  width: 100%; padding: 0.35rem 0.6rem;",
+    "  cursor: pointer; text-align: left;",
+    "}",
+    ".leaf-suggest-row[aria-selected='true'] {",
+    "  background: color-mix(in oklab, var(--color-base-content, #1f2937) 10%, transparent);",
+    "}",
+    ".leaf-suggest-row .leaf-suggest-text {",
+    "  flex: 1 1 auto; min-width: 0;",
+    "  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;",
+    "}",
+    ".leaf-suggest-row .leaf-suggest-sub {",
+    "  flex: 0 0 auto; margin-left: 0.5rem;",
+    "  font-size: 0.6875rem; opacity: 0.55;",
+    "}",
+    ".leaf-suggest-row .leaf-suggest-icon {",
+    "  flex: 0 0 auto; width: 1em; height: 1em;",
+    "  background-color: currentColor; opacity: 0.55;",
+    "}",
+    ".leaf-suggest-create { border-top: 1px solid var(--color-base-300, #d1d5db); }",
+    ".leaf-suggest-note {",
+    "  display: flex; align-items: center; gap: 0.4rem;",
+    "  padding: 0.4rem 0.6rem; opacity: 0.6; font-size: 0.75rem;",
+    "}",
+    ".leaf-suggest-spinner {",
+    "  width: 0.75rem; height: 0.75rem; border-radius: 50%;",
+    "  border: 2px solid currentColor; border-right-color: transparent;",
+    "  animation: leaf-suggest-spin 0.6s linear infinite;",
+    "}",
+    "@keyframes leaf-suggest-spin { to { transform: rotate(360deg); } }",
+    ".leaf-suggest-sr {",
+    "  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;",
+    "  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;",
+    "}",
+    "@media (prefers-reduced-motion: reduce) {",
+    "  .leaf-suggest-spinner { animation-duration: 2s; }",
+    "}",
   ].join("\n");
 
   function injectStyles() {
@@ -975,17 +1037,65 @@
   // Markdown textarea helpers
   // =========================================================================
 
+  // Replace [start, end) in a textarea WITHOUT destroying the browser's
+  // native undo stack.
+  //
+  // Assigning `textarea.value` (what every helper below used to do) clears
+  // the undo history wholesale: after a programmatic write, Ctrl/Cmd+Z
+  // restores neither the programmatic edit nor the typing that preceded it.
+  // For a toolbar that is fine-ish; for suggestion accepts it is not —
+  // using the feature once would silently disable undo for the rest of the
+  // session.
+  //
+  // `document.execCommand("insertText")` inserts at the current selection
+  // and pushes a proper undo entry, so the whole stack survives. It is
+  // formally deprecated but remains the only cross-browser way to make an
+  // undoable programmatic edit to a <textarea> (the InputEvent /
+  // beforeinput path has no "apply this edit for me" counterpart). Every
+  // engine we target still implements it; when it is missing or refuses
+  // (returns false / throws) we fall back to the old value assignment plus
+  // a synthetic `input` event, so callers keep working — just without undo.
+  function replaceRange(textarea, start, end, text, selStart, selEnd) {
+    textarea.focus();
+    textarea.setSelectionRange(start, end);
+
+    var ok = false;
+    try {
+      if (text === "") {
+        // insertText with an empty string is a no-op in some engines, so an
+        // empty replacement has to go through the delete command instead.
+        ok = end > start ? document.execCommand("delete", false, null) : true;
+      } else {
+        ok = document.execCommand("insertText", false, text);
+      }
+    } catch (e) {
+      ok = false;
+    }
+
+    if (!ok) {
+      var v = textarea.value;
+      textarea.value = v.substring(0, start) + text + v.substring(end);
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+
+    if (selStart != null) {
+      textarea.setSelectionRange(selStart, selEnd == null ? selStart : selEnd);
+    }
+  }
+
   function markdownFormat(textarea, before, after, pushFn) {
     var start = textarea.selectionStart;
     var end = textarea.selectionEnd;
-    var text = textarea.value;
-    var selected = text.substring(start, end);
+    var selected = textarea.value.substring(start, end);
 
-    textarea.value =
-      text.substring(0, start) + before + selected + after + text.substring(end);
-    textarea.selectionStart = start + before.length;
-    textarea.selectionEnd = end + before.length;
-    textarea.focus();
+    replaceRange(
+      textarea,
+      start,
+      end,
+      before + selected + after,
+      start + before.length,
+      end + before.length
+    );
     if (pushFn) pushFn(textarea.value);
   }
 
@@ -1002,23 +1112,20 @@
 
     // Toggle: if line already starts with prefix, remove it
     if (line.startsWith(prefix)) {
-      textarea.value =
-        text.substring(0, lineStart) +
-        line.substring(prefix.length) +
-        text.substring(lineEnd);
-      textarea.selectionStart = start - prefix.length;
-      textarea.selectionEnd = start - prefix.length;
+      replaceRange(
+        textarea,
+        lineStart,
+        lineEnd,
+        line.substring(prefix.length),
+        start - prefix.length
+      );
     } else {
       // Remove existing heading prefixes before adding new one
       var cleaned = line.replace(/^#{1,6}\s|^[-*+]\s|^\d+\.\s|^>\s/, "");
-      textarea.value =
-        text.substring(0, lineStart) + prefix + cleaned + text.substring(lineEnd);
       var offset = prefix.length + cleaned.length - line.length;
-      textarea.selectionStart = start + offset;
-      textarea.selectionEnd = start + offset;
+      replaceRange(textarea, lineStart, lineEnd, prefix + cleaned, start + offset);
     }
 
-    textarea.focus();
     if (pushFn) pushFn(textarea.value);
   }
 
@@ -1057,10 +1164,14 @@
       }
     });
 
-    textarea.value = text.substring(0, lineStart) + result.join("\n") + text.substring(lineEnd);
-    textarea.selectionStart = Math.max(lineStart, start + firstDelta);
-    textarea.selectionEnd = end + delta;
-    textarea.focus();
+    replaceRange(
+      textarea,
+      lineStart,
+      lineEnd,
+      result.join("\n"),
+      Math.max(lineStart, start + firstDelta),
+      end + delta
+    );
     if (pushFn) pushFn(textarea.value);
   }
 
@@ -1076,22 +1187,99 @@
     var linkText = selected || "link text";
     var md = "[" + linkText + "](" + url + ")";
 
-    textarea.value = text.substring(0, start) + md + text.substring(end);
-    textarea.selectionStart = start + 1;
-    textarea.selectionEnd = start + 1 + linkText.length;
-    textarea.focus();
+    replaceRange(textarea, start, end, md, start + 1, start + 1 + linkText.length);
     if (pushFn) pushFn(textarea.value);
   }
 
   function markdownInsert(textarea, snippet, pushFn) {
     var start = textarea.selectionStart;
-    var text = textarea.value;
 
-    textarea.value = text.substring(0, start) + snippet + text.substring(start);
-    textarea.selectionStart = start + snippet.length;
-    textarea.selectionEnd = start + snippet.length;
-    textarea.focus();
+    replaceRange(textarea, start, start, snippet, start + snippet.length);
     if (pushFn) pushFn(textarea.value);
+  }
+
+  // =========================================================================
+  // Inline suggestions — trigger detection
+  // =========================================================================
+  //
+  // The editor knows nothing about tags, users or components: it detects a
+  // configured trigger character, asks the host what matches, renders the
+  // list, and inserts the pick. Everything below is trigger-agnostic; the
+  // rules come from the `suggestions` configs the server rendered as
+  // `[data-leaf-suggest]` nodes.
+
+  // Compile a character-class source (`[\p{L}\p{N}_-]`) into an anchored
+  // single-char matcher. Unicode property escapes need the `u` flag; engines
+  // without it fall back to a non-unicode compile, and a config that is not a
+  // valid pattern at all is treated as "no constraint" rather than crashing
+  // the hook.
+  function suggestCharClass(source) {
+    if (!source) return null;
+    try {
+      return new RegExp("^" + source + "$", "u");
+    } catch (e) {
+      try {
+        return new RegExp("^" + source + "$");
+      } catch (e2) {
+        return null;
+      }
+    }
+  }
+
+  function parseSuggestConfig(el) {
+    var trigger = el.dataset.trigger || "";
+    if (!trigger) return null;
+    var suffix = el.dataset.insertSuffix;
+    return {
+      trigger: trigger,
+      boundary: el.dataset.boundary || "word_start",
+      token: suggestCharClass(el.dataset.token || "[\\p{L}\\p{N}_-]"),
+      firstChar: suggestCharClass(el.dataset.firstChar || ""),
+      minChars: parseInt(el.dataset.minChars || "0", 10) || 0,
+      maxLength: parseInt(el.dataset.maxLength || "0", 10) || 0,
+      debounce: parseInt(el.dataset.debounce || "150", 10) || 0,
+      maxResults: parseInt(el.dataset.maxResults || "10", 10) || 10,
+      allowCreate: el.dataset.allowCreate === "true",
+      // `#tag` keeps its trigger; a `/` command menu consumes it, so `/im`
+      // becomes `<Image />` rather than `/<Image />`.
+      keepTrigger: el.dataset.keepTrigger !== "false",
+      insertSuffix: suffix == null ? " " : suffix,
+      label: el.dataset.label || "",
+      exclude: (el.dataset.exclude || "").split(",").filter(Boolean),
+    };
+  }
+
+  // Is the character before the trigger an acceptable opening boundary?
+  // `index === 0` counts as a boundary everywhere: in a textarea it means the
+  // very start of the content, and in the contenteditable it means the start
+  // of a text node (i.e. right after a block or inline element boundary).
+  function suggestBoundaryOk(boundary, index, prevChar) {
+    if (index === 0) return true;
+    if (boundary === "any") return true;
+    if (boundary === "line_start") return prevChar === "\n";
+    return /[\s(]/.test(prevChar);
+  }
+
+  function suggestTokenOk(cfg, token) {
+    if (cfg.firstChar && token.length > 0 && !cfg.firstChar.test(token.charAt(0))) {
+      return false;
+    }
+    if (!cfg.token) return true;
+    for (var i = 0; i < token.length; i++) {
+      if (!cfg.token.test(token.charAt(i))) return false;
+    }
+    return true;
+  }
+
+  // Nearest ancestor matching `selector`, searched only up to (and not past)
+  // the editor root — `Element.closest` would happily escape into the host page.
+  function suggestClosestWithin(node, root, selector) {
+    var el = node && node.nodeType === Node.TEXT_NODE ? node.parentNode : node;
+    while (el && el !== root) {
+      if (el.nodeType === Node.ELEMENT_NODE && el.matches(selector)) return el;
+      el = el.parentNode;
+    }
+    return null;
   }
 
   // =========================================================================
@@ -1208,6 +1396,10 @@
       this._setupMarkdownTextarea();
       this._setupHtmlTextarea();
       this._setupGripDoubleClick();
+      // Entirely inert unless the host passed `suggestions` — see
+      // `_setupSuggestions`: no configs means no state, no listeners and no
+      // server-event registration.
+      this._setupSuggestions();
 
       this._wordCountEl = this.el.querySelector("[data-word-count]");
       this._charCountEl = this.el.querySelector("[data-char-count]");
@@ -1299,6 +1491,12 @@
       // is mounted we own the state, so keep it pinned to "ready" through
       // any parent-triggered re-render.
       this.el.dataset.leafMountState = "ready";
+
+      // The host can add, change or drop trigger configs at runtime. This
+      // returns immediately when the config set is unchanged, so the very
+      // common case (a re-render caused by the host answering our own
+      // suggest request) never disturbs an open popup.
+      this._setupSuggestions();
 
       if (!this._visualEl) return;
       var newReadonly = this.el.dataset.readonly === "true";
@@ -1450,6 +1648,8 @@
       delete window["markdownLink_" + gid];
       delete window["markdownEditorInsert_" + gid];
       delete window["markdownIndent_" + gid];
+
+      this._teardownSuggestions();
     },
 
     // -- Markdown textarea setup --
@@ -1705,10 +1905,18 @@
       }
       this._debouncedPushVisualChange();
       this._updateCounts();
+      // Scan LAST: the hybrid passes above can rebuild the caret's block,
+      // so anything read before them would point at a detached text node.
+      this._suggestScan();
     },
 
     _onVisualKeydown: function (e) {
       if (this._readonly) return;
+
+      // While the suggestion popup is open it owns ↑/↓/Enter/Tab/Esc. This
+      // has to come first so Enter can't also run the list auto-continue
+      // further down.
+      if (this._suggestKeydown(e)) return;
 
       var mod = e.ctrlKey || e.metaKey;
 
@@ -2588,6 +2796,9 @@
           if (self.el.contains(document.activeElement)) return;
           if (!self._hasEditorFocus) return;
           self._hasEditorFocus = false;
+          // Focus genuinely left the editor — the popup goes with it. Row
+          // clicks preventDefault on mousedown, so picking never lands here.
+          self._suggestClose();
           if (self._flushOnBlur) self._flushPending();
           if (self._emitEvents) {
             self.pushEventTo(self.el, "blur", { editor_id: self._editorId });
@@ -2722,14 +2933,920 @@
     },
 
     // Insert text at the caret of a textarea, collapsing any selection.
+    // Goes through `replaceRange` so the browser's undo stack survives.
     _insertAtTextarea: function (ta, text) {
       var start = ta.selectionStart;
-      var end = ta.selectionEnd;
-      var v = ta.value;
-      ta.value = v.substring(0, start) + text + v.substring(end);
-      var pos = start + text.length;
-      ta.selectionStart = ta.selectionEnd = pos;
-      ta.focus();
+      replaceRange(ta, start, ta.selectionEnd, text, start + text.length);
+    },
+
+    // =====================================================================
+    // Inline suggestions (#tag / @user / /component / :emoji / …)
+    // =====================================================================
+    //
+    // Nothing here knows what a tag is. A trigger config says which char
+    // opens the popup, which chars continue the token, and where the token
+    // may start; the host answers `{:leaf_suggest, …}` with rows and we
+    // insert the pick. Two rules outrank the shape of any of it:
+    //
+    //   * stale replies are dropped — keystrokes routinely outrun a round
+    //     trip, so every reply is matched on trigger + query + seq;
+    //   * typing is never blocked — if the host never answers we spin
+    //     briefly and close quietly. A hand-typed `#tag` is already valid;
+    //     this is an enhancement over something that works without it.
+
+    _suggestEnabled: function () {
+      return !!(this._suggestConfigs && this._suggestConfigs.length);
+    },
+
+    _setupSuggestions: function () {
+      var self = this;
+      var nodes = this.el.querySelectorAll("[data-leaf-suggest]");
+
+      // `updated()` re-runs this on every server render, including the one
+      // caused by the host answering our own suggest request. Bail on an
+      // unchanged config set so a re-render never closes an open popup.
+      var signature = "";
+      for (var s = 0; s < nodes.length; s++) {
+        signature += nodes[s].outerHTML + "|";
+      }
+      if (this._suggestSignature === signature) return;
+      this._suggestSignature = signature;
+
+      var configs = [];
+      for (var i = 0; i < nodes.length; i++) {
+        var cfg = parseSuggestConfig(nodes[i]);
+        if (cfg) configs.push(cfg);
+      }
+
+      // The config set genuinely changed — anything on screen belongs to
+      // the old one.
+      if (this._suggestWired) this._suggestClose();
+      this._suggestConfigs = configs;
+
+      // No configs → no popup state, no listeners, no server event
+      // registration. An editor without `suggestions` behaves exactly as it
+      // did before this feature existed.
+      if (!configs.length) return;
+
+      // Listeners and the `handleEvent` registration are wired exactly once,
+      // however often the config list is swapped afterwards.
+      if (this._suggestWired) return;
+      this._suggestWired = true;
+
+      var host = this.el.querySelector("[data-leaf-suggestions]");
+      this._suggestText = {
+        searching: (host && host.dataset.tSearching) || "Searching…",
+        noMatches: (host && host.dataset.tNoMatches) || "No matches",
+        create: (host && host.dataset.tCreate) || "Create",
+        results: (host && host.dataset.tResults) || "results",
+      };
+
+      this._suggest = {
+        open: false,
+        cfg: null,
+        query: "",
+        start: 0,
+        caret: 0,
+        kind: null,
+        el: null,
+        seq: null,
+        results: [],
+        loading: false,
+        index: 0,
+      };
+      this._suggestCache = {};
+      this._suggestSeq = 0;
+      this._suggestComposing = false;
+      this._suggestBlockedKey = null;
+
+      this._onSuggestInput = function () {
+        self._suggestScan();
+      };
+      // Caret moves only ever CLOSE an open popup (opening is driven by
+      // typing), so these do nothing until something is on screen.
+      this._onSuggestCaretMove = function () {
+        if (self._suggest.open) self._suggestScan();
+      };
+      this._onSuggestKeydown = function (e) {
+        if (self._suggestKeydown(e)) return;
+      };
+      this._onSuggestCompositionStart = function () {
+        self._suggestComposing = true;
+        self._suggestClose();
+      };
+      this._onSuggestCompositionEnd = function () {
+        self._suggestComposing = false;
+        self._suggestScan();
+      };
+
+      this._suggestSurfaces = [];
+      [
+        this._getMarkdownTextarea(),
+        this._getHtmlTextarea(),
+        this._visualEl,
+      ].forEach(function (surface) {
+        if (!surface) return;
+        self._suggestSurfaces.push(surface);
+        // The contenteditable routes keydown through `_onVisualKeydown`,
+        // which calls `_suggestKeydown` itself — a second listener here
+        // would fire the handler twice and let the list auto-continue run
+        // after an accept. The textareas have no keydown handler of their
+        // own, and get one in the CAPTURE phase so Enter is swallowed
+        // before it can reach a surrounding form.
+        if (surface !== self._visualEl) {
+          surface.addEventListener("keydown", self._onSuggestKeydown, true);
+        }
+        surface.addEventListener("keyup", self._onSuggestCaretMove);
+        surface.addEventListener("click", self._onSuggestCaretMove);
+        surface.addEventListener(
+          "compositionstart",
+          self._onSuggestCompositionStart
+        );
+        surface.addEventListener(
+          "compositionend",
+          self._onSuggestCompositionEnd
+        );
+        // The contenteditable scans from `_onVisualInput`, which already
+        // runs the hybrid re-tagging passes that can rebuild the caret's
+        // text node — scanning before those would read a stale node.
+        if (surface !== self._visualEl) {
+          surface.addEventListener("input", self._onSuggestInput);
+        }
+      });
+
+      this.handleEvent(
+        "leaf-suggestions:" + this._editorId,
+        this._suggestApplyResults.bind(this)
+      );
+    },
+
+    _teardownSuggestions: function () {
+      var self = this;
+      this._suggestClose();
+      if (this._suggestSurfaces) {
+        this._suggestSurfaces.forEach(function (surface) {
+          surface.removeEventListener("keydown", self._onSuggestKeydown, true);
+          surface.removeEventListener("keyup", self._onSuggestCaretMove);
+          surface.removeEventListener("click", self._onSuggestCaretMove);
+          surface.removeEventListener(
+            "compositionstart",
+            self._onSuggestCompositionStart
+          );
+          surface.removeEventListener(
+            "compositionend",
+            self._onSuggestCompositionEnd
+          );
+          surface.removeEventListener("input", self._onSuggestInput);
+        });
+        this._suggestSurfaces = null;
+      }
+      if (this._suggestMirror && this._suggestMirror.parentNode) {
+        this._suggestMirror.parentNode.removeChild(this._suggestMirror);
+      }
+      this._suggestMirror = null;
+      this._suggestConfigs = null;
+    },
+
+    // Where the caret is, and the text in front of it. For the textareas
+    // that is the whole value up to the caret; for the contenteditable it
+    // is the caret's text node only — a token never spans element
+    // boundaries, and staying inside the node keeps the offsets we hand to
+    // `Range` valid.
+    _suggestContext: function () {
+      if (this._readonly) return null;
+
+      if (this._mode === "markdown" || this._mode === "html") {
+        var ta =
+          this._mode === "markdown"
+            ? this._getMarkdownTextarea()
+            : this._getHtmlTextarea();
+        if (!ta || document.activeElement !== ta) return null;
+        if (ta.selectionStart !== ta.selectionEnd) return null;
+        return {
+          kind: "textarea",
+          el: ta,
+          caret: ta.selectionStart,
+          before: ta.value.substring(0, ta.selectionStart),
+        };
+      }
+
+      var vis = this._visualEl;
+      if (!vis) return null;
+      var sel = window.getSelection();
+      if (!sel || !sel.rangeCount || !sel.isCollapsed) return null;
+      var range = sel.getRangeAt(0);
+      if (!vis.contains(range.startContainer)) return null;
+      if (range.startContainer.nodeType !== Node.TEXT_NODE) return null;
+
+      return {
+        kind: "ce",
+        el: vis,
+        node: range.startContainer,
+        caret: range.startOffset,
+        // contenteditable stores trailing spaces as NBSP; normalizing keeps
+        // the boundary test honest without changing any offsets.
+        before: (range.startContainer.textContent || "")
+          .substring(0, range.startOffset)
+          .replace(/\u00a0/g, " "),
+      };
+    },
+
+    // The active trigger, if any. When several configs match (an editor can
+    // carry `#` and `/` at once) the one nearest the caret wins.
+    _suggestDetect: function (ctx) {
+      var best = null;
+
+      for (var i = 0; i < this._suggestConfigs.length; i++) {
+        var cfg = this._suggestConfigs[i];
+        var index = ctx.before.lastIndexOf(cfg.trigger);
+        if (index === -1) continue;
+        if (best && index <= best.start) continue;
+
+        var prev = index > 0 ? ctx.before.charAt(index - 1) : "";
+        if (!suggestBoundaryOk(cfg.boundary, index, prev)) continue;
+
+        var token = ctx.before.substring(index + cfg.trigger.length);
+        if (cfg.maxLength && token.length > cfg.maxLength) continue;
+        if (token.length < cfg.minChars) continue;
+        if (!suggestTokenOk(cfg, token)) continue;
+        if (this._suggestExcluded(cfg, ctx, index)) continue;
+
+        best = { cfg: cfg, start: index, query: token };
+      }
+
+      return best;
+    },
+
+    // Contexts where a suggestion would insert something the markdown
+    // parser then ignores. A client-side approximation: in the
+    // contenteditable we can ask the DOM (`<code>` / `<pre>` / `<a>`
+    // ancestors), in the textareas we count delimiters. A stray popup is
+    // cosmetic; a stray insertion is not, which is why accepting is the
+    // only thing that ever writes text.
+    _suggestExcluded: function (cfg, ctx, index) {
+      var head = ctx.before.substring(0, index);
+
+      if (cfg.exclude.indexOf("code") !== -1) {
+        if (ctx.kind === "ce") {
+          if (suggestClosestWithin(ctx.node, ctx.el, "code,pre")) return true;
+        } else {
+          // Odd number of fence openers before the caret → inside a fence.
+          var fences = head.match(/^```/gm);
+          if (fences && fences.length % 2 === 1) return true;
+          // Odd number of backticks earlier on this line → inline code.
+          var lineHead = head.substring(head.lastIndexOf("\n") + 1);
+          var ticks = lineHead.match(/`/g);
+          if (ticks && ticks.length % 2 === 1) return true;
+        }
+      }
+
+      if (cfg.exclude.indexOf("link") !== -1) {
+        if (ctx.kind === "ce" && suggestClosestWithin(ctx.node, ctx.el, "a")) {
+          return true;
+        }
+        // Inside a markdown link/image destination: `[jump](#section)`.
+        // The `:word_start` boundary deliberately allows `(` so `(#tag)`
+        // works, which is exactly what lets this case through otherwise.
+        var lineStart = head.lastIndexOf("\n") + 1;
+        var line = head.substring(lineStart);
+        var open = line.lastIndexOf("](");
+        if (open !== -1 && line.indexOf(")", open) === -1) return true;
+      }
+
+      return false;
+    },
+
+    _suggestScan: function () {
+      if (!this._suggestEnabled()) return;
+      if (this._suggestComposing) return;
+
+      var ctx = this._suggestContext();
+      var hit = ctx ? this._suggestDetect(ctx) : null;
+
+      if (!hit) {
+        this._suggestClose();
+        return;
+      }
+
+      var key = hit.cfg.trigger + "\u0000" + hit.query;
+      // The token we just accepted — don't reopen on top of our own insert.
+      if (this._suggestBlockedKey === key) return;
+      this._suggestBlockedKey = null;
+
+      var st = this._suggest;
+      var same =
+        st.open &&
+        st.cfg === hit.cfg &&
+        st.query === hit.query &&
+        st.start === hit.start;
+
+      st.cfg = hit.cfg;
+      st.query = hit.query;
+      st.start = hit.start;
+      st.caret = ctx.caret;
+      st.kind = ctx.kind;
+      st.el = ctx.el;
+
+      if (same) {
+        // Typing scans twice (input, then keyup); only the first moved the
+        // caret, and measuring is the expensive half.
+        if (ctx.caret !== this._suggestPositionedAt) this._suggestPosition();
+        return;
+      }
+
+      st.open = true;
+      st.index = 0;
+
+      var cached = this._suggestCache[key];
+      if (cached) {
+        st.results = cached.slice(0, hit.cfg.maxResults);
+        st.loading = false;
+        this._suggestRender();
+        return;
+      }
+
+      st.results = [];
+      st.loading = true;
+      this._suggestRender();
+      this._suggestRequest();
+    },
+
+    _suggestRequest: function () {
+      var self = this;
+      var st = this._suggest;
+
+      clearTimeout(this._suggestTimer);
+      this._suggestTimer = setTimeout(function () {
+        if (!st.open || !st.cfg) return;
+        self._suggestSeq += 1;
+        st.seq = self._suggestSeq;
+        self.pushEventTo(self.el, "suggest", {
+          editor_id: self._editorId,
+          trigger: st.cfg.trigger,
+          query: st.query,
+          seq: st.seq,
+        });
+
+        // Never block typing: a host that never answers gets a short
+        // spinner and then the popup goes away on its own.
+        clearTimeout(self._suggestTimeout);
+        self._suggestTimeout = setTimeout(function () {
+          if (st.open && st.loading) self._suggestClose();
+        }, 5000);
+      }, st.cfg.debounce);
+    },
+
+    _suggestApplyResults: function (payload) {
+      if (!payload || !this._suggest) return;
+      var results = payload.results || [];
+
+      var key = (payload.trigger || "") + "\u0000" + (payload.query || "");
+      // Cache even a reply we're about to drop as stale — a backspace can
+      // land right back on this query a moment later.
+      var keys = Object.keys(this._suggestCache);
+      if (keys.length > 200) this._suggestCache = {};
+      this._suggestCache[key] = results;
+
+      var st = this._suggest;
+      if (!st.open || !st.cfg) return;
+      if ((payload.trigger || "") !== st.cfg.trigger) return;
+      if ((payload.query || "") !== st.query) return;
+      if (payload.seq != null && st.seq != null && payload.seq !== st.seq) {
+        return;
+      }
+
+      clearTimeout(this._suggestTimeout);
+      st.results = results.slice(0, st.cfg.maxResults);
+      st.loading = false;
+      st.index = 0;
+      this._suggestRender();
+    },
+
+    // The accept-able rows: the host's results, plus a "create" row when
+    // the config allows one and nothing matched the query exactly.
+    _suggestRows: function () {
+      var st = this._suggest;
+      if (!st.cfg) return [];
+
+      var rows = st.results.map(function (result) {
+        return { kind: "result", result: result };
+      });
+
+      if (st.cfg.allowCreate && st.query && !st.loading) {
+        var query = st.query.toLowerCase();
+        var exact = st.results.some(function (result) {
+          return String(result.value || "").toLowerCase() === query;
+        });
+        if (!exact) {
+          rows.push({
+            kind: "create",
+            result: { value: st.query, label: st.cfg.trigger + st.query },
+          });
+        }
+      }
+
+      return rows;
+    },
+
+    _suggestRender: function () {
+      var self = this;
+      var st = this._suggest;
+      if (!st.open || !st.cfg) return;
+
+      if (!this._suggestEl) {
+        var popup = document.createElement("div");
+        popup.className = "leaf-suggest-popup";
+        popup.id = this._editorId + "-suggest";
+        popup.setAttribute("role", "listbox");
+        popup.dataset.leafSuggestPopup = this._editorId;
+        // mousedown (not click) + preventDefault: the caret must stay put
+        // through the press, otherwise the token we're about to replace is
+        // gone by the time we read it.
+        popup.addEventListener("mousedown", function (e) {
+          e.preventDefault();
+          var row = e.target.closest("[data-leaf-suggest-index]");
+          if (!row) return;
+          var rows = self._suggestRows();
+          var picked = rows[parseInt(row.dataset.leafSuggestIndex, 10)];
+          if (picked) self._suggestAccept(picked);
+        });
+        popup.addEventListener("mouseover", function (e) {
+          var row = e.target.closest("[data-leaf-suggest-index]");
+          if (!row) return;
+          st.index = parseInt(row.dataset.leafSuggestIndex, 10);
+          self._suggestHighlight();
+        });
+        document.body.appendChild(popup);
+        this._suggestEl = popup;
+
+        var status = document.createElement("div");
+        status.className = "leaf-suggest-sr";
+        status.setAttribute("aria-live", "polite");
+        document.body.appendChild(status);
+        this._suggestStatusEl = status;
+
+        // Capture-phase scroll fires for every scrollable ancestor and can
+        // arrive dozens of times a frame. Repositioning rebuilds the
+        // textarea caret mirror with the whole document and forces layout
+        // twice, so coalesce to one measurement per frame.
+        this._onSuggestReposition = function () {
+          if (self._suggestRaf) return;
+          self._suggestRaf = requestAnimationFrame(function () {
+            self._suggestRaf = null;
+            self._suggestPosition();
+          });
+        };
+        // Anything that isn't the popup or the surface being edited
+        // dismisses — including this editor's OWN chrome. Guarding on
+        // `self.el` instead would keep the popup open when the user clicks
+        // a mode tab or a toolbar button: those take focus without leaving
+        // the hook root, so `_onFocusOut` doesn't fire either, and the
+        // popup would linger anchored to a surface that just got hidden.
+        this._onSuggestOutside = function (e) {
+          if (popup.contains(e.target)) return;
+          var surface = self._suggest && self._suggest.el;
+          if (surface && surface.contains(e.target)) return;
+          self._suggestClose();
+        };
+        document.addEventListener("scroll", this._onSuggestReposition, true);
+        window.addEventListener("resize", this._onSuggestReposition);
+        document.addEventListener("mousedown", this._onSuggestOutside, true);
+      }
+
+      var el = this._suggestEl;
+      el.setAttribute("aria-label", st.cfg.label || st.cfg.trigger);
+      el.textContent = "";
+
+      if (st.cfg.label) {
+        var heading = document.createElement("div");
+        heading.className = "leaf-suggest-heading";
+        heading.textContent = st.cfg.label;
+        el.appendChild(heading);
+      }
+
+      var rows = this._suggestRows();
+      if (st.index >= rows.length) st.index = Math.max(0, rows.length - 1);
+
+      var list = document.createElement("div");
+      list.className = "leaf-suggest-list";
+      rows.forEach(function (row, i) {
+        list.appendChild(self._suggestRowEl(row, i));
+      });
+      el.appendChild(list);
+
+      if (st.loading) {
+        el.appendChild(
+          this._suggestNote(this._suggestText.searching, true)
+        );
+      } else if (!rows.length) {
+        el.appendChild(this._suggestNote(this._suggestText.noMatches, false));
+      }
+
+      this._suggestHighlight();
+      this._suggestPosition();
+      this._suggestAria();
+
+      if (this._suggestStatusEl && !st.loading) {
+        this._suggestStatusEl.textContent =
+          rows.length + " " + this._suggestText.results;
+      }
+    },
+
+    _suggestRowEl: function (row, index) {
+      var st = this._suggest;
+      var el = document.createElement("div");
+      el.className =
+        "leaf-suggest-row" + (row.kind === "create" ? " leaf-suggest-create" : "");
+      el.setAttribute("role", "option");
+      el.id = this._editorId + "-suggest-opt-" + index;
+      el.dataset.leafSuggestIndex = String(index);
+      el.dataset.leafSuggestValue = row.result.value;
+      el.dataset.leafSuggestKind = row.kind;
+
+      // Icons are host-supplied CSS class names (the heroicons convention
+      // the rest of the stack uses). Rendered only when one is given, so an
+      // app without that plugin never gets an empty gutter.
+      if (row.kind === "create") {
+        var plus = document.createElement("span");
+        plus.className = "leaf-suggest-icon";
+        plus.textContent = "+";
+        plus.style.backgroundColor = "transparent";
+        el.appendChild(plus);
+      } else if (row.result.icon) {
+        var icon = document.createElement("span");
+        icon.className = "leaf-suggest-icon " + row.result.icon;
+        el.appendChild(icon);
+      }
+
+      var text = document.createElement("span");
+      text.className = "leaf-suggest-text";
+      text.textContent =
+        row.kind === "create"
+          ? this._suggestText.create + " " + (row.result.label || row.result.value)
+          : row.result.label || row.result.value;
+      el.appendChild(text);
+
+      if (row.kind !== "create" && row.result.sublabel) {
+        var sub = document.createElement("span");
+        sub.className = "leaf-suggest-sub";
+        sub.textContent = row.result.sublabel;
+        el.appendChild(sub);
+      }
+
+      el.setAttribute("aria-selected", index === st.index ? "true" : "false");
+      return el;
+    },
+
+    _suggestNote: function (label, spinner) {
+      var note = document.createElement("div");
+      note.className = "leaf-suggest-note";
+      if (spinner) {
+        var dot = document.createElement("span");
+        dot.className = "leaf-suggest-spinner";
+        note.appendChild(dot);
+      }
+      var text = document.createElement("span");
+      text.textContent = label;
+      note.appendChild(text);
+      return note;
+    },
+
+    _suggestHighlight: function () {
+      var st = this._suggest;
+      if (!this._suggestEl) return;
+      var rows = this._suggestEl.querySelectorAll("[data-leaf-suggest-index]");
+      for (var i = 0; i < rows.length; i++) {
+        var selected = i === st.index;
+        rows[i].setAttribute("aria-selected", selected ? "true" : "false");
+        if (selected && rows[i].scrollIntoView) {
+          rows[i].scrollIntoView({ block: "nearest" });
+        }
+      }
+      this._suggestAria();
+    },
+
+    _suggestMove: function (delta) {
+      var st = this._suggest;
+      var count = this._suggestRows().length;
+      if (!count) return;
+      st.index = (st.index + delta + count) % count;
+      this._suggestHighlight();
+    },
+
+    // Editable-combobox wiring, applied only while the popup is open and
+    // removed on close, so a plain editor keeps its native semantics.
+    _suggestAria: function () {
+      var st = this._suggest;
+      var surface = st.el;
+      if (!surface || !this._suggestEl) return;
+      surface.setAttribute("role", "combobox");
+      surface.setAttribute("aria-autocomplete", "list");
+      surface.setAttribute("aria-expanded", "true");
+      surface.setAttribute("aria-controls", this._suggestEl.id);
+      var rows = this._suggestRows();
+      if (rows.length) {
+        surface.setAttribute(
+          "aria-activedescendant",
+          this._editorId + "-suggest-opt-" + st.index
+        );
+      } else {
+        surface.removeAttribute("aria-activedescendant");
+      }
+    },
+
+    _suggestClearAria: function () {
+      var surface = this._suggest && this._suggest.el;
+      if (!surface) return;
+      surface.removeAttribute("role");
+      surface.removeAttribute("aria-autocomplete");
+      surface.removeAttribute("aria-expanded");
+      surface.removeAttribute("aria-controls");
+      surface.removeAttribute("aria-activedescendant");
+    },
+
+    _suggestAccept: function (row) {
+      var st = this._suggest;
+      if (!st.open || !st.cfg || !row) return;
+
+      var cfg = st.cfg;
+      var value = String(row.result.value || "");
+      if (!value) return;
+      var replacement =
+        (cfg.keepTrigger ? cfg.trigger : "") + value + cfg.insertSuffix;
+
+      // Re-derive the token span from the LIVE caret. Between opening the
+      // popup and this click the hybrid engine may have rebuilt the block,
+      // or another keystroke may have landed; the stored offsets can be a
+      // frame old and replacing the wrong range is unrecoverable.
+      var ctx = this._suggestContext();
+      var hit = ctx ? this._suggestDetect(ctx) : null;
+      if (!hit || hit.cfg !== cfg) {
+        this._suggestClose();
+        return;
+      }
+
+      // Set BEFORE the edit: the insert fires `input` synchronously, which
+      // re-scans, and with an empty `insert_suffix` the fresh token would
+      // match again and reopen the popup on top of our own write.
+      this._suggestBlockedKey = cfg.trigger + "\u0000" + value;
+
+      if (ctx.kind === "textarea") {
+        replaceRange(
+          ctx.el,
+          hit.start,
+          ctx.caret,
+          replacement,
+          hit.start + replacement.length
+        );
+        this._updateCounts();
+      } else {
+        var range = document.createRange();
+        range.setStart(ctx.node, hit.start);
+        range.setEnd(ctx.node, ctx.caret);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        ctx.el.focus();
+
+        var ok = false;
+        try {
+          ok = document.execCommand("insertText", false, replacement);
+        } catch (e) {
+          ok = false;
+        }
+        if (!ok) {
+          range.deleteContents();
+          var node = document.createTextNode(replacement);
+          range.insertNode(node);
+          range.setStartAfter(node);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+
+        this._debouncedPushVisualChange();
+        this._updateCounts();
+      }
+
+      this._suggestClose();
+    },
+
+    _suggestKeydown: function (e) {
+      if (!this._suggestEnabled()) return false;
+      var st = this._suggest;
+      if (!st.open) return false;
+      // Mid-composition the keydown is the IME's, not the user's.
+      if (this._suggestComposing || e.isComposing || e.keyCode === 229) {
+        return false;
+      }
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        this._suggestClose();
+        return true;
+      }
+
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        if (!this._suggestRows().length) return false;
+        e.preventDefault();
+        e.stopPropagation();
+        this._suggestMove(e.key === "ArrowDown" ? 1 : -1);
+        return true;
+      }
+
+      if (e.key === "Enter" || e.key === "Tab") {
+        var rows = this._suggestRows();
+        // Nothing to accept (still loading, or no matches): let the key do
+        // its normal job rather than swallowing a keystroke.
+        if (!rows.length) {
+          this._suggestClose();
+          return false;
+        }
+        // stopPropagation as well as preventDefault: Enter must not reach
+        // the list auto-continue, and must not submit a surrounding form.
+        e.preventDefault();
+        e.stopPropagation();
+        this._suggestAccept(rows[st.index]);
+        return true;
+      }
+
+      return false;
+    },
+
+    _suggestClose: function () {
+      clearTimeout(this._suggestTimer);
+      clearTimeout(this._suggestTimeout);
+
+      var st = this._suggest;
+      if (st) {
+        this._suggestClearAria();
+        st.open = false;
+        st.cfg = null;
+        st.query = "";
+        st.results = [];
+        st.loading = false;
+        st.index = 0;
+        st.seq = null;
+        st.el = null;
+      }
+
+      if (this._suggestEl && this._suggestEl.parentNode) {
+        this._suggestEl.parentNode.removeChild(this._suggestEl);
+      }
+      this._suggestEl = null;
+      if (this._suggestStatusEl && this._suggestStatusEl.parentNode) {
+        this._suggestStatusEl.parentNode.removeChild(this._suggestStatusEl);
+      }
+      this._suggestStatusEl = null;
+
+      if (this._onSuggestReposition) {
+        document.removeEventListener("scroll", this._onSuggestReposition, true);
+        window.removeEventListener("resize", this._onSuggestReposition);
+        this._onSuggestReposition = null;
+      }
+      if (this._suggestRaf) {
+        cancelAnimationFrame(this._suggestRaf);
+        this._suggestRaf = null;
+      }
+      this._suggestPositionedAt = null;
+      if (this._onSuggestOutside) {
+        document.removeEventListener("mousedown", this._onSuggestOutside, true);
+        this._onSuggestOutside = null;
+      }
+    },
+
+    _suggestPosition: function () {
+      var el = this._suggestEl;
+      if (!el) return;
+      var rect = this._suggestCaretRect();
+      if (!rect) return;
+
+      var margin = 6;
+      el.style.visibility = "hidden";
+      el.style.left = "0px";
+      el.style.top = "0px";
+      var width = el.offsetWidth;
+      var height = el.offsetHeight;
+
+      var vw = window.innerWidth;
+      // visualViewport height shrinks when the mobile keyboard opens, so
+      // this is what makes the popup flip above the caret on phones.
+      var vh = window.visualViewport
+        ? window.visualViewport.height
+        : window.innerHeight;
+
+      var left = Math.max(margin, Math.min(rect.left, vw - width - margin));
+      var top = rect.bottom + 4;
+      if (top + height > vh - margin) {
+        var above = rect.top - height - 4;
+        top = above >= margin ? above : Math.max(margin, vh - height - margin);
+      }
+
+      el.style.left = left + "px";
+      el.style.top = top + "px";
+      el.style.visibility = "";
+      this._suggestPositionedAt = this._suggest.caret;
+    },
+
+    _suggestCaretRect: function () {
+      var st = this._suggest;
+      if (!st.el) return null;
+
+      if (st.kind === "textarea") {
+        return this._textareaCaretRect(st.el, st.caret);
+      }
+
+      var sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return null;
+      var range = sel.getRangeAt(0).cloneRange();
+      range.collapse(true);
+      var rects = range.getClientRects();
+      if (rects.length) return rects[0];
+      var box = range.getBoundingClientRect();
+      if (box && (box.top || box.left || box.height)) return box;
+      // Collapsed range in an empty element: no marker-node insertion
+      // here — mutating the document to measure it would dirty the buffer
+      // and fire an input event. The block's own rect is close enough.
+      var block = suggestClosestWithin(
+        range.startContainer,
+        st.el,
+        "p,li,h1,h2,h3,h4,h5,h6,blockquote,pre,div"
+      );
+      return (block || st.el).getBoundingClientRect();
+    },
+
+    // Caret coordinates inside a <textarea>, via the standard hidden-mirror
+    // technique: a div that copies every metric affecting text layout, is
+    // filled with the text up to the caret, and carries a marker span whose
+    // offset within the mirror is the caret's offset within the textarea.
+    // Survives soft wrapping and textarea scrolling; recomputed on every
+    // reposition so resize / zoom stay correct.
+    _textareaCaretRect: function (ta, index) {
+      var mirror = this._suggestMirror;
+      if (!mirror) {
+        mirror = document.createElement("div");
+        mirror.setAttribute("aria-hidden", "true");
+        document.body.appendChild(mirror);
+        this._suggestMirror = mirror;
+      }
+
+      var cs = window.getComputedStyle(ta);
+      [
+        "boxSizing",
+        "width",
+        "borderTopWidth",
+        "borderRightWidth",
+        "borderBottomWidth",
+        "borderLeftWidth",
+        "paddingTop",
+        "paddingRight",
+        "paddingBottom",
+        "paddingLeft",
+        "fontStyle",
+        "fontVariant",
+        "fontWeight",
+        "fontStretch",
+        "fontSize",
+        "fontFamily",
+        "lineHeight",
+        "letterSpacing",
+        "wordSpacing",
+        "textTransform",
+        "textIndent",
+        "textAlign",
+        "tabSize",
+      ].forEach(function (prop) {
+        mirror.style[prop] = cs[prop];
+      });
+      mirror.style.position = "absolute";
+      mirror.style.top = "0";
+      mirror.style.left = "-9999px";
+      mirror.style.height = "auto";
+      mirror.style.visibility = "hidden";
+      mirror.style.whiteSpace = "pre-wrap";
+      mirror.style.wordWrap = "break-word";
+      mirror.style.overflowWrap = "break-word";
+
+      mirror.textContent = ta.value.substring(0, index);
+      var marker = document.createElement("span");
+      // Non-empty content so the span has a box; the remaining text keeps
+      // the wrap point identical to the real textarea.
+      marker.textContent = ta.value.substring(index) || ".";
+      mirror.appendChild(marker);
+
+      var taRect = ta.getBoundingClientRect();
+      var lineHeight =
+        parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.25 || 16;
+      var top = taRect.top + marker.offsetTop - ta.scrollTop;
+      var left = taRect.left + marker.offsetLeft - ta.scrollLeft;
+
+      return {
+        top: top,
+        left: left,
+        bottom: top + lineHeight,
+        height: lineHeight,
+      };
     },
 
     // If `text` is exactly one preserved custom tag (<Hero .../> or
@@ -3042,6 +4159,10 @@
           if (newMode === self._mode) return;
 
           self._dismissLinkPopover();
+          // The popup is anchored to the surface we're about to hide, and
+          // its ARIA lives on that element. (`set_mode` from the server
+          // routes through this same click, so this covers it too.)
+          self._suggestClose();
 
           var oldMode = self._mode;
           self._syncModes(oldMode, newMode);
@@ -4302,7 +5423,7 @@
         var afFirst = this._firstTextDescendant(li);
         if (afFirst) {
           var afTask = afFirst.textContent
-            .replace(/ /g, " ")
+            .replace(/\u00a0/g, " ")
             .match(/^\[([ xX]?)\] /);
           if (afTask) {
             li.classList.add("leaf-task");
@@ -7002,7 +8123,7 @@
         // (Block-level patterns like `# ` are literal text inside a list
         // item, so we run only the inline scan on the body.)
         var liM = sourceText
-          .replace(/ /g, " ")
+          .replace(/\u00a0/g, " ")
           .match(/^(- |\d+\. )(\[([ xX])\] )?/);
         var liMarkerLen = liM ? liM[0].length : 0;
         var liIsTask = !!(liM && liM[2]);
@@ -7206,13 +8327,27 @@
       var kind = "p";
       var blockPrefixLen = 0;
 
-      // Detect leading `#`s (1-6, not followed by a 7th) optionally
-      // followed by a single space. We accept `##` *without* a trailing
-      // space so the block retags to h2 the moment the second `#` lands,
-      // not after the user types the space. The negative lookahead
-      // `(?!#)` makes the count exact — a 7-hash prefix leaves the
-      // block as a plain paragraph.
-      var headingMatch = text.match(/^(#{1,6})(?!#)( ?)/);
+      // Detect leading `#`s (1-6, not followed by a 7th) followed by a
+      // REQUIRED space or tab. The negative lookahead `(?!#)` makes the
+      // count exact — a 7-hash prefix leaves the block as a plain
+      // paragraph.
+      //
+      // The separator being required is what makes `#hashtag` work at the
+      // start of a line. This used to treat the space as optional, so
+      // `#hashtag` rendered as `<h1>hashtag</h1>` on the client while the
+      // server stored a plain paragraph — and exiting the block
+      // serialized it back out as a real `# hashtag` heading, silently
+      // destroying the tag.
+      //
+      // A bare `#` (or `##`) with nothing after it is deliberately NOT
+      // treated as a heading either, even though CommonMark counts it as
+      // an empty one. Accepting it made the block flash into h1 styling
+      // on the first keystroke of every hashtag and then drop back out on
+      // the second — the formatting should only appear once the space
+      // that actually commits to a heading has been typed. The cost is
+      // that a line holding nothing but hashes previews as a paragraph
+      // while MDEx would render an (invisible, empty) heading.
+      var headingMatch = text.match(/^(#{1,6})(?!#)[ \t]/);
       if (headingMatch) {
         kind = "h" + headingMatch[1].length;
         blockPrefixLen = headingMatch[0].length;
@@ -7520,11 +8655,11 @@
       var text = sourceText.replace(/\u00a0/g, " ");
       var tagName = "p";
 
-      // Heading: leading `#`s (1-6, no 7th) optionally followed by a
-      // single space. Matches the same `_scanSource` regex so the
-      // live-edit display and the rendered form agree — typing `##h`
-      // still exits to `<h2>h</h2>`, not `<p>##h</p>`.
-      var headingMatch = text.match(/^(#{1,6})(?!#) ?(.*)$/);
+      // Heading: leading `#`s (1-6, no 7th) followed by a required space
+      // or tab. Kept in lockstep with `_scanSource` so the live-edit
+      // display and the rendered form agree. `##h` exits to `<p>##h</p>`,
+      // matching what the server actually stores.
+      var headingMatch = text.match(/^(#{1,6})(?!#)[ \t](.*)$/);
       if (headingMatch) {
         tagName = "h" + headingMatch[1].length;
         text = headingMatch[2];
