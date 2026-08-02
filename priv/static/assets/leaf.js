@@ -24,6 +24,14 @@
 
   window.LeafHooks = window.LeafHooks || {};
 
+  // Version of this bundle. Kept in lockstep with mix.exs's @version by
+  // test/js_version_test.exs, and compared against the server-rendered
+  // `data-leaf-js-version` on mount — a host that VENDORS this file into
+  // its own asset pipeline gets a copy that silently stays behind after
+  // `mix deps.update leaf`, and a stale bundle looks exactly like a
+  // current one until something it doesn't implement quietly no-ops.
+  window.LeafHooks.version = "0.5.0";
+
   // =========================================================================
   // Reveal hidden spoilers on click (works for any .leaf-spoiler on the page,
   // not just inside an editor — so consumer-rendered output works too).
@@ -129,16 +137,62 @@
     "  outline-offset: 2px;",
     "}",
 
-    // Atomic preserved blocks (custom/unknown tags) — rendered as a
-    // non-editable chip so the underlying XML can't be corrupted in place.
+    // Atomic preserved blocks (custom/unknown tags) — non-editable, so the
+    // underlying XML can't be corrupted in place, but NOT opaque: the
+    // block form shows the tag's attributes, a thumbnail for any image-ish
+    // attribute, and its children rendered as formatted text. A chip that
+    // only said "⧉ Hero" hid exactly the content people open a document
+    // to read.
     ".content-editor-visual .leaf-atomic {",
-    "  display: inline-block; vertical-align: middle; user-select: all;",
-    "  padding: 0.15em 0.55em; margin: 0.1em 0; border-radius: 0.375rem;",
+    "  user-select: all; border-radius: 0.375rem;",
     "  border: 1px dashed var(--color-base-300, #d1d5db);",
     "  background: color-mix(in oklab, var(--color-base-content, #1f2937) 6%, transparent);",
-    "  font: 600 0.8em ui-monospace, monospace; cursor: default;",
+    "  cursor: default;",
     "}",
+    ".content-editor-visual .leaf-atomic-inline {",
+    "  display: inline-block; vertical-align: middle;",
+    "  padding: 0.15em 0.55em; margin: 0.1em 0;",
+    "  font: 600 0.8em ui-monospace, monospace;",
+    "}",
+    ".content-editor-visual .leaf-atomic-block {",
+    "  display: block; padding: 0.5em 0.7em; margin: 0.5em 0;",
+    "}",
+    ".content-editor-visual .leaf-atomic-block:hover {",
+    "  border-color: color-mix(in oklab, var(--color-primary, #3b82f6) 60%, transparent);",
+    "}",
+    ".content-editor-visual .leaf-atomic-label {",
+    "  font: 600 0.8em ui-monospace, monospace;",
+    "}",
+    ".content-editor-visual .leaf-atomic-block .leaf-atomic-label { display: block; }",
     ".content-editor-visual .leaf-atomic-label::before { content: '⧉ '; opacity: 0.6; }",
+    ".content-editor-visual .leaf-atomic-attrs {",
+    "  font: 400 0.75em ui-monospace, SFMono-Regular, monospace;",
+    "  opacity: 0.6; word-break: break-word;",
+    "}",
+    ".content-editor-visual .leaf-atomic-block .leaf-atomic-attrs {",
+    "  display: block; margin-top: 0.1em;",
+    "}",
+    ".content-editor-visual .leaf-atomic-inline .leaf-atomic-attrs { margin-left: 0.4em; }",
+    ".content-editor-visual .leaf-atomic-media {",
+    "  display: block; max-height: 5rem; width: auto; max-width: 100%;",
+    "  margin: 0.4em 0 0; border-radius: 0.25rem; cursor: default;",
+    "}",
+    ".content-editor-visual .leaf-atomic-body {",
+    "  display: block; margin-top: 0.35em; font-size: 0.95em;",
+    "  border-top: 1px dashed color-mix(in oklab, var(--color-base-content, #1f2937) 15%, transparent);",
+    "  padding-top: 0.35em;",
+    "}",
+    ".content-editor-visual .leaf-atomic-body a {",
+    "  text-decoration: underline; color: var(--color-primary, #3b82f6);",
+    "}",
+    // Hashtags. Opt-in — only rendered when the host configured a `#`
+    // suggestion trigger, i.e. said that `#` means "tag" here.
+    ".content-editor-visual .leaf-hashtag {",
+    "  font-style: italic; font-weight: 500;",
+    "  color: color-mix(in oklab, var(--color-primary, #3b82f6) 85%, var(--color-base-content, #1f2937));",
+    "  background: color-mix(in oklab, var(--color-primary, #3b82f6) 10%, transparent);",
+    "  border-radius: 0.25em; padding: 0 0.2em; margin: 0 -0.05em;",
+    "}",
 
     // GFM callouts / admonitions
     ".content-editor-visual blockquote.leaf-callout {",
@@ -1275,10 +1329,19 @@
   }
 
   // Is the character before the trigger an acceptable opening boundary?
-  // `index === 0` counts as a boundary everywhere: in a textarea it means the
-  // very start of the content, and in the contenteditable it means the start
-  // of a text node (i.e. right after a block or inline element boundary).
+  // `index === 0` counts as a boundary everywhere EXCEPT `not_line_start`:
+  // in a textarea it means the very start of the content, and in the
+  // contenteditable it means the start of a text node (i.e. right after a
+  // block or inline element boundary).
+  //
+  // `not_line_start` exists for `#`, where the first column is already
+  // spoken for: `# ` opens a heading and `#tag` mid-line opens the popup.
+  // Excluding column zero leaves no keystroke where both are live.
   function suggestBoundaryOk(boundary, index, prevChar) {
+    if (boundary === "not_line_start") {
+      if (index === 0) return false;
+      return prevChar !== "\n" && /[\s(]/.test(prevChar);
+    }
     if (index === 0) return true;
     if (boundary === "any") return true;
     if (boundary === "line_start") return prevChar === "\n";
@@ -1325,8 +1388,13 @@
       this._denyLinks = this.el.dataset.denyLinks === "true";
       this._denyImages = this.el.dataset.denyImages === "true";
       this._denyVideo = this.el.dataset.denyVideo === "true";
+      this._denyVisualMode = this.el.dataset.denyVisualMode === "true";
+      this._denyHybridMode = this.el.dataset.denyHybridMode === "true";
       this._denyMarkdownMode = this.el.dataset.denyMarkdownMode === "true";
       this._denyHtmlMode = this.el.dataset.denyHtmlMode === "true";
+      this._fallbackMode = this.el.dataset.fallbackMode || "hybrid";
+      this._hashtags = this.el.dataset.hashtags === "true";
+      this._warnStaleBundle();
       this._debounceTimer = null;
       this._markdownDebounceTimer = null;
       this._htmlDebounceTimer = null;
@@ -1412,6 +1480,7 @@
         this._setupSelectionToolbar();
       }
       this._setupImageDragAndDrop();
+      this._setupAtomicBlockEditing();
       this._setupCodeBlockTools();
       this._setupTaskLists();
       this._setupMaxlength();
@@ -1497,6 +1566,30 @@
         }.bind(this)
       );
 
+      // A re-rendered atomic block, answering `render_preserved`. The
+      // preview (attributes, thumbnail, formatted children) is built
+      // server-side because that is where the markdown renderer lives; the
+      // client only knows how to swap the finished chip into place.
+      this.handleEvent(
+        "leaf-preserved-html:" + this._editorId,
+        function (payload) {
+          var target =
+            this._pendingPreserved &&
+            this._pendingPreserved.token === payload.token
+              ? this._pendingPreserved.el
+              : null;
+          this._pendingPreserved = null;
+          if (!target || !target.parentNode || !payload.html) return;
+
+          var tmp = document.createElement("div");
+          tmp.innerHTML = payload.html;
+          var chip = tmp.firstElementChild;
+          if (chip) target.parentNode.replaceChild(chip, target);
+          this._debouncedPushVisualChange();
+          this._updateCounts();
+        }.bind(this)
+      );
+
       // Fullscreen API state reflection. The browser owns entering/exiting
       // fullscreen (user click on our button, Escape, F11, programmatic
       // exit); our DOM follows by listening to `fullscreenchange`. Attach
@@ -1537,12 +1630,23 @@
       this._denyLinks = this.el.dataset.denyLinks === "true";
       this._denyImages = this.el.dataset.denyImages === "true";
       this._denyVideo = this.el.dataset.denyVideo === "true";
+      this._denyVisualMode = this.el.dataset.denyVisualMode === "true";
+      this._denyHybridMode = this.el.dataset.denyHybridMode === "true";
       this._denyMarkdownMode = this.el.dataset.denyMarkdownMode === "true";
       this._denyHtmlMode = this.el.dataset.denyHtmlMode === "true";
+      this._fallbackMode = this.el.dataset.fallbackMode || "hybrid";
+      // A host can add or drop the `#` trigger at runtime, which is what
+      // decides whether hashtags are decorated at all.
+      this._hashtags = this.el.dataset.hashtags === "true";
 
+      // The host can widen or narrow the deny list at runtime. Falling back
+      // to a hardcoded "visual" stopped being safe once :visual itself
+      // became deniable — the server names the first allowed mode instead.
       if (!this._isModeAllowed(this._mode)) {
-        var visualTab = this.el.querySelector('[data-mode-tab="visual"]');
-        if (visualTab) visualTab.click();
+        var fallbackTab = this.el.querySelector(
+          '[data-mode-tab="' + this._fallbackMode + '"]'
+        );
+        if (fallbackTab) fallbackTab.click();
       }
 
       // Re-find drag handle after morphdom patch (element may have been replaced)
@@ -1644,6 +1748,19 @@
         this._gripTooltipCleanup();
         this._gripTooltipCleanup = null;
       }
+      if (this._onAtomicDblClick && this._visualEl) {
+        this._visualEl.removeEventListener("dblclick", this._onAtomicDblClick);
+        this._onAtomicDblClick = null;
+      }
+      if (this._onAtomicMediaError && this._visualEl) {
+        this._visualEl.removeEventListener(
+          "error",
+          this._onAtomicMediaError,
+          true
+        );
+        this._onAtomicMediaError = null;
+      }
+      this._pendingPreserved = null;
       if (this._imageDropdownMenu) {
         this._imageDropdownMenu.remove();
         this._imageDropdownMenu = null;
@@ -2891,8 +3008,21 @@
     // Force any pending debounced change to fire immediately for the
     // surface that matches the current mode. Pushing only the active
     // surface avoids clobbering server content with a stale inactive one.
-    _flushPending: function () {
+    //
+    // `ref` is the host's correlation id from `action: :flush, ref: …`. A
+    // flush's reply is otherwise an ordinary content event, indistinguish-
+    // able from the debounce firing on its own — so a host that wants to
+    // *await* the flush (save before navigating away) has nothing to wait
+    // for. When a ref is given we push one extra, dedicated event after
+    // the content event, and that becomes `{:leaf_flushed, %{ref: …}}`.
+    //
+    // It is pushed unconditionally — even when the branch above found no
+    // surface to read — because a host awaiting a reply that never comes
+    // is a worse failure than an empty one.
+    _flushPending: function (ref) {
       var id = this._editorId;
+      var flushedMarkdown = null;
+      var flushedHtml = "";
 
       if (this._mode === "markdown") {
         if (this._markdownDebounceTimer) {
@@ -2902,6 +3032,7 @@
         var mta = this._getMarkdownTextarea();
         if (mta) {
           this._syncFormInput(mta.value);
+          flushedMarkdown = mta.value;
           this.pushEventTo(this.el, "markdown_content_changed", {
             editor_id: id,
             content: mta.value,
@@ -2917,6 +3048,8 @@
         if (hta) {
           var hmd = htmlToMarkdown(hta.value || "");
           this._syncFormInput(hmd);
+          flushedMarkdown = hmd;
+          flushedHtml = hta.value;
           this.pushEventTo(this.el, "html_content_changed", {
             editor_id: id,
             content: hta.value,
@@ -2931,11 +3064,23 @@
         var html = this._visualEl.innerHTML;
         var markdown = htmlToMarkdown(html);
         this._syncFormInput(markdown);
+        flushedMarkdown = markdown;
+        flushedHtml = html;
         this.pushEventTo(this.el, "content_changed", {
           editor_id: id,
           html: html,
           markdown: markdown,
           dirty: this._computeDirty(markdown),
+        });
+      }
+
+      if (ref !== undefined && ref !== null) {
+        if (flushedMarkdown === null) flushedMarkdown = this._currentMarkdown();
+        this.pushEventTo(this.el, "flushed", {
+          editor_id: id,
+          ref: ref,
+          markdown: flushedMarkdown,
+          html: flushedHtml,
         });
       }
     },
@@ -4034,17 +4179,151 @@
       );
       if (!whole.test(trimmed)) return null;
 
-      var raw = trimmed
+      return this._buildAtomicChip(trimmed, name);
+    },
+
+    _escapeHtml: function (s) {
+      return String(s == null ? "" : s)
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;");
+    },
+
+    // A chip built on the client — for a tag inserted at the caret, and
+    // for the optimistic redraw after an in-place source edit. It is
+    // deliberately plainer than the server's: the client has no markdown
+    // renderer, so the tag's children can't be shown formatted here. The
+    // server sends back the rich version a round trip later.
+    _buildAtomicChip: function (raw, name) {
+      var attrs = this._parseTagAttrs(raw);
+      var parts = ['<span class="leaf-atomic-label">' + this._escapeHtml(name) + "</span>"];
+
+      if (attrs) {
+        parts.push('<span class="leaf-atomic-attrs">' + this._escapeHtml(attrs) + "</span>");
+      }
+
       return (
-        '<span class="leaf-atomic" contenteditable="false" data-leaf-raw="' +
-        raw +
-        '"><span class="leaf-atomic-label">' +
-        name +
-        "</span></span>"
+        '<span class="leaf-atomic leaf-atomic-block" contenteditable="false"' +
+        ' data-leaf-raw="' + this._escapeHtml(raw) + '"' +
+        ' data-leaf-tag="' + this._escapeHtml(name) + '"' +
+        ' title="' + this._escapeHtml(raw.replace(/\s+/g, " ").slice(0, 200)) + '">' +
+        parts.join("") +
+        "</span>"
+      );
+    },
+
+    // `key="value"` pairs from the OPENING tag only, as one summary line.
+    _parseTagAttrs: function (raw) {
+      var open = raw.match(/^\s*<[^>]*>/);
+      if (!open) return "";
+      var re = /([A-Za-z_:][\w.:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g;
+      var out = [];
+      var m;
+      while ((m = re.exec(open[0])) !== null && out.length < 6) {
+        var value = m[2] !== undefined ? m[2] : m[3] !== undefined ? m[3] : m[4];
+        if (value && value.length > 40) value = value.slice(0, 39) + "…";
+        out.push(m[1] + '="' + value + '"');
+      }
+      return out.join(" ");
+    },
+
+    // -- Editing an atomic block in place --
+    //
+    // A preserved tag is non-editable on purpose — that is what stops the
+    // HTML round trip from corrupting it. But "non-editable" used to mean
+    // the only way to change a `<Showcase>` was to switch to markdown mode
+    // and find it by hand, which makes the visual surfaces useless for
+    // component-heavy documents. Double-click opens a raw-source editor
+    // for just that one block: still no in-place DOM editing of the tag,
+    // still `data-leaf-raw` as the single source of truth, but reachable.
+
+    _setupAtomicBlockEditing: function () {
+      if (!this._visualEl) return;
+      var self = this;
+
+      // The chip's thumbnail is a guess from an attribute name — a wrong
+      // guess should leave no thumbnail, not a broken-image icon sitting
+      // in the writer's document. `error` doesn't bubble, hence capture.
+      this._onAtomicMediaError = function (e) {
+        var img = e.target;
+        if (img && img.classList && img.classList.contains("leaf-atomic-media")) {
+          img.remove();
+        }
+      };
+      this._visualEl.addEventListener("error", this._onAtomicMediaError, true);
+
+      if (this._readonly) return;
+
+      this._onAtomicDblClick = function (e) {
+        var chip = e.target && e.target.closest && e.target.closest(".leaf-atomic");
+        if (!chip || !self._visualEl.contains(chip)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        self._openAtomicEditor(chip);
+      };
+
+      this._visualEl.addEventListener("dblclick", this._onAtomicDblClick);
+    },
+
+    _openAtomicEditor: function (chip) {
+      var self = this;
+      var raw = chip.getAttribute("data-leaf-raw") || "";
+
+      this._openTextPrompt({
+        label: "Edit <" + (chip.getAttribute("data-leaf-tag") || "block") + "> source",
+        value: raw,
+        multiline: true,
+        placeholder: '<Component attr="value" />',
+        confirmLabel: "Save",
+        anchor: chip,
+        onSubmit: function (next) {
+          var trimmed = (next || "").trim();
+          if (!trimmed || trimmed === raw) return;
+
+          var name = (trimmed.match(/^<([A-Za-z][\w-]*)\b/) || [])[1];
+          if (!name) return;
+
+          // Redraw immediately from what the client can work out, then
+          // ask the server for the rich preview (attributes are cheap,
+          // rendered children need a markdown renderer we don't have).
+          var tmp = document.createElement("div");
+          tmp.innerHTML = self._buildAtomicChip(trimmed, name);
+          var replacement = tmp.firstElementChild;
+          if (!replacement || !chip.parentNode) return;
+          chip.parentNode.replaceChild(replacement, chip);
+
+          var token = "atomic-" + Date.now() + "-" + Math.floor(Math.random() * 1e6);
+          self._pendingPreserved = { token: token, el: replacement };
+          self.pushEventTo(self.el, "render_preserved", {
+            editor_id: self._editorId,
+            token: token,
+            raw: trimmed,
+          });
+
+          self._debouncedPushVisualChange();
+          self._updateCounts();
+        },
+      });
+    },
+
+    // A vendored copy of leaf.js drifts silently: the editor renders
+    // identically whether the bundle matches the library or is six
+    // releases behind, and the only symptom is that something quietly
+    // doesn't happen. Compare the two and say so once.
+    _warnStaleBundle: function () {
+      if (window.__leafVersionWarned) return;
+      var served = this.el.dataset.leafJsVersion;
+      var loaded = window.LeafHooks && window.LeafHooks.version;
+      if (!served || !loaded || served === loaded) return;
+
+      window.__leafVersionWarned = true;
+      console.warn(
+        "[leaf] JS bundle version " + loaded + " does not match the leaf " +
+        "library version " + served + ". If you vendored " +
+        "priv/static/assets/leaf.js into your app's assets, that copy is " +
+        "stale — re-copy it (mix phoenix_kit.update, or your own asset " +
+        "step) after updating the dependency."
       );
     },
 
@@ -4365,6 +4644,8 @@
     },
 
     _isModeAllowed: function (mode) {
+      if (mode === "visual" && this._denyVisualMode) return false;
+      if (mode === "hybrid" && this._denyHybridMode) return false;
       if (mode === "markdown" && this._denyMarkdownMode) return false;
       if (mode === "html" && this._denyHtmlMode) return false;
       return true;
@@ -5316,15 +5597,46 @@
     // a block round-tripped through source mode.
     _textWithLineBreaks: function (text) {
       if (text.indexOf("\n") === -1) {
-        return [document.createTextNode(text)];
+        return this._textWithHashtags(text);
       }
       var out = [];
       var parts = text.split("\n");
       for (var i = 0; i < parts.length; i++) {
         if (i > 0) out.push(document.createElement("br"));
-        if (parts[i]) out.push(document.createTextNode(parts[i]));
+        if (parts[i]) out = out.concat(this._textWithHashtags(parts[i]));
       }
       return out;
+    },
+
+    // `#tag` → a decoration span, so hashtags read as tags rather than
+    // prose in the rendered (non-source) form of a hybrid block. Mirrors
+    // what the server does on first render; both are gated on the host
+    // having configured a `#` suggestion trigger, so an editor that uses
+    // `#` for something else is untouched.
+    //
+    // Safe by construction: `convertNode` serializes an unknown span as
+    // its own text, and `_serializeBlockInline` recurses into it without
+    // wrapping — so the source stays `#tag` and offsets stay correct.
+    _textWithHashtags: function (text) {
+      if (!this._hashtags || !text || text.indexOf("#") === -1) {
+        return text ? [document.createTextNode(text)] : [];
+      }
+
+      var re = /(^|[\s(\[])#(\p{L}[\p{L}\p{N}_-]*)/gu;
+      var out = [];
+      var last = 0;
+      var m;
+      while ((m = re.exec(text)) !== null) {
+        var start = m.index + m[1].length;
+        if (start > last) out.push(document.createTextNode(text.slice(last, start)));
+        var span = document.createElement("span");
+        span.className = "leaf-hashtag";
+        span.textContent = "#" + m[2];
+        out.push(span);
+        last = start + 1 + m[2].length;
+      }
+      if (last < text.length) out.push(document.createTextNode(text.slice(last)));
+      return out.length ? out : [document.createTextNode(text)];
     },
 
     _buildFormattedFragment: function (text) {
@@ -9703,16 +10015,23 @@
     // page and can't be styled): a small floating dialog with one text
     // input and Cancel/OK. Enter/OK submit (the raw value, possibly "");
     // Escape/Cancel/outside-click dismiss without calling onSubmit.
-    // opts: { label, value, placeholder, anchor, onSubmit(value), onCancel() }
+    // opts: { label, value, placeholder, anchor, multiline, confirmLabel,
+    //         width, onSubmit(value), onCancel() }
+    // `multiline` swaps the input for a monospace textarea (Enter inserts a
+    // newline; Cmd/Ctrl+Enter submits) — the atomic-block source editor
+    // needs room and real line breaks.
     _openTextPrompt: function (opts) {
       var self = this;
       this._closeTextPrompt();
+      var multiline = opts.multiline === true;
+      var width = opts.width || (multiline ? 380 : 280);
 
       var dialog = document.createElement("div");
       dialog.className = "leaf-text-prompt";
       dialog.setAttribute("contenteditable", "false");
       dialog.style.cssText =
-        "position:absolute;z-index:60;background:var(--color-base-200,#e5e7eb);color:var(--color-base-content,#1f2937);border:1px solid var(--color-base-300,#d1d5db);border-radius:0.5rem;box-shadow:0 4px 16px rgba(0,0,0,0.12),0 1px 4px rgba(0,0,0,0.08);padding:0.5rem;width:280px;";
+        "position:absolute;z-index:60;background:var(--color-base-200,#e5e7eb);color:var(--color-base-content,#1f2937);border:1px solid var(--color-base-300,#d1d5db);border-radius:0.5rem;box-shadow:0 4px 16px rgba(0,0,0,0.12),0 1px 4px rgba(0,0,0,0.08);padding:0.5rem;width:" +
+        width + "px;";
 
       var label = document.createElement("div");
       label.textContent = opts.label || "";
@@ -9720,13 +10039,29 @@
         "font-size:0.72rem;font-weight:600;margin-bottom:0.3rem;opacity:0.8;";
       dialog.appendChild(label);
 
-      var input = document.createElement("input");
-      input.type = "text";
+      var input;
+      if (multiline) {
+        input = document.createElement("textarea");
+        input.rows = 4;
+        input.className = "textarea textarea-xs textarea-bordered w-full";
+        input.style.cssText =
+          "font:0.75rem/1.5 ui-monospace,SFMono-Regular,monospace;width:100%;resize:vertical;";
+      } else {
+        input = document.createElement("input");
+        input.type = "text";
+        input.className = "input input-xs input-bordered w-full";
+        input.style.cssText = "font-size:0.8rem;width:100%;";
+      }
       input.value = opts.value || "";
       input.placeholder = opts.placeholder || "";
-      input.className = "input input-xs input-bordered w-full";
-      input.style.cssText = "font-size:0.8rem;width:100%;";
       dialog.appendChild(input);
+
+      if (multiline) {
+        var hint = document.createElement("div");
+        hint.textContent = "⌘/Ctrl+Enter to save · Esc to cancel";
+        hint.style.cssText = "font-size:0.65rem;opacity:0.55;margin-top:0.25rem;";
+        dialog.appendChild(hint);
+      }
 
       var row = document.createElement("div");
       row.style.cssText =
@@ -9737,7 +10072,7 @@
       cancel.className = "btn btn-xs";
       var ok = document.createElement("button");
       ok.type = "button";
-      ok.textContent = "OK";
+      ok.textContent = opts.confirmLabel || "OK";
       ok.className = "btn btn-xs btn-primary";
       row.appendChild(cancel);
       row.appendChild(ok);
@@ -9765,6 +10100,9 @@
       });
       input.addEventListener("keydown", function (e) {
         if (e.key === "Enter") {
+          // In a multiline prompt a bare Enter is a newline — only the
+          // modifier submits.
+          if (multiline && !(e.metaKey || e.ctrlKey)) return;
           e.preventDefault();
           e.stopPropagation();
           finish(true);
@@ -12465,6 +12803,16 @@
     },
 
     _dismissImagePopover: function (skipPush) {
+      // Opening the popover moves focus into its alt-text input. Dismissing
+      // it has to hand focus back, or the caret is left nowhere: keystrokes
+      // go to a detached input and typing appears to do nothing. Only
+      // reclaim focus if it is still inside the popover we are removing —
+      // a click that landed elsewhere in the document keeps its target.
+      var reclaimFocus =
+        this._imagePopoverEl &&
+        this._imagePopoverEl.contains(document.activeElement);
+      var caretTarget = this._imagePopoverTarget;
+
       // Remove selection class
       if (this._imagePopoverTarget) {
         this._imagePopoverTarget.classList.remove("leaf-img-selected");
@@ -12482,6 +12830,29 @@
       if (this._imagePopoverTarget) {
         this._imagePopoverTarget = null;
         if (!skipPush) this._debouncedPushVisualChange();
+      }
+
+      if (reclaimFocus && this._visualEl && !this._readonly) {
+        this._visualEl.focus();
+        this._placeCaretAfterNode(caretTarget);
+      }
+    },
+
+    // Collapse the selection immediately after `node` (typically the image
+    // that was being edited), so typing continues where the writer was
+    // rather than at some remembered offset.
+    _placeCaretAfterNode: function (node) {
+      if (!node || !node.parentNode || !this._visualEl) return;
+      if (!this._visualEl.contains(node)) return;
+      try {
+        var range = document.createRange();
+        range.setStartAfter(node);
+        range.collapse(true);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      } catch (_e) {
+        // A detached or otherwise unrangeable node — focus alone is enough.
       }
     },
 
@@ -12525,6 +12896,16 @@
           this._dragHandleBlock = null;
           this._syncFormInput(content);
           this._updateCounts();
+          // Re-baseline the dirty snapshot: replacing the content
+          // programmatically (a version switch, a collaborative sync, a
+          // reload) is not a user edit, and leaving the old baseline in
+          // place makes `protect_navigation` prompt about unsaved work
+          // the writer never did. `_setupHostEvents` re-baselines after
+          // setup for exactly this reason; this is the same situation
+          // arriving later. `mark_saved: false` opts out.
+          if (payload.mark_saved !== false) {
+            this._savedContent = this._currentMarkdown();
+          }
           break;
 
         case "set_mode":
@@ -12569,7 +12950,7 @@
           break;
 
         case "flush":
-          this._flushPending();
+          this._flushPending(payload.ref);
           break;
 
         case "mark_saved":

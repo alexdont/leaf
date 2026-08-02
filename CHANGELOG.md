@@ -1,5 +1,120 @@
 # Changelog
 
+## 0.5.0
+
+### Upgrading
+
+- **Re-copy the JS bundle.** Almost everything below is a server↔client
+  contract. A vendored copy of `priv/static/assets/leaf.js`, or a CDN pin,
+  must move with the dependency — pin `@v0.5.0`. A bundle left behind is
+  otherwise silent: the editor renders identically and just stops
+  implementing things the server now expects (no `{:leaf_flushed, …}`
+  reply, no dirty re-baseline, atomic blocks styled as inline chips). Leaf
+  now warns in the console when the two disagree.
+- **The fallback for a denied mode changed** from a hardcoded `:visual` to
+  the first allowed mode. Only reachable when `mode:` names a mode the same
+  editor denies.
+- **Hosts that persist the `html` from `{:leaf_changed, …}`** (rather than
+  the markdown) and configure a `#` suggestion trigger will see
+  `<span class="leaf-hashtag">` in that HTML. The markdown is unchanged.
+
+### Added
+
+- **Atomic preserved blocks show their content.** A `preserve_tags` block
+  used to render as an opaque `⧉ Hero` chip, which hid the attributes, the
+  text and the links the tag wrapped — most of the reason to look at a
+  document at all. A block chip now shows the tag name, its attributes, a
+  thumbnail for any image-ish attribute (`image`, `poster`, `cover`, an
+  image `src`, …) and its children rendered as formatted text. The
+  serialized form is unchanged: `data-leaf-raw` still carries the verbatim
+  source, so the round trip stays byte-for-byte identical.
+- **Editing an atomic block in place.** Double-click one to open a raw
+  source editor for just that block; ⌘/Ctrl+Enter or Save commits, Escape
+  cancels. Previously the only way to change a `<Showcase>` was to switch
+  to markdown mode and hunt for it by hand, which made the visual surfaces
+  useless for component-heavy documents.
+- **A flush you can await.** `send_update(Leaf, action: :flush, ref: "…")`
+  now answers with `{:leaf_flushed, %{editor_id, ref, markdown, html}}`
+  after the matching `{:leaf_changed, …}`. A bare flush produced a reply
+  indistinguishable from the debounce firing, so save-before-navigate
+  (version switch, language switch, translation enqueue) had nothing to
+  wait for. Omitting `ref` sends no `{:leaf_flushed, …}` at all, so
+  existing hosts are untouched.
+- **`deny: [:visual_mode]` / `[:hybrid_mode]`.** The other two modes were
+  already deniable; these complete the set. A denied mode loses its tab in
+  every switcher and its `:set_mode` command is ignored, so the deny list
+  is one rule rather than a default a stray click can talk its way past.
+  Denying every mode raises; when only one survives, the switcher is hidden
+  rather than rendered as a single dead tab.
+- **A warning for undeclared custom tags.** Content holding `<Foo …>` tags
+  that are not in `preserve_tags` now logs a one-off `Logger.warning`
+  naming them and showing the declaration to paste. The visual surfaces
+  flatten undeclared tags into loose paragraphs and autosave writes that
+  back over the original — this turns silent, irreversible content loss
+  into a one-line diagnosis. Silence with
+  `config :leaf, warn_unpreserved_tags: false`.
+- **Bundle-presence and staleness checks.** Leaf does not bundle its JS
+  into the host, and an editor whose hook never attached is
+  indistinguishable from a working one at a glance. A small inline script
+  now logs a console error naming the likely causes when the hook has not
+  attached shortly after paint, and `window.LeafHooks.version` (plus
+  `Leaf.js_version/0`) catches a vendored or CDN-pinned copy that stayed
+  behind. `bundle_check={false}` turns the inline script off for hosts
+  under a CSP that allows neither it nor a `script_nonce`.
+- **`priv/gettext/leaf.pot`.** `gettext_backend` worked, but Leaf shipped
+  no catalogs and a host's `mix gettext.extract` cannot see msgids living
+  in a dependency's source — so it was wired but untranslatable in
+  practice. Copy the template in and `mix gettext.merge`. Lookups try the
+  `"leaf"` domain first and fall back to `"default"`.
+  `mix leaf.gettext.extract` regenerates it; a test fails when it drifts.
+- **Hashtag styling.** Configuring a `#` suggestion trigger also tells Leaf
+  that `#` means "tag" here, so hashtags render as tinted, slightly-italic
+  tokens in the visual and hybrid surfaces instead of reading as ordinary
+  prose. Purely a decoration — the markdown stays `#tag`. An editor with no
+  `#` trigger is left alone, so a document using `#` for issue numbers is
+  unaffected.
+- **`boundary: :not_line_start`.** For `#`, where the first column is
+  already spoken for: `# ` opens a heading and `#tag` mid-line opens the
+  popup, with no keystroke where both are live.
+- **`toolbar_extra` buttons can refuse to collapse.** `collapse: false`
+  pins a button to the main toolbar row instead of letting it fold into the
+  "More" menu, which at a two-column editor layout was essentially always.
+  `toolbar_extra` is the only way a host adds a primary action, and buried
+  under "More" those are barely more discoverable than typing the tag by
+  hand — the problem they existed to solve.
+
+### Changed
+
+- **`set_content` re-baselines the dirty snapshot.** Replacing content
+  programmatically — loading a different version, a collaborative sync, a
+  reload — is not a user edit, but the old baseline stayed put, so with
+  `protect_navigation` the writer got a prompt accusing them of unsaved
+  work they never did. Pass `mark_saved: false` for the rare case where the
+  new content really is a draft.
+- **A denied mode falls back to the first allowed one** (`:hybrid`,
+  `:visual`, `:markdown`, `:html` order) rather than to a hardcoded
+  `:visual`, which stopped being a safe default once `:visual` itself
+  became deniable.
+- **`toolbar_extra`'s `:icon` is documented as trusted markup.** It goes
+  through `raw/1` so an inline `<svg>` works, which means a host passing
+  anything user-influenced there has an XSS. Use `:glyph` for a built-in
+  icon when custom artwork isn't needed.
+
+### Fixed
+
+- **The compact and mobile mode switchers ignored the deny list.** Both
+  rendered the markdown and HTML tabs unconditionally, so denying a mode
+  only hid its inline tab — a narrow viewport was a way straight back into
+  it.
+- **Escape from the image alt-text popover left the caret nowhere.**
+  Opening the popover moves focus into its alt-text input; dismissing it
+  did not hand focus back, so keystrokes went to a detached input and
+  typing appeared to do nothing. Focus now returns to the editing surface
+  with the caret placed after the image.
+- **A chip thumbnail that fails to load removes itself** rather than
+  leaving a broken-image icon in the document — the thumbnail is a guess
+  from an attribute name, and a wrong guess should cost nothing.
+
 ## 0.4.1
 
 ### Fixed

@@ -1,0 +1,250 @@
+## Leaf editor UI strings.
+##
+## Leaf's msgids live in a dependency's source, which a host's
+## `mix gettext.extract` cannot see. Copy this file into your own
+## `priv/gettext/` and run `mix gettext.merge priv/gettext` to get
+## `<locale>/LC_MESSAGES/leaf.po` files to translate.
+##
+## Leaf looks up the "leaf" domain first and falls back to "default", so
+## you can also paste these msgids into `default.pot` instead if you would
+## rather keep one catalog.
+##
+## Regenerate with `mix leaf.gettext.extract`.
+msgid ""
+msgstr ""
+"Language: \n"
+"Plural-Forms: nplurals=2\n"
+
+msgid "Add Column Right"
+msgstr ""
+
+msgid "Add Row Below"
+msgstr ""
+
+msgid "Align Center"
+msgstr ""
+
+msgid "Align Left"
+msgstr ""
+
+msgid "Align Right"
+msgstr ""
+
+msgid "Blockquote"
+msgstr ""
+
+msgid "Bold"
+msgstr ""
+
+msgid "Bullet List"
+msgstr ""
+
+msgid "By URL"
+msgstr ""
+
+msgid "Callout"
+msgstr ""
+
+msgid "Clean up"
+msgstr ""
+
+msgid "Code Block"
+msgstr ""
+
+msgid "Column align"
+msgstr ""
+
+msgid "Columns"
+msgstr ""
+
+msgid "Components"
+msgstr ""
+
+msgid "Copy as HTML"
+msgstr ""
+
+msgid "Copy as Markdown"
+msgstr ""
+
+msgid "Create"
+msgstr ""
+
+msgid "Decrease Indent"
+msgstr ""
+
+msgid "Details / Accordion"
+msgstr ""
+
+msgid "Download .md"
+msgstr ""
+
+msgid "Emoji"
+msgstr ""
+
+msgid "Export"
+msgstr ""
+
+msgid "Format"
+msgstr ""
+
+msgid "Fullscreen"
+msgstr ""
+
+msgid "HTML"
+msgstr ""
+
+msgid "HTML mode"
+msgstr ""
+
+msgid "Heading"
+msgstr ""
+
+msgid "Headings"
+msgstr ""
+
+msgid "Horizontal Rule"
+msgstr ""
+
+msgid "Hybrid"
+msgstr ""
+
+msgid "Hybrid mode"
+msgstr ""
+
+msgid "Image"
+msgstr ""
+
+msgid "Image options"
+msgstr ""
+
+msgid "Increase Indent"
+msgstr ""
+
+msgid "Inline Code"
+msgstr ""
+
+msgid "Insert"
+msgstr ""
+
+msgid "Insert Emoji"
+msgstr ""
+
+msgid "Insert Image"
+msgstr ""
+
+msgid "Insert Link"
+msgstr ""
+
+msgid "Insert Table"
+msgstr ""
+
+msgid "Insert Video"
+msgstr ""
+
+msgid "Italic"
+msgstr ""
+
+msgid "Link"
+msgstr ""
+
+msgid "Lists"
+msgstr ""
+
+msgid "Markdown"
+msgstr ""
+
+msgid "Markdown mode"
+msgstr ""
+
+msgid "Mode"
+msgstr ""
+
+msgid "More editor options"
+msgstr ""
+
+msgid "More formatting"
+msgstr ""
+
+msgid "More inserts"
+msgstr ""
+
+msgid "No matches"
+msgstr ""
+
+msgid "Numbered List"
+msgstr ""
+
+msgid "Redo"
+msgstr ""
+
+msgid "Remove Column"
+msgstr ""
+
+msgid "Remove Formatting"
+msgstr ""
+
+msgid "Remove Row"
+msgstr ""
+
+msgid "Rows"
+msgstr ""
+
+msgid "Saved"
+msgstr ""
+
+msgid "Saving…"
+msgstr ""
+
+msgid "Searching…"
+msgstr ""
+
+msgid "Spoiler"
+msgstr ""
+
+msgid "Strikethrough"
+msgstr ""
+
+msgid "Subscript"
+msgstr ""
+
+msgid "Superscript"
+msgstr ""
+
+msgid "Symbols / Date"
+msgstr ""
+
+msgid "Table"
+msgstr ""
+
+msgid "Task List"
+msgstr ""
+
+msgid "Toggle Header Row"
+msgstr ""
+
+msgid "Toggle fullscreen"
+msgstr ""
+
+msgid "Undo"
+msgstr ""
+
+msgid "Unsaved changes"
+msgstr ""
+
+msgid "Upload"
+msgstr ""
+
+msgid "Video"
+msgstr ""
+
+msgid "View"
+msgstr ""
+
+msgid "Visual"
+msgstr ""
+
+msgid "Visual mode"
+msgstr ""
+
+msgid "results"
+msgstr ""

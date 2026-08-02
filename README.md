@@ -24,7 +24,7 @@ Add `leaf` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:leaf, "~> 0.4.0"}
+    {:leaf, "~> 0.5"}
   ]
 end
 ```
@@ -51,12 +51,19 @@ If you prefer not to use the `deps/` import path (e.g., non-standard project str
 ```javascript
 // Load Leaf from CDN
 const script = document.createElement("script");
-script.src = "https://cdn.jsdelivr.net/gh/alexdont/leaf@v0.4.1/priv/static/assets/leaf.js";
+script.src = "https://cdn.jsdelivr.net/gh/alexdont/leaf@v0.5.0/priv/static/assets/leaf.js";
 script.onload = () => {
   // Leaf is now available at window.LeafHooks
 };
 document.head.appendChild(script);
 ```
+
+> [!IMPORTANT]
+> A CDN pin (or a vendored copy of `leaf.js`) has to move in lockstep with
+> the hex dependency. The editor renders identically either way, so a bundle
+> left behind is otherwise silent — it just quietly stops implementing things
+> the server expects. Leaf compares `window.LeafHooks.version` against the
+> library version on mount and warns in the console when they disagree.
 
 ### Peer Requirements
 
@@ -114,7 +121,9 @@ Then use it in your templates:
 | `mode` | `:hybrid` \| `:visual` \| `:markdown` \| `:html` | `:hybrid` | Initial editor mode |
 | `preset` | `:advanced` \| `:simple` | `:advanced` | Toolbar preset; `:simple` is a compact subset for comments and lightweight editing |
 | `toolbar` | list | `[]` | Extra toolbar buttons (`:image`, `:video`) |
-| `deny` | list | `[]` | Disallowed features (`:links`, `:images`, `:video`, `:markdown_mode`, `:html_mode`); denied controls are hidden from the UI |
+| `deny` | list | `[]` | Disallowed features (`:links`, `:images`, `:video`, `:visual_mode`, `:hybrid_mode`, `:markdown_mode`, `:html_mode`); denied controls are hidden from the UI — see [Denying features](#denying-features) |
+| `preserve_tags` | list | `[]` | Custom component tag names to protect from the HTML round-trip — **required** for content using them, see [Custom component tags](#custom-component-tags) |
+| `toolbar_extra` | list | `[]` | Host-defined toolbar buttons — see [Host toolbar buttons](#host-toolbar-buttons) |
 | `placeholder` | string | `"Write something..."` | Placeholder text shown when the editor is empty |
 | `readonly` | boolean | `false` | Read-only mode |
 | `height` | string | `"480px"` | Editor height (the body resizes from this baseline) |
@@ -124,7 +133,95 @@ Then use it in your templates:
 | `upload_handler` | any | `nil` | Hint that the consumer supports uploads. When set, the main image button asks the parent for an upload via `:leaf_insert_request`; when `nil`, it opens the by-URL dialog directly |
 | `suggestions` | list | `[]` | Inline-suggestion trigger configs — see [Inline suggestions](#inline-suggestions) |
 | `class` | string | `nil` | Extra classes for the wrapper |
-| `script_nonce` | string | `""` | CSP nonce for the inline `<style>` block |
+| `script_nonce` | string | `""` | CSP nonce applied to the inline `<style>` block and the bundle-check `<script>` |
+| `bundle_check` | boolean | `true` | Emit the inline `<script>` that reports a JS hook that never attached. Set `false` under a CSP that forbids inline scripts and cannot supply a nonce — it is a diagnostic, nothing depends on it |
+
+### Custom component tags
+
+> [!IMPORTANT]
+> Content that uses custom tags — `<Hero />`, `<Showcase>…</Showcase>` —
+> **must** declare them in `preserve_tags`. Without it the visual and hybrid
+> surfaces flatten each one into loose paragraphs on the first keystroke, and
+> autosave writes that back over the original. Leaf logs a warning naming any
+> undeclared PascalCase tag it sees, but only the declaration protects the
+> content.
+
+```heex
+<.leaf_editor
+  id="post-editor"
+  content={@content}
+  preserve_tags={["Hero", "Showcase", "Note", "Audio", "EntityForm"]}
+/>
+```
+
+A declared tag is pulled out before the markdown parser runs, rendered as a
+non-editable **atomic block** and restored verbatim on the way back, so the
+source round-trips byte for byte.
+
+The block is not opaque — it shows the tag name, its attributes, a thumbnail
+for any image-ish attribute (`image`, `poster`, `cover`, an image `src`, …) and
+its children rendered as formatted text, so links and emphasis inside
+`<Header>…</Header>` are visible while you write. **Double-click** a block to
+edit its raw source in place; ⌘/Ctrl+Enter or Save commits, Escape cancels.
+
+Silence the warning (e.g. for content that legitimately contains prose like
+`<Not A Tag>`) with `config :leaf, warn_unpreserved_tags: false`.
+
+### Denying features
+
+`deny` removes affordances entirely — the markup is never rendered and the
+matching client paths refuse to act, so it is one rule rather than a default a
+stray click can talk its way past.
+
+| Atom | Effect |
+|---|---|
+| `:links` | No link button; `<a>` / `[…](…)` stripped from content |
+| `:images` | No image button; `<img>` / `![…](…)` stripped from content |
+| `:video` | No video button |
+| `:visual_mode` / `:hybrid_mode` / `:markdown_mode` / `:html_mode` | That mode loses its tab in **every** switcher and refuses a `:set_mode` command |
+
+A host whose documents are built from custom component tags typically wants the
+markdown surface only — the visual surfaces can't edit an atomic block's source
+anyway:
+
+```heex
+<.leaf_editor id="content-editor" mode={:markdown}
+              deny={[:visual_mode, :hybrid_mode]} … />
+```
+
+Denying the mode you also passed as `mode` falls back to the first allowed mode
+(`:hybrid`, `:visual`, `:markdown`, `:html` order). Denying *every* mode raises.
+When only one mode survives, the switcher is hidden rather than rendered as a
+single dead tab.
+
+### Host toolbar buttons
+
+`toolbar_extra` adds your own buttons; each click sends
+`{:leaf_toolbar_action, %{editor_id, id, selection}}`.
+
+```heex
+<.leaf_editor
+  id="post-editor"
+  content={@content}
+  toolbar_extra={[
+    %{id: "showcase", label: "Showcase", title: "Insert a showcase", collapse: false},
+    %{id: "footnote", label: "Footnote"}
+  ]}
+/>
+```
+
+| Key | Meaning |
+|---|---|
+| `:id` | Required; echoed back in the message |
+| `:label` / `:title` | Button text / tooltip |
+| `:icon` | **Rendered as raw markup** so an inline `<svg>` works. That makes it trusted HTML — never build it from user-influenced input |
+| `:glyph` | Name of a bundled icon, used in the overflow menus |
+| `:class` | Extra classes on the button |
+| `:collapse` | `false` pins the button to the main toolbar row instead of letting it fold into the "More" menu when the toolbar gets narrow |
+
+Use `collapse: false` for the actions your documents are actually built from —
+buried under "More" they are barely more discoverable than typing the tag by
+hand, which is the problem they existed to solve.
 
 ### Inline suggestions
 
@@ -165,10 +262,20 @@ end
 ```
 
 Every config key but `:trigger` is optional; keys may be atoms or strings.
-`:boundary` (`:word_start` / `:line_start` / `:any`), `:token`, `:first_char`,
-`:min_chars`, `:max_length`, `:debounce`, `:max_results`, `:allow_create`,
-`:keep_trigger`, `:insert_suffix`, `:label` and `:exclude` are documented in
-full in the `Leaf` moduledoc.
+`:boundary` (`:word_start` / `:line_start` / `:not_line_start` / `:any`),
+`:token`, `:first_char`, `:min_chars`, `:max_length`, `:debounce`,
+`:max_results`, `:allow_create`, `:keep_trigger`, `:insert_suffix`, `:label`
+and `:exclude` are documented in full in the `Leaf` moduledoc.
+
+`:not_line_start` exists for `#`, where the first column is already spoken for:
+`# ` opens a heading and `#tag` mid-line opens the popup, with no keystroke
+where both are live.
+
+Configuring a `#` trigger also tells Leaf that `#` means "tag" here, so
+hashtags render as tinted, slightly-italic tokens in the visual and hybrid
+surfaces instead of reading as ordinary prose. It is purely a decoration — the
+markdown stays `#tag`. An editor with no `#` trigger gets no hashtag styling,
+so a document using `#` for issue numbers is left alone.
 
 Two rules matter more than the shape: **echo `trigger`, `query` and `seq` back
 unchanged** so the client can drop replies a later keystroke superseded, and
@@ -208,7 +315,31 @@ def handle_info({:leaf_suggest, %{editor_id: id, trigger: t, query: q, seq: seq}
   # Only sent when `suggestions` is configured — see "Inline suggestions"
   {:noreply, socket}
 end
+
+def handle_info({:leaf_flushed, %{editor_id: id, ref: ref, markdown: md}}, socket) do
+  # Only sent in answer to `action: :flush, ref: …` — see "Flushing"
+  {:noreply, socket}
+end
 ```
+
+### Flushing (save before navigate)
+
+`action: :flush` tells the client to push its pending keystrokes immediately.
+On its own that reply arrives as an ordinary `{:leaf_changed, …}` —
+indistinguishable from the debounce firing — so a host that needs to *await*
+the flush (version switch, language switch, translation enqueue) passes a
+correlation `ref`:
+
+```elixir
+send_update(Leaf, id: "content-editor", action: :flush, ref: "save-42")
+
+def handle_info({:leaf_flushed, %{ref: "save-42", markdown: md}}, socket) do
+  # every keystroke is in; safe to persist and navigate
+end
+```
+
+Without a `ref` no `{:leaf_flushed, …}` is sent at all, so existing hosts keep
+their exact behaviour.
 
 ### Commands from Parent
 
@@ -216,11 +347,19 @@ end
 # Insert an image at the cursor position
 send_update(Leaf, id: "my-editor", action: :insert_image, url: "https://...", alt: "description")
 
-# Replace all content
+# Replace all content. Re-baselines the dirty snapshot by default — replacing
+# content programmatically is not a user edit, so `protect_navigation` does not
+# prompt about work the writer never did. `mark_saved: false` opts out.
 send_update(Leaf, id: "my-editor", action: :set_content, content: "# New content")
 
-# Switch mode programmatically
+# Switch mode programmatically (ignored when that mode is denied)
 send_update(Leaf, id: "my-editor", action: :set_mode, mode: :markdown)
+
+# Push pending keystrokes; `ref` makes the reply identifiable
+send_update(Leaf, id: "my-editor", action: :flush, ref: "save-42")
+
+# Mark the current content as the clean baseline
+send_update(Leaf, id: "my-editor", action: :mark_saved)
 
 # Answer a {:leaf_suggest, …} request (echo trigger/query/seq back unchanged)
 send_update(Leaf,
@@ -243,6 +382,34 @@ config :leaf, :gettext_backend, MyApp.Gettext
 ```
 
 Without this config, English strings are used as-is.
+
+Leaf's msgids live in a dependency's source, which your `mix gettext.extract`
+cannot see — so Leaf ships the catalog template instead. Copy it in and merge:
+
+```bash
+cp deps/leaf/priv/gettext/leaf.pot priv/gettext/leaf.pot
+mix gettext.merge priv/gettext
+```
+
+Then translate `priv/gettext/<locale>/LC_MESSAGES/leaf.po`. Lookups try the
+`"leaf"` domain first and fall back to `"default"`, so you can also paste the
+msgids into `default.po` and skip the extra domain.
+
+## Checking the JS bundle is present and current
+
+Leaf does not bundle its JS into the host, and an editor whose hook never
+attached is indistinguishable from a working one at a glance — it renders, it
+looks ordinary, it captures nothing. Two guards:
+
+- If the hook has not attached shortly after paint, the editor logs a console
+  error naming the likely causes and stays on its loading shimmer rather than
+  pretending to be an editor. This is Leaf's only inline `<script>`; it takes
+  `script_nonce` like the inline `<style>` does, and `bundle_check={false}`
+  turns it off entirely for hosts whose CSP allows neither.
+- `window.LeafHooks.version` reports the loaded bundle's version. Leaf compares
+  it against the library version on mount and warns on a mismatch — which is
+  what catches a **vendored** copy of `leaf.js` that stayed behind after
+  `mix deps.update leaf`. `Leaf.js_version/0` exposes the same value server-side.
 
 ## License
 

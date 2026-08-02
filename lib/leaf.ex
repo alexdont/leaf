@@ -32,10 +32,34 @@ defmodule Leaf do
   ## Messages Sent to Parent
 
   - `{:leaf_changed, %{editor_id, markdown, html}}` — Content updated
+  - `{:leaf_flushed, %{editor_id, ref, markdown, html}}` — Reply to an
+    explicit `action: :flush` that carried a `ref` (see "Flushing" below)
   - `{:leaf_insert_request, %{editor_id, type: :image | :video}}` — Insert requested
   - `{:leaf_mode_changed, %{editor_id, mode: :visual | :markdown}}` — Mode switched
   - `{:leaf_suggest, %{editor_id, trigger, query, seq}}` — Inline suggestion
     requested (only when `suggestions` is configured; see below)
+
+  ## Flushing (save before navigate)
+
+  `send_update(Leaf, id: …, action: :flush)` tells the client to push its
+  pending keystrokes immediately. On its own that reply is an ordinary
+  `{:leaf_changed, …}` — indistinguishable from the debounce firing — so a
+  host that needs to *await* the flush (version switch, language switch,
+  translation enqueue) passes a correlation `ref`:
+
+      send_update(Leaf, id: "content-editor", action: :flush, ref: "save-42")
+
+  The client echoes it back on a dedicated message, after the matching
+  `{:leaf_changed, …}`:
+
+      def handle_info({:leaf_flushed, %{ref: "save-42", markdown: md}}, socket) do
+        # every keystroke is in; safe to persist and navigate
+      end
+
+  `ref` must be JSON-encodable (a string or integer). Without a `ref` no
+  `{:leaf_flushed, …}` is sent at all, so hosts written against older
+  versions keep their exact behaviour — a `handle_info/2` that does not
+  match the new message can never be reached by accident.
 
   ## Inline Suggestions
 
@@ -71,7 +95,7 @@ defmodule Leaf do
   | Key | Default | Meaning |
   | --- | --- | --- |
   | `:trigger` | — | Required. The character(s) that open the popup. |
-  | `:boundary` | `:word_start` | Where a token may start: `:word_start` (start of input, whitespace or `(`), `:line_start`, or `:any`. |
+  | `:boundary` | `:word_start` | Where a token may start: `:word_start` (start of input, whitespace or `(`), `:line_start`, `:not_line_start` (like `:word_start`, but never the first character of a line), or `:any`. |
   | `:token` | `~r/[\\p{L}\\p{N}_-]/u` | Characters that continue the token. Typing anything else closes the popup. |
   | `:first_char` | none | Extra constraint on the first character after the trigger. |
   | `:min_chars` | `0` | Query length before the popup opens. `0` opens on the bare trigger. |
@@ -131,7 +155,19 @@ defmodule Leaf do
   heading, so with `min_chars: 0` that single keystroke both renders as a
   heading and opens the tag popup. It resolves itself on the next character:
   a letter makes it a tag, a space makes it a heading. Set `min_chars: 1` if
-  you would rather the popup never appear in that ambiguous moment.
+  you would rather the popup never appear in that ambiguous moment, or
+  `boundary: :not_line_start` to keep the popup off the first column
+  entirely — then `#` opens a heading and `#tag` mid-line opens the popup,
+  with no keystroke where both are live.
+
+  ### Hashtag styling
+
+  Configuring a `#` trigger also tells Leaf that `#` means "tag" in this
+  editor, so hashtags render as tinted, slightly-italic tokens in the
+  visual and hybrid surfaces instead of reading as ordinary prose. It is
+  purely a decoration — the markdown stays `#tag` and serialization is
+  unchanged. An editor with no `#` trigger gets no hashtag styling, so a
+  document that uses `#` for issue numbers is left alone.
 
   ### Interaction
 
@@ -154,10 +190,72 @@ defmodule Leaf do
   `data-leaf-suggest-value` and `data-leaf-suggest-kind`
   (`"result"` / `"create"`).
 
+  ## Custom component tags (`preserve_tags`)
+
+  > #### Read this before putting component tags through the editor {: .warning}
+  >
+  > Markdown holding custom tags — `<Hero />`, `<Showcase>…</Showcase>` —
+  > **must** declare them in `preserve_tags`. Without it the visual and
+  > hybrid surfaces flatten each one into loose paragraphs on the first
+  > keystroke, and autosave writes that back over the original. Leaf logs
+  > a warning (see below) the first time it sees an undeclared PascalCase
+  > tag, but the declaration is what actually protects the content.
+
+      <.leaf_editor
+        id="post-content-editor"
+        content={@content}
+        preserve_tags={["Hero", "Showcase", "Note", "Audio", "EntityForm"]}
+      />
+
+  A declared tag is pulled out before the markdown parser runs, rendered
+  as an **atomic block** — non-editable, so nothing inside it can be
+  corrupted in place — and restored verbatim on the way back out, so the
+  source round-trips byte for byte.
+
+  The block is not opaque: it shows the tag name, its attributes, a
+  thumbnail for any image-ish attribute (`src`, `image`, `poster`, …) and
+  the tag's own children rendered as formatted text — so links, emphasis
+  and images inside `<Header>…</Header>` are visible while you write.
+  **Double-click** a block to edit its raw source in place and Enter (or
+  the Save button) to commit; Escape cancels.
+
+  When `preserve_tags` is missing a tag that the content uses, Leaf emits
+  a one-off `Logger.warning` naming it. Disable with:
+
+      config :leaf, warn_unpreserved_tags: false
+
   ## Security Note
 
   The deny-list regex sanitization in this component is a UX layer only.
   Consumers must still validate and allow-list content at the persistence boundary.
+
+  ## Denying features
+
+  `deny` removes affordances entirely — the markup is never rendered, and
+  the matching client paths refuse to act, so it is one rule rather than a
+  default a stray click can talk its way past.
+
+  | Atom | Effect |
+  | --- | --- |
+  | `:links` | No link button; `<a>`/`[…](…)` stripped from content |
+  | `:images` | No image button; `<img>`/`![…](…)` stripped from content |
+  | `:video` | No video button |
+  | `:visual_mode` | No visual tab, in any switcher |
+  | `:hybrid_mode` | No hybrid tab, in any switcher |
+  | `:markdown_mode` | No markdown tab, in any switcher |
+  | `:html_mode` | No HTML tab, in any switcher |
+
+  A host whose documents are built from custom component tags typically
+  wants the markdown surface only — the visual surfaces cannot edit an
+  atomic block's source anyway:
+
+      <.leaf_editor id="content-editor" mode={:markdown}
+                    deny={[:visual_mode, :hybrid_mode]} … />
+
+  Denying the mode the host also passed as `mode` falls back to the first
+  allowed mode in `:hybrid`, `:visual`, `:markdown`, `:html` order.
+  Denying *every* mode raises — it is always a mistake. When only one mode
+  survives the switcher is hidden rather than rendered as a single dead tab.
 
   ## Commands from Parent
 
@@ -166,6 +264,14 @@ defmodule Leaf do
       send_update(Leaf, id: "my-editor", action: :insert_image, url: "https://...", alt: "description")
       send_update(Leaf, id: "my-editor", action: :set_content, content: "# Hello")
       send_update(Leaf, id: "my-editor", action: :set_mode, mode: :visual)
+      send_update(Leaf, id: "my-editor", action: :flush, ref: "save-42")
+      send_update(Leaf, id: "my-editor", action: :mark_saved)
+
+  `:set_content` re-baselines the dirty snapshot by default — replacing the
+  content programmatically is not a user edit, so an untouched editor still
+  reads clean and `protect_navigation` does not prompt. Pass
+  `mark_saved: false` to keep the old baseline (i.e. treat the new content
+  as unsaved work).
 
   ## JS Setup
 
@@ -178,6 +284,27 @@ defmodule Leaf do
         // ... your other hooks
       }
 
+  ### Checking the bundle is present and current
+
+  Leaf does not bundle its own JS into the host — an editor whose hook
+  never attaches renders, looks ordinary and does nothing at all. Two
+  things guard against losing an afternoon to that:
+
+  - If the hook has not attached shortly after paint, the editor logs a
+    console error naming the likely causes. It stays on its loading
+    shimmer rather than pretending to be an editor.
+  - `window.LeafHooks.version` reports the version of the loaded bundle.
+    Compare it against `Leaf.js_version/0` (which equals the `:leaf`
+    application version) to catch a **vendored** copy that stayed behind
+    after `mix deps.update leaf`:
+
+        if Leaf.js_version() != vendored_version_from_somewhere do
+          Logger.warning("Vendored leaf.js is stale")
+        end
+
+    The client does the same check itself whenever the server-rendered
+    `data-leaf-js-version` disagrees with the loaded bundle, and warns.
+
   ## Gettext (optional)
 
   To enable translations, configure a gettext backend:
@@ -185,11 +312,48 @@ defmodule Leaf do
       config :leaf, :gettext_backend, MyApp.Gettext
 
   Otherwise, English strings are used as-is.
+
+  Leaf ships its own catalog template at `priv/gettext/leaf.pot` — a
+  host's `mix gettext.extract` cannot see msgids living in a dependency's
+  source, so copy it in and merge instead of extracting:
+
+      cp deps/leaf/priv/gettext/leaf.pot priv/gettext/leaf.pot
+      mix gettext.merge priv/gettext
+
+  Then translate `priv/gettext/<locale>/LC_MESSAGES/leaf.po`. Lookups try
+  the `"leaf"` domain first and fall back to the `"default"` domain, so
+  hosts that would rather keep every string in `default.po` can append the
+  msgids there and skip the extra domain.
   """
 
   use Phoenix.LiveComponent
 
   import Phoenix.HTML, only: [raw: 1]
+
+  require Logger
+
+  # Mode preference order. `normalize_mode/2` falls back along this list
+  # when the requested mode is denied, so a host that denies its own
+  # `mode:` lands somewhere sensible instead of somewhere arbitrary.
+  @mode_order [:hybrid, :visual, :markdown, :html]
+
+  @doc """
+  The version of the JS bundle this library ships, as a string.
+
+  Equals the `:leaf` application version. Hosts that **vendor**
+  `priv/static/assets/leaf.js` into their own asset pipeline (rather than
+  importing it from `deps/`) can compare this against
+  `window.LeafHooks.version` to catch a copy that stayed behind after
+  `mix deps.update leaf` — the editor renders identically either way, so
+  a stale bundle is otherwise silent.
+  """
+  @spec js_version() :: String.t()
+  def js_version do
+    case :application.get_key(:leaf, :vsn) do
+      {:ok, vsn} -> List.to_string(vsn)
+      _ -> "unknown"
+    end
+  end
 
   @doc """
   Renders a Leaf editor as a function component.
@@ -210,7 +374,17 @@ defmodule Leaf do
   attr(:mode, :atom, default: :hybrid, values: [:visual, :hybrid, :markdown, :html])
   attr(:preset, :atom, default: :advanced, values: [:advanced, :simple])
   attr(:toolbar, :list, default: [])
-  attr(:deny, :list, default: [])
+
+  attr(:deny, :list,
+    default: [],
+    doc: """
+    Features to remove entirely: `:links`, `:images`, `:video`,
+    `:visual_mode`, `:hybrid_mode`, `:markdown_mode`, `:html_mode`. Denied
+    modes lose their tab in every switcher and refuse a `:set_mode`
+    command. Denying all four modes raises.
+    """
+  )
+
   attr(:placeholder, :string, default: "Write something...")
   attr(:readonly, :boolean, default: false)
   attr(:height, :string, default: "480px")
@@ -219,9 +393,41 @@ defmodule Leaf do
   attr(:debounce, :integer, default: 400)
   attr(:flush_on_blur, :boolean, default: true)
   attr(:emit_events, :boolean, default: false)
-  attr(:toolbar_extra, :list, default: [])
+
+  attr(:toolbar_extra, :list,
+    default: [],
+    doc: """
+    Host-defined toolbar buttons. Each entry is a map (atom or string
+    keys):
+
+    - `:id` — required; echoed back as `{:leaf_toolbar_action, %{id: id}}`
+    - `:label` — text shown on the button
+    - `:title` — tooltip / aria-label
+    - `:icon` — **rendered as raw markup** so an inline `<svg>` works.
+      That makes it trusted HTML: never build it from user-influenced
+      input, or you have an XSS. Use `:glyph` for a built-in icon name
+      instead when you don't need custom artwork.
+    - `:glyph` — name of a bundled icon, used in the overflow menus
+    - `:class` — extra classes on the button
+    - `:collapse` — `false` pins the button to the main toolbar row
+      instead of letting it fold into the "More" menu when the toolbar
+      gets narrow. Use it for the actions your documents are actually
+      built from; leave it unset for secondary tools.
+    """
+  )
+
   attr(:toolbar_layout, :atom, default: :fixed, values: [:fixed, :floating, :both])
-  attr(:preserve_tags, :list, default: [])
+
+  attr(:preserve_tags, :list,
+    default: [],
+    doc: """
+    Custom component tag names (`["Hero", "Showcase"]`) to protect from
+    the HTML round-trip. **Required** for any content using such tags —
+    see the "Custom component tags" section; without it the visual and
+    hybrid surfaces flatten them into loose paragraphs.
+    """
+  )
+
   attr(:maxlength, :integer, default: nil)
   attr(:spellcheck, :boolean, default: true)
   attr(:dir, :string, default: "ltr", values: ["ltr", "rtl", "auto"])
@@ -239,7 +445,27 @@ defmodule Leaf do
   attr(:upload_handler, :any, default: nil)
   attr(:sync_input_name, :string, default: nil)
   attr(:class, :string, default: nil)
-  attr(:script_nonce, :string, default: "")
+
+  attr(:script_nonce, :string,
+    default: "",
+    doc: """
+    CSP nonce applied to the inline `<style>` block and to the
+    bundle-presence `<script>` (see `:bundle_check`).
+    """
+  )
+
+  attr(:bundle_check, :boolean,
+    default: true,
+    doc: """
+    Emit the tiny inline `<script>` that logs a console error when the
+    Leaf JS hook never attaches — the difference between "the editor
+    silently does nothing" and a one-line diagnosis.
+
+    Set `false` for a host whose CSP forbids inline scripts and which
+    cannot supply a `script_nonce`; the check is a diagnostic, nothing
+    depends on it. Everything else about the editor is unaffected.
+    """
+  )
 
   attr(:loading_preset, :atom,
     default: :random,
@@ -297,7 +523,8 @@ defmodule Leaf do
      |> assign_new(:loading_preset, fn -> :random end)
      |> assign_new(:loading_text, fn -> nil end)
      |> assign_new(:class, fn -> nil end)
-     |> assign_new(:script_nonce, fn -> "" end)}
+     |> assign_new(:script_nonce, fn -> "" end)
+     |> assign_new(:bundle_check, fn -> true end)}
   end
 
   @impl true
@@ -312,13 +539,18 @@ defmodule Leaf do
      })}
   end
 
-  def update(%{action: :set_content, content: content}, socket) do
+  # Replacing the content programmatically is not a user edit, so the
+  # dirty snapshot is re-baselined alongside it — otherwise loading a
+  # different version (or a collaborative sync) leaves `protect_navigation`
+  # accusing the writer of unsaved work they never did. `mark_saved: false`
+  # opts out, for the rare case where the new content really is a draft.
+  def update(%{action: :set_content, content: content} = assigns, socket) do
     deny = Map.get(socket.assigns, :deny, [])
     sanitized_markdown = sanitize_markdown(content, deny)
 
     html =
       sanitized_markdown
-      |> markdown_to_html(preserve_tags(socket))
+      |> markdown_to_html(render_opts(socket))
       |> sanitize_html(deny)
 
     {:ok,
@@ -328,22 +560,30 @@ defmodule Leaf do
      |> push_event("leaf-command:#{socket.assigns.id}", %{
        action: "set_content",
        content: sanitized_markdown,
-       html: html
+       html: html,
+       mark_saved: Map.get(assigns, :mark_saved, true) != false
      })}
   end
 
+  # A denied mode is ignored outright rather than redirected: the deny list
+  # is one rule, not a default the host can talk its way past. (The client
+  # resolves `[data-mode-tab="…"]` to perform the switch, and that button
+  # does not exist for a denied mode, so it degrades quietly there too.)
   def update(%{action: :set_mode, mode: mode}, socket)
       when mode in [:visual, :hybrid, :markdown, :html] do
     deny = Map.get(socket.assigns, :deny, [])
-    mode = normalize_mode(mode, deny)
 
-    {:ok,
-     socket
-     |> assign(:mode, mode)
-     |> push_event("leaf-command:#{socket.assigns.id}", %{
-       action: "set_mode",
-       mode: to_string(mode)
-     })}
+    if mode_denied?(mode, deny) do
+      {:ok, socket}
+    else
+      {:ok,
+       socket
+       |> assign(:mode, mode)
+       |> push_event("leaf-command:#{socket.assigns.id}", %{
+         action: "set_mode",
+         mode: to_string(mode)
+       })}
+    end
   end
 
   def update(%{action: :insert_markdown} = assigns, socket) do
@@ -369,8 +609,17 @@ defmodule Leaf do
      })}
   end
 
-  def update(%{action: :flush}, socket) do
-    {:ok, push_event(socket, "leaf-command:#{socket.assigns.id}", %{action: "flush"})}
+  # A bare flush produces an ordinary `{:leaf_changed, …}` and nothing
+  # else — the historical behaviour. Passing `ref:` opts into a second,
+  # identifiable `{:leaf_flushed, %{ref: …}}` so a host can *await* the
+  # flush (save-before-navigate) instead of guessing which `:leaf_changed`
+  # was the answer. The ref is echoed verbatim; keep it JSON-encodable.
+  def update(%{action: :flush} = assigns, socket) do
+    {:ok,
+     push_event(socket, "leaf-command:#{socket.assigns.id}", %{
+       action: "flush",
+       ref: Map.get(assigns, :ref)
+     })}
   end
 
   def update(%{action: :mark_saved}, socket) do
@@ -386,15 +635,18 @@ defmodule Leaf do
       |> assign_new(:mode, fn -> parent_mode end)
 
     deny = Map.get(socket.assigns, :deny, [])
+    validate_deny!(deny)
     mode = normalize_mode(socket.assigns.mode, deny)
 
     socket = assign(socket, :mode, mode)
 
     socket =
       assign_new(socket, :visual_html, fn ->
+        warn_unpreserved_tags(socket.assigns.content, preserve_tags(socket))
+
         socket.assigns.content
         |> sanitize_markdown(deny)
-        |> markdown_to_html(preserve_tags(socket))
+        |> markdown_to_html(render_opts(socket))
         |> sanitize_html(deny)
       end)
 
@@ -405,8 +657,22 @@ defmodule Leaf do
   def render(assigns) do
     Process.put(:leaf_gettext_backend, assigns[:gettext_backend])
 
+    deny = assigns[:deny] || []
+    validate_deny!(deny)
+    allowed_modes = Enum.reject(@mode_order, &mode_denied?(&1, deny))
+
+    {pinned_extra, overflow_extra} =
+      Enum.split_with(assigns[:toolbar_extra] || [], &(efetch(&1, :collapse) == false))
+
     assigns =
-      assign(assigns, :suggest_configs, normalized_suggestions(assigns[:suggestions] || []))
+      assigns
+      |> assign(:suggest_configs, normalized_suggestions(assigns[:suggestions] || []))
+      |> assign(:allowed_modes, allowed_modes)
+      # A lone tab is a dead affordance — nothing to switch to. Hide the
+      # switcher entirely rather than render it.
+      |> assign(:show_mode_switcher, length(allowed_modes) > 1)
+      |> assign(:pinned_extra, pinned_extra)
+      |> assign(:overflow_extra, overflow_extra)
 
     ~H"""
     <div
@@ -433,13 +699,19 @@ defmodule Leaf do
       data-protect-navigation={to_string(@protect_navigation)}
       data-has-upload={to_string(@upload_handler != nil)}
       data-sync-input-name={@sync_input_name}
+      data-leaf-js-version={js_version()}
+      data-hashtags={to_string(hashtag_trigger?(@suggest_configs))}
       data-deny-links={to_string(:links in @deny)}
       data-deny-images={to_string(:images in @deny)}
       data-deny-video={to_string(:video in @deny)}
+      data-deny-visual-mode={to_string(:visual_mode in @deny)}
+      data-deny-hybrid-mode={to_string(:hybrid_mode in @deny)}
       data-deny-markdown-mode={to_string(:markdown_mode in @deny)}
       data-deny-html-mode={to_string(:html_mode in @deny)}
+      data-fallback-mode={to_string(List.first(@allowed_modes))}
     >
       {loading_state_style_tag(@height, @script_nonce)}
+      <%= if @bundle_check do %>{bundle_check_script_tag(@script_nonce)}<% end %>
 
       <%!-- Inline-suggestion trigger configs. Rendered only when the host
            passes `suggestions`, so an editor without them gets exactly the
@@ -761,11 +1033,15 @@ defmodule Leaf do
                         <.tool_icon name="remove-format" /><span>{t("Remove Formatting")}</span>
                       </button>
                     </li>
-                    <%= if @toolbar_extra != [] and not @readonly do %>
+                    <%!-- Only the collapsible half of toolbar_extra gets a
+                         mirror row here; buttons marked `collapse: false`
+                         stay pinned to the main row, so listing them would
+                         duplicate them. --%>
+                    <%= if @overflow_extra != [] and not @readonly do %>
                       <li class="menu-title text-xs px-2 pt-1 hidden" data-compact-overflow="extra">
                         {t("Components")}
                       </li>
-                      <%= for btn <- @toolbar_extra do %>
+                      <%= for btn <- @overflow_extra do %>
                         <li class="hidden" data-compact-overflow="extra">
                           <button type="button" data-host-action={efetch(btn, :id)}>
                             <.tool_icon name={efetch(btn, :glyph) || "squares-plus"} />
@@ -1205,21 +1481,21 @@ defmodule Leaf do
              Each click pushes "toolbar_action" with the button id + the
              current selection; the host LiveView receives
              {:leaf_toolbar_action, %{editor_id, id, selection}}. --%>
-        <%= if @toolbar_extra != [] and not @readonly do %>
+        <%!-- Buttons marked `collapse: false` are the host's primary
+             actions — the components its documents are built from — so
+             they render in a group with no `data-toolbar-overflow` key and
+             the compact CSS never folds them into the "More" menu. The
+             rest keep the original collapse-on-narrow behaviour. --%>
+        <%= if @pinned_extra != [] and not @readonly do %>
+          <div class="divider divider-horizontal mx-0.5 h-6" data-toolbar-divider="extra-pinned"></div>
+          <div class="flex items-center gap-0.5" data-toolbar-extra data-toolbar-extra-pinned>
+            <.toolbar_extra_button :for={btn <- @pinned_extra} btn={btn} />
+          </div>
+        <% end %>
+        <%= if @overflow_extra != [] and not @readonly do %>
           <div class="divider divider-horizontal mx-0.5 h-6" data-toolbar-divider="extra"></div>
           <div class="flex items-center gap-0.5" data-toolbar-extra data-toolbar-overflow="extra">
-            <%= for btn <- @toolbar_extra do %>
-              <button
-                type="button"
-                data-host-action={efetch(btn, :id)}
-                class={["btn btn-xs btn-ghost px-2", efetch(btn, :class)]}
-                title={efetch(btn, :title)}
-                aria-label={efetch(btn, :title)}
-              >
-                <%= if icon = efetch(btn, :icon) do %>{raw(icon)}<% end %>
-                <%= if label = efetch(btn, :label) do %><span>{label}</span><% end %>
-              </button>
-            <% end %>
+            <.toolbar_extra_button :for={btn <- @overflow_extra} btn={btn} />
           </div>
         <% end %>
 
@@ -1246,49 +1522,55 @@ defmodule Leaf do
         <%!-- Spacer --%>
         <div class="flex-1"></div>
 
-        <%!-- Mode Switcher --%>
-        <div class="flex items-center gap-0.5" data-mode-switcher="inline">
+        <%!-- Mode Switcher. Every tab is gated on the deny list, and the
+             whole switcher disappears when only one mode survives — a lone
+             tab switches to nothing. --%>
+        <div :if={@show_mode_switcher} class="flex items-center gap-0.5" data-mode-switcher="inline">
           <div class="divider divider-horizontal mx-0.5 h-6"></div>
-          <button
-            type="button"
-            data-mode-tab="hybrid"
-            class={["btn btn-xs px-2", (@mode == :hybrid && "btn-active") || "btn-ghost"]}
-            title={t("Hybrid mode")}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-              class="w-3.5 h-3.5"
+          <%= if :hybrid in @allowed_modes do %>
+            <button
+              type="button"
+              data-mode-tab="hybrid"
+              class={["btn btn-xs px-2", (@mode == :hybrid && "btn-active") || "btn-ghost"]}
+              title={t("Hybrid mode")}
             >
-              <path
-                fill-rule="evenodd"
-                d="M9 4.5a.75.75 0 0 1 .721.544l.813 2.846a3.75 3.75 0 0 0 2.576 2.576l2.846.813a.75.75 0 0 1 0 1.442l-2.846.813a3.75 3.75 0 0 0-2.576 2.576l-.813 2.846a.75.75 0 0 1-1.442 0l-.813-2.846a3.75 3.75 0 0 0-2.576-2.576L1.044 12.22a.75.75 0 0 1 0-1.442l2.846-.813A3.75 3.75 0 0 0 6.466 7.39l.813-2.846A.75.75 0 0 1 9 4.5Z"
-                clip-rule="evenodd"
-              />
-            </svg>
-          </button>
-          <button
-            type="button"
-            data-mode-tab="visual"
-            class={["btn btn-xs px-2", (@mode == :visual && "btn-active") || "btn-ghost"]}
-            title={t("Visual mode")}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-              class="w-3.5 h-3.5"
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+                class="w-3.5 h-3.5"
+              >
+                <path
+                  fill-rule="evenodd"
+                  d="M9 4.5a.75.75 0 0 1 .721.544l.813 2.846a3.75 3.75 0 0 0 2.576 2.576l2.846.813a.75.75 0 0 1 0 1.442l-2.846.813a3.75 3.75 0 0 0-2.576 2.576l-.813 2.846a.75.75 0 0 1-1.442 0l-.813-2.846a3.75 3.75 0 0 0-2.576-2.576L1.044 12.22a.75.75 0 0 1 0-1.442l2.846-.813A3.75 3.75 0 0 0 6.466 7.39l.813-2.846A.75.75 0 0 1 9 4.5Z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+            </button>
+          <% end %>
+          <%= if :visual in @allowed_modes do %>
+            <button
+              type="button"
+              data-mode-tab="visual"
+              class={["btn btn-xs px-2", (@mode == :visual && "btn-active") || "btn-ghost"]}
+              title={t("Visual mode")}
             >
-              <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
-              <path
-                fill-rule="evenodd"
-                d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
-                clip-rule="evenodd"
-              />
-            </svg>
-          </button>
-          <%= unless :markdown_mode in @deny do %>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+                class="w-3.5 h-3.5"
+              >
+                <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
+                <path
+                  fill-rule="evenodd"
+                  d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+            </button>
+          <% end %>
+          <%= if :markdown in @allowed_modes do %>
             <button
               type="button"
               data-mode-tab="markdown"
@@ -1300,7 +1582,7 @@ defmodule Leaf do
               </svg>
             </button>
           <% end %>
-          <%= unless :html_mode in @deny do %>
+          <%= if :html in @allowed_modes do %>
             <button
               type="button"
               data-mode-tab="html"
@@ -1371,43 +1653,45 @@ defmodule Leaf do
             data-leaf-menu
             data-mode-menu
           >
-            <li class="menu-title text-xs px-2 pt-1">{t("Mode")}</li>
-            <li>
-              <button
-                type="button"
-                data-mode-tab="hybrid"
-                class={(@mode == :hybrid && "btn-active") || "btn-ghost"}
-              >
-                <span>{t("Hybrid")}</span>
-              </button>
-            </li>
-            <li>
-              <button
-                type="button"
-                data-mode-tab="visual"
-                class={(@mode == :visual && "btn-active") || "btn-ghost"}
-              >
-                <span>{t("Visual")}</span>
-              </button>
-            </li>
-            <li>
-              <button
-                type="button"
-                data-mode-tab="markdown"
-                class={(@mode == :markdown && "btn-active") || "btn-ghost"}
-              >
-                <span>{t("Markdown")}</span>
-              </button>
-            </li>
-            <li>
-              <button
-                type="button"
-                data-mode-tab="html"
-                class={(@mode == :html && "btn-active") || "btn-ghost"}
-              >
-                <span>{t("HTML")}</span>
-              </button>
-            </li>
+            <%= if @show_mode_switcher do %>
+              <li class="menu-title text-xs px-2 pt-1">{t("Mode")}</li>
+              <li :if={:hybrid in @allowed_modes}>
+                <button
+                  type="button"
+                  data-mode-tab="hybrid"
+                  class={(@mode == :hybrid && "btn-active") || "btn-ghost"}
+                >
+                  <span>{t("Hybrid")}</span>
+                </button>
+              </li>
+              <li :if={:visual in @allowed_modes}>
+                <button
+                  type="button"
+                  data-mode-tab="visual"
+                  class={(@mode == :visual && "btn-active") || "btn-ghost"}
+                >
+                  <span>{t("Visual")}</span>
+                </button>
+              </li>
+              <li :if={:markdown in @allowed_modes}>
+                <button
+                  type="button"
+                  data-mode-tab="markdown"
+                  class={(@mode == :markdown && "btn-active") || "btn-ghost"}
+                >
+                  <span>{t("Markdown")}</span>
+                </button>
+              </li>
+              <li :if={:html in @allowed_modes}>
+                <button
+                  type="button"
+                  data-mode-tab="html"
+                  class={(@mode == :html && "btn-active") || "btn-ghost"}
+                >
+                  <span>{t("HTML")}</span>
+                </button>
+              </li>
+            <% end %>
             <%= if @preset == :advanced do %>
               <li class="menu-title text-xs px-2 pt-1">{t("View")}</li>
               <li>
@@ -1623,43 +1907,45 @@ defmodule Leaf do
               <span class="text-base font-bold leading-none">&#8942;</span>
             </summary>
             <ul class={leaf_menu_class("right-0")} data-leaf-menu>
-              <li class="menu-title text-xs px-2 pt-1">{t("Mode")}</li>
-              <li>
-                <button
-                  type="button"
-                  data-mode-tab="hybrid"
-                  class={(@mode == :hybrid && "btn-active") || "btn-ghost"}
-                >
-                  <.tool_icon name="sparkles" /><span>{t("Hybrid")}</span>
-                </button>
-              </li>
-              <li>
-                <button
-                  type="button"
-                  data-mode-tab="visual"
-                  class={(@mode == :visual && "btn-active") || "btn-ghost"}
-                >
-                  <.tool_icon name="eye" /><span>{t("Visual")}</span>
-                </button>
-              </li>
-              <li>
-                <button
-                  type="button"
-                  data-mode-tab="markdown"
-                  class={(@mode == :markdown && "btn-active") || "btn-ghost"}
-                >
-                  <.tool_icon name="markdown" /><span>{t("Markdown")}</span>
-                </button>
-              </li>
-              <li>
-                <button
-                  type="button"
-                  data-mode-tab="html"
-                  class={(@mode == :html && "btn-active") || "btn-ghost"}
-                >
-                  <.tool_icon name="html" /><span>{t("HTML")}</span>
-                </button>
-              </li>
+              <%= if @show_mode_switcher do %>
+                <li class="menu-title text-xs px-2 pt-1">{t("Mode")}</li>
+                <li :if={:hybrid in @allowed_modes}>
+                  <button
+                    type="button"
+                    data-mode-tab="hybrid"
+                    class={(@mode == :hybrid && "btn-active") || "btn-ghost"}
+                  >
+                    <.tool_icon name="sparkles" /><span>{t("Hybrid")}</span>
+                  </button>
+                </li>
+                <li :if={:visual in @allowed_modes}>
+                  <button
+                    type="button"
+                    data-mode-tab="visual"
+                    class={(@mode == :visual && "btn-active") || "btn-ghost"}
+                  >
+                    <.tool_icon name="eye" /><span>{t("Visual")}</span>
+                  </button>
+                </li>
+                <li :if={:markdown in @allowed_modes}>
+                  <button
+                    type="button"
+                    data-mode-tab="markdown"
+                    class={(@mode == :markdown && "btn-active") || "btn-ghost"}
+                  >
+                    <.tool_icon name="markdown" /><span>{t("Markdown")}</span>
+                  </button>
+                </li>
+                <li :if={:html in @allowed_modes}>
+                  <button
+                    type="button"
+                    data-mode-tab="html"
+                    class={(@mode == :html && "btn-active") || "btn-ghost"}
+                  >
+                    <.tool_icon name="html" /><span>{t("HTML")}</span>
+                  </button>
+                </li>
+              <% end %>
               <%= if @preset == :advanced do %>
                 <li class="menu-title text-xs px-2 pt-1">{t("View")}</li>
                 <li>
@@ -1861,6 +2147,26 @@ defmodule Leaf do
         {@glyph}
       </span>
     </span>
+    """
+  end
+
+  # One host-defined toolbar button. `:icon` is rendered raw so hosts can
+  # pass an inline `<svg>` — see the `toolbar_extra` attr docs; that makes
+  # it trusted markup and never safe to build from user input.
+  attr(:btn, :map, required: true)
+
+  defp toolbar_extra_button(assigns) do
+    ~H"""
+    <button
+      type="button"
+      data-host-action={efetch(@btn, :id)}
+      class={["btn btn-xs btn-ghost px-2", efetch(@btn, :class)]}
+      title={efetch(@btn, :title)}
+      aria-label={efetch(@btn, :title)}
+    >
+      <%= if icon = efetch(@btn, :icon) do %>{raw(icon)}<% end %>
+      <%= if label = efetch(@btn, :label) do %><span>{label}</span><% end %>
+    </button>
     """
   end
 
@@ -2072,12 +2378,47 @@ defmodule Leaf do
     {:noreply, socket}
   end
 
+  # Reply to an explicit `send_update(action: :flush, ref: …)`. Pushed by
+  # the client right after the matching content event, so the host's
+  # `{:leaf_changed, …}` has already landed and this only has to say
+  # "that one was yours". No ref, no message — see the "Flushing" section.
+  def handle_event("flushed", %{"ref" => ref} = params, socket) do
+    markdown = sanitize_markdown(Map.get(params, "markdown", ""), socket.assigns.deny)
+    html = sanitize_html(Map.get(params, "html", ""), socket.assigns.deny)
+
+    send(
+      self(),
+      {:leaf_flushed,
+       %{
+         editor_id: socket.assigns.id,
+         ref: ref,
+         markdown: markdown,
+         html: html
+       }}
+    )
+
+    {:noreply, socket}
+  end
+
+  # Double-clicking an atomic preserved block opens a raw-source editor for
+  # just that block. On save the client sends the new source here so the
+  # preview (attributes, thumbnail, rendered children) can be rebuilt by
+  # the same code that built it on first render — the client has no
+  # markdown renderer of its own.
+  def handle_event("render_preserved", %{"raw" => raw, "token" => token}, socket) do
+    {:noreply,
+     push_event(socket, "leaf-preserved-html:#{socket.assigns.id}", %{
+       token: token,
+       html: preserved_chip(raw, :block)
+     })}
+  end
+
   def handle_event("markdown_content_changed", %{"content" => content} = params, socket) do
     sanitized_markdown = sanitize_markdown(content, socket.assigns.deny)
 
     html =
       sanitized_markdown
-      |> markdown_to_html(preserve_tags(socket))
+      |> markdown_to_html(render_opts(socket))
       |> sanitize_html(socket.assigns.deny)
 
     send(
@@ -2163,7 +2504,7 @@ defmodule Leaf do
     html =
       markdown
       |> sanitize_markdown(socket.assigns.deny)
-      |> markdown_to_html(preserve_tags(socket))
+      |> markdown_to_html(render_opts(socket))
       |> sanitize_html(socket.assigns.deny)
 
     {:noreply, push_event(socket, "leaf-set-html:#{socket.assigns.id}", %{html: html})}
@@ -2251,7 +2592,7 @@ defmodule Leaf do
   # -- Inline suggestions --
 
   @default_suggestion_token "[\\p{L}\\p{N}_-]"
-  @suggestion_boundaries ~w(word_start line_start any)
+  @suggestion_boundaries ~w(word_start line_start not_line_start any)
 
   @doc false
   # Turn the host's `suggestions` list into the flat string map the template
@@ -2379,14 +2720,26 @@ defmodule Leaf do
   # LiveView process), so the bare `t(...)` calls in the template pick it
   # up without threading the backend through every call site. Falls back to
   # the app-global config, then to the untranslated string.
+  #
+  # Lookups try the `"leaf"` domain first (what the shipped
+  # `priv/gettext/leaf.pot` merges into) and fall back to `"default"` for
+  # hosts that would rather keep everything in one catalog. Gettext returns
+  # the msgid unchanged when there is no translation, which is exactly the
+  # signal for "try the other domain".
   defp t(string) do
     backend =
       Process.get(:leaf_gettext_backend) ||
         Application.get_env(:leaf, :gettext_backend)
 
     case backend do
-      nil -> string
-      backend -> Gettext.gettext(backend, string)
+      nil ->
+        string
+
+      backend ->
+        case Gettext.dgettext(backend, "leaf", string) do
+          ^string -> Gettext.gettext(backend, string)
+          translated -> translated
+        end
     end
   end
 
@@ -2423,6 +2776,53 @@ defmodule Leaf do
       loading_state_css(height),
       ~s(</style>)
     ])
+  end
+
+  # Bundle-presence check. Leaf does not bundle its JS into the host, and
+  # an editor whose hook never attached is indistinguishable from a working
+  # one at a glance — it renders, it looks ordinary, it silently captures
+  # nothing. This is the only place the check can live: if the bundle is
+  # absent there is no Leaf JS around to notice its own absence.
+  #
+  # Guarded so exactly one timer runs per page however many editors are on
+  # it, and it only ever writes to the console. Hosts under a CSP that
+  # forbids inline scripts and cannot pass a `script_nonce` turn it off
+  # with `bundle_check={false}` — it is a diagnostic, nothing depends on it.
+  defp bundle_check_script_tag(nonce) do
+    nonce_str = nonce |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
+
+    raw([
+      ~s(<script nonce="),
+      nonce_str,
+      ~s(">),
+      bundle_check_js(),
+      ~s(</script>)
+    ])
+  end
+
+  defp bundle_check_js do
+    """
+    (function(){
+      if (window.__leafBundleCheck) return;
+      window.__leafBundleCheck = 1;
+      setTimeout(function(){
+        var stuck = document.querySelector('[phx-hook="Leaf"][data-leaf-mount-state="loading"]');
+        if (!stuck) return;
+        var missing = !(window.LeafHooks && window.LeafHooks.Leaf);
+        console.error(
+          '[leaf] editor "' + (stuck.id || '?') + '" never attached its JS hook, so it ' +
+          'captures nothing you type. ' +
+          (missing
+            ? 'window.LeafHooks.Leaf is not defined: leaf.js was never loaded.'
+            : 'leaf.js IS loaded, so the hook is most likely not registered with the LiveSocket.') +
+          '\\n  1. import "../../../deps/leaf/priv/static/assets/leaf.js" in app.js' +
+          '\\n  2. spread window.LeafHooks into the LiveSocket `hooks` option' +
+          '\\n  3. check that the LiveView connected at all (earlier console errors)' +
+          '\\nSee the "JS Setup" section of the Leaf docs.'
+        );
+      }, 5000);
+    })();
+    """
   end
 
   # Inline CSS for the loading state. Emitted once per editor at the top of
@@ -2514,7 +2914,15 @@ defmodule Leaf do
     }
     /* Extra tools (host toolbar_extra + export) collapse into the compact
        menu the moment compact mode engages — same as remove-format — so
-       they never spill onto a second row. */
+       they never spill onto a second row.
+
+       `toolbar_extra` entries marked `collapse: false` land in
+       [data-toolbar-extra-pinned] instead, which carries no
+       data-toolbar-overflow key and so is never matched by any of the
+       collapse rules below. They are the host's primary actions — the
+       components its documents are built from — and burying those under
+       "More" makes them barely more discoverable than typing the tag by
+       hand, which is the problem they existed to solve. */
     [data-visual-toolbar][data-compact-modes="true"][data-toolbar-preset="advanced"] [data-toolbar-overflow="extra"],
     [data-visual-toolbar][data-compact-modes="true"][data-toolbar-preset="advanced"] [data-toolbar-divider="extra"],
     [data-visual-toolbar][data-compact-modes="true"][data-toolbar-preset="advanced"] [data-toolbar-overflow="export"],
@@ -2954,19 +3362,44 @@ defmodule Leaf do
   # non-editable placeholder blocks, and restored verbatim. The client
   # serializes those placeholders straight back to their original source,
   # so custom XML round-trips byte-for-byte through visual/hybrid mode.
-  defp markdown_to_html(nil, _), do: markdown_to_html(nil)
-  defp markdown_to_html("", _), do: markdown_to_html("")
+  defp markdown_to_html(markdown, opts) when is_binary(markdown) and is_map(opts) do
+    preserve = Map.get(opts, :preserve_tags, [])
 
-  defp markdown_to_html(markdown, preserve_tags)
-       when is_list(preserve_tags) and preserve_tags != [] do
-    {protected, store} = extract_preserved_tags(markdown, preserve_tags)
+    html =
+      if preserve == [] do
+        markdown_to_html(markdown)
+      else
+        {protected, store} = extract_preserved_tags(markdown, preserve)
 
-    protected
-    |> markdown_to_html()
-    |> restore_preserved_tags(store)
+        protected
+        |> markdown_to_html()
+        |> restore_preserved_tags(store)
+      end
+
+    if Map.get(opts, :hashtags, false), do: decorate_hashtags(html), else: html
   end
 
-  defp markdown_to_html(markdown, _), do: markdown_to_html(markdown)
+  # The per-render knobs the markdown→HTML pass needs, read off the
+  # component's own assigns rather than threaded through every call site.
+  defp render_opts(socket) do
+    %{
+      preserve_tags: preserve_tags(socket),
+      hashtags:
+        socket.assigns
+        |> Map.get(:suggestions, [])
+        |> normalized_suggestions()
+        |> hashtag_trigger?()
+    }
+  end
+
+  # `#` is only a tag sigil if the host said so by configuring a `#`
+  # suggestion trigger. Without that, `#` is left alone — a document using
+  # it for issue numbers or CSS ids should not sprout tag chips.
+  defp hashtag_trigger?(suggest_configs) when is_list(suggest_configs) do
+    Enum.any?(suggest_configs, &(Map.get(&1, :trigger) == "#"))
+  end
+
+  defp hashtag_trigger?(_), do: false
 
   # Replace each occurrence of a preserved tag with an inert text token,
   # returning {protected_markdown, %{token => original_source}}.
@@ -2990,27 +3423,199 @@ defmodule Leaf do
 
   # Swap tokens back for atomic placeholder spans carrying the verbatim
   # source in a `data-leaf-raw` attribute. A standalone token that MDEx
-  # wrapped in its own `<p>` stays a block; an inline token stays inline.
+  # wrapped in its own `<p>` becomes the taller block chip; an inline token
+  # stays a compact inline one.
   defp restore_preserved_tags(html, store) do
     Enum.reduce(store, html, fn {token, raw}, acc ->
-      escaped = raw |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
-      label = preserve_label(raw)
-
-      wrapper =
-        ~s(<span class="leaf-atomic" contenteditable="false" data-leaf-raw="#{escaped}"><span class="leaf-atomic-label">#{label}</span></span>)
-
       acc
-      |> String.replace("<p>#{token}</p>", "<p>#{wrapper}</p>")
-      |> String.replace(token, wrapper)
+      |> String.replace("<p>#{token}</p>", "<p>#{preserved_chip(raw, :block)}</p>")
+      |> String.replace(token, preserved_chip(raw, :inline))
     end)
   end
 
-  defp preserve_label(raw) do
-    case Regex.run(~r/<\s*([A-Za-z][\w-]*)/, raw) do
-      [_, name] -> name
-      _ -> "block"
+  # Render one preserved custom tag as an atomic chip.
+  #
+  # The chip is `contenteditable="false"` and carries the verbatim source
+  # in `data-leaf-raw` — that attribute, not the rendered preview, is what
+  # the client serializes back, so everything below is free to be as rich
+  # as it likes without any risk to the round trip.
+  #
+  # It is deliberately not opaque. A chip showing only "⧉ Hero" tells the
+  # writer nothing about which Hero it is, and hides the text, links and
+  # images the tag actually wraps — which is most of the reason to look at
+  # a document at all. So a block chip shows the tag name, its attributes,
+  # a thumbnail for any image-ish attribute, and its children rendered as
+  # formatted text. Every child element here is phrasing content, because
+  # the block form still sits inside the `<p>` MDEx produced.
+  defp preserved_chip(raw, layout) do
+    {name, attrs, inner} = parse_preserved_tag(raw)
+    escaped_raw = escape_attr(raw)
+
+    parts = [
+      ~s(<span class="leaf-atomic-label">#{escape_text(name)}</span>),
+      preserved_attr_summary(attrs, layout),
+      preserved_media(attrs, layout),
+      preserved_inner_preview(inner, layout)
+    ]
+
+    classes =
+      case layout do
+        :block -> "leaf-atomic leaf-atomic-block"
+        :inline -> "leaf-atomic leaf-atomic-inline"
+      end
+
+    ~s(<span class="#{classes}" contenteditable="false" data-leaf-raw="#{escaped_raw}") <>
+      ~s( data-leaf-tag="#{escape_attr(name)}" title="#{escape_attr(preserved_tooltip(raw))}">) <>
+      Enum.join(parts) <> ~s(</span>)
+  end
+
+  @preserved_attr_re ~r/([A-Za-z_:][\w.:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/
+
+  # {tag_name, [{attr, value}], inner_source}. Only the OPENING tag is
+  # scanned for attributes — attributes on nested tags belong to those.
+  defp parse_preserved_tag(raw) do
+    name =
+      case Regex.run(~r/<\s*([A-Za-z][\w.-]*)/, raw) do
+        [_, n] -> n
+        _ -> "block"
+      end
+
+    open_tag =
+      case Regex.run(~r/^\s*<[^>]*>/s, raw) do
+        [tag] -> tag
+        _ -> raw
+      end
+
+    attrs =
+      @preserved_attr_re
+      |> Regex.scan(open_tag)
+      |> Enum.map(fn
+        [_, key, dq, "", ""] -> {key, dq}
+        [_, key, "", sq, ""] -> {key, sq}
+        [_, key, "", "", bare] -> {key, bare}
+        [_, key | rest] -> {key, Enum.find(rest, "", &(&1 != ""))}
+      end)
+
+    inner =
+      case Regex.run(~r/^\s*<[^>]*[^\/]>(.*)<\/[A-Za-z][\w.-]*\s*>\s*$/s, raw) do
+        [_, body] -> body
+        _ -> ""
+      end
+
+    {name, attrs, inner}
+  end
+
+  # Attribute names whose value is worth showing as a picture rather than
+  # a string.
+  #
+  # These name a picture outright, so any URL-ish value is taken at face
+  # value — real image URLs routinely have no extension (CDN paths, signed
+  # URLs, `placehold.co/200x80/png`), and demanding one means most real
+  # content gets no thumbnail.
+  @preserved_image_attrs ~w(image img poster thumbnail thumb cover background bg avatar)
+  # `src` is ambiguous — `<Audio src="…mp3">` uses it too — so it has to
+  # actually look like an image before we draw one.
+  @preserved_src_attrs ~w(src)
+  @url_ref_re ~r{^(?:https?://|/|\./|data:)\S*$}i
+  @image_ref_re ~r{^(?:data:image/|.*\.(?:png|jpe?g|gif|webp|avif|svg)(?:[?#]|$))}i
+
+  defp preserved_media(attrs, :block) do
+    attrs
+    |> Enum.find(&image_attr?/1)
+    |> case do
+      nil -> ""
+      {_k, url} -> ~s(<img class="leaf-atomic-media" src="#{escape_attr(url)}" alt="">)
     end
   end
+
+  defp preserved_media(_attrs, :inline), do: ""
+
+  defp image_attr?({key, value}) do
+    key = String.downcase(key)
+
+    cond do
+      not Regex.match?(@url_ref_re, value) -> false
+      key in @preserved_image_attrs -> true
+      key in @preserved_src_attrs -> Regex.match?(@image_ref_re, value)
+      true -> false
+    end
+  end
+
+  defp preserved_attr_summary([], _layout), do: ""
+
+  defp preserved_attr_summary(attrs, layout) do
+    limit = if layout == :block, do: 6, else: 2
+
+    text =
+      attrs
+      |> Enum.take(limit)
+      |> Enum.map_join(" ", fn {k, v} -> ~s(#{k}="#{truncate(v, 40)}") end)
+
+    ~s(<span class="leaf-atomic-attrs">#{escape_text(text)}</span>)
+  end
+
+  defp preserved_inner_preview(inner, layout) do
+    trimmed = String.trim(inner)
+
+    cond do
+      trimmed == "" ->
+        ""
+
+      layout == :inline ->
+        ~s(<span class="leaf-atomic-attrs">#{escape_text(truncate(trimmed, 60))}</span>)
+
+      true ->
+        ~s(<span class="leaf-atomic-body">#{render_inner_markdown(trimmed)}</span>)
+    end
+  end
+
+  # A preserved tag's children rendered as formatted text — this is what
+  # makes the bold, the links and the images inside `<Header>…</Header>`
+  # visible while writing.
+  #
+  # Two deliberate restrictions. `unsafe: false` means raw HTML in the
+  # children is dropped rather than injected, so a nested custom tag can't
+  # recurse back into the chip machinery or smuggle markup into the
+  # preview. And the `<p>` wrappers are unwrapped because the block chip
+  # is phrasing content living inside MDEx's own `<p>` — a nested `<p>`
+  # would close it and split the chip in half.
+  defp render_inner_markdown(source) do
+    case MDEx.to_html(source, render: [hardbreaks: true, unsafe: false]) do
+      {:ok, html} ->
+        html
+        |> String.replace(~r{<!--\s*raw HTML omitted\s*-->}i, "")
+        |> String.replace(~r{</p>\s*<p>}, "<br>")
+        |> String.replace(~r{^\s*<p>|</p>\s*$}, "")
+        # The chip is not editable, but a real `href` inside a
+        # contenteditable is still a live target for ctrl-click and drag.
+        # Keep the look, drop the destination.
+        |> String.replace(~r/<a\s+href=/i, ~s(<a data-leaf-href=))
+        |> String.trim()
+
+      {:error, _} ->
+        escape_text(source)
+    end
+  end
+
+  defp preserved_tooltip(raw) do
+    truncate(String.replace(raw, ~r/\s+/, " "), 200)
+  end
+
+  defp truncate(value, max) do
+    string = to_string(value)
+
+    if String.length(string) > max do
+      String.slice(string, 0, max - 1) <> "…"
+    else
+      string
+    end
+  end
+
+  defp escape_attr(value) do
+    value |> to_string() |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
+  end
+
+  defp escape_text(value), do: escape_attr(value)
 
   defp markdown_to_html(nil), do: "<p><br></p>"
   defp markdown_to_html(""), do: "<p><br></p>"
@@ -3161,13 +3766,130 @@ defmodule Leaf do
     end
   end
 
-  defp normalize_mode(mode, deny)
-       when mode in [:visual, :hybrid, :markdown, :html] and is_list(deny) do
-    if mode_denied?(mode, deny), do: :visual, else: mode
+  # Wrap `#tag` occurrences in a decoration span so hashtags read as tags
+  # rather than prose. Two things keep this safe:
+  #
+  # - `<span>` serializes back as its own text (see `convertNode`), so the
+  #   markdown stays `#tag` and nothing about the round trip changes.
+  # - Substitution only happens in text runs — never inside a tag, and
+  #   never inside `<pre>` / `<code>` / `<a>`, where a `#` is a literal or
+  #   a URL fragment rather than a tag.
+  #
+  # The leading-boundary group mirrors the `:word_start` suggestion
+  # boundary, so `/page#section` is left alone for the same reason the
+  # popup doesn't open there.
+  @hashtag_re ~r/(^|[\s(\[>])#(\p{L}[\p{L}\p{N}_-]*)/u
+  @hashtag_skip_re ~r{(<(?:pre|code|a)\b[^>]*>.*?</(?:pre|code|a)>)}is
+
+  defp decorate_hashtags(html) do
+    html
+    |> String.split(@hashtag_skip_re, include_captures: true)
+    |> Enum.map_join("", &decorate_hashtags_chunk/1)
   end
 
-  defp mode_denied?(:hybrid, _deny), do: false
+  defp decorate_hashtags_chunk(chunk) do
+    if Regex.match?(~r/^<(?:pre|code|a)\b/i, chunk) do
+      chunk
+    else
+      chunk
+      |> String.split(~r/(<[^>]*>)/, include_captures: true)
+      |> Enum.map_join("", &decorate_hashtags_text/1)
+    end
+  end
+
+  defp decorate_hashtags_text("<" <> _ = tag), do: tag
+
+  defp decorate_hashtags_text(text) do
+    Regex.replace(@hashtag_re, text, ~s(\\1<span class="leaf-hashtag">#\\2</span>))
+  end
+
+  # Custom component tags that the host forgot to declare in
+  # `preserve_tags` are the single most expensive mistake this library
+  # allows: the visual surfaces flatten them into loose paragraphs and
+  # autosave writes that back over the only copy. Nothing here can fix
+  # that — only the declaration can — but a named warning turns silent
+  # irreversible content loss into a one-line diagnosis.
+  #
+  # Warned once per tag name per editor process (the LiveView owning it),
+  # so a re-render storm doesn't flood the log.
+  @unpreserved_tag_re ~r/<([A-Z][A-Za-z0-9]*)\b/
+
+  defp warn_unpreserved_tags(content, preserve_tags) when is_binary(content) do
+    if Application.get_env(:leaf, :warn_unpreserved_tags, true) do
+      declared = MapSet.new(preserve_tags, &String.downcase(to_string(&1)))
+      already_warned = Process.get(:leaf_warned_tags, MapSet.new())
+
+      undeclared =
+        content
+        # A tag inside a code fence or inline code is a code sample, not
+        # content the editor will mangle.
+        |> String.replace(~r/```.*?```/s, "")
+        |> String.replace(~r/`[^`\n]*`/, "")
+        |> then(&Regex.scan(@unpreserved_tag_re, &1, capture: :all_but_first))
+        |> Enum.map(&hd/1)
+        |> Enum.uniq()
+        |> Enum.reject(&(String.downcase(&1) in declared or &1 in already_warned))
+
+      if undeclared != [] do
+        Process.put(:leaf_warned_tags, MapSet.union(already_warned, MapSet.new(undeclared)))
+        Logger.warning(unpreserved_tags_message(undeclared))
+      end
+    end
+
+    :ok
+  end
+
+  defp warn_unpreserved_tags(_content, _preserve_tags), do: :ok
+
+  defp unpreserved_tags_message(tags) do
+    named = Enum.map_join(tags, ", ", &"<#{&1}>")
+    declaration = Enum.map_join(tags, ", ", &~s("#{&1}"))
+
+    """
+    [leaf] content contains custom tag(s) #{named} that are not declared in `preserve_tags`.
+
+    The visual and hybrid surfaces flatten undeclared tags into loose paragraphs on the \
+    first keystroke, and autosave then writes that back over the original — the tag and \
+    everything it wrapped are gone. Declare them:
+
+        <.leaf_editor … preserve_tags={[#{declaration}]} />
+
+    Silence this warning with: config :leaf, warn_unpreserved_tags: false
+    """
+  end
+
+  defp validate_deny!(deny) when is_list(deny) do
+    if Enum.all?(@mode_order, &mode_denied?(&1, deny)) do
+      raise ArgumentError, """
+      Leaf: `deny` removes every editing mode, leaving nothing to render.
+
+      Got: #{inspect(deny)}
+
+      At least one of :visual_mode, :hybrid_mode, :markdown_mode, :html_mode \
+      must stay allowed.
+      """
+    end
+
+    :ok
+  end
+
+  defp validate_deny!(_deny), do: :ok
+
+  # A denied mode falls back to the first allowed one in @mode_order rather
+  # than to a hardcoded :visual — which stopped being a safe default the
+  # moment :visual itself became deniable.
+  defp normalize_mode(mode, deny)
+       when mode in [:visual, :hybrid, :markdown, :html] and is_list(deny) do
+    if mode_denied?(mode, deny) do
+      validate_deny!(deny)
+      Enum.find(@mode_order, &(not mode_denied?(&1, deny)))
+    else
+      mode
+    end
+  end
+
+  defp mode_denied?(:hybrid, deny), do: :hybrid_mode in deny
+  defp mode_denied?(:visual, deny), do: :visual_mode in deny
   defp mode_denied?(:markdown, deny), do: :markdown_mode in deny
   defp mode_denied?(:html, deny), do: :html_mode in deny
-  defp mode_denied?(:visual, _deny), do: false
 end

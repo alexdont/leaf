@@ -140,14 +140,18 @@ defmodule LeafTest do
     assert rendered =~ ~s(data-deny-html-mode="true")
   end
 
-  test "mode_changed falls back to visual when requested mode is denied" do
+  # Defensive path only — a denied mode has no tab to click, so the client
+  # cannot normally report one. The fallback is the first *allowed* mode
+  # rather than a hardcoded :visual, which stopped being a safe default
+  # once :visual itself became deniable.
+  test "mode_changed falls back to the first allowed mode when the requested one is denied" do
     socket = base_socket(deny: [:html_mode], mode: :visual)
 
     assert {:noreply, new_socket} =
              Leaf.handle_event("mode_changed", %{"mode" => "html", "content" => "x"}, socket)
 
-    assert_received {:leaf_mode_changed, %{mode: :visual}}
-    assert new_socket.assigns.mode == :visual
+    assert_received {:leaf_mode_changed, %{mode: :hybrid}}
+    assert new_socket.assigns.mode == :hybrid
   end
 
   describe "inline suggestions" do

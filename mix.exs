@@ -1,7 +1,7 @@
 defmodule Leaf.MixProject do
   use Mix.Project
 
-  @version "0.4.1"
+  @version "0.5.0"
   @source_url "https://github.com/alexdont/leaf"
 
   def project do
@@ -43,7 +43,8 @@ defmodule Leaf.MixProject do
     [
       licenses: ["MIT"],
       links: %{"GitHub" => @source_url},
-      files: ~w(lib priv/static/assets .formatter.exs mix.exs README.md LICENSE CHANGELOG.md)
+      files:
+        ~w(lib priv/static/assets priv/gettext .formatter.exs mix.exs README.md LICENSE CHANGELOG.md)
     ]
   end
 
