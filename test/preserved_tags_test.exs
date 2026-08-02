@@ -18,18 +18,58 @@ defmodule Leaf.PreservedTagsTest do
     |> then(&render_component(Leaf, &1))
   end
 
-  describe "atomic chip preview" do
-    test "a self-closing tag shows its name and attributes" do
+  describe "atomic block preview" do
+    test "attributes are typeset by role, not dumped as source" do
       html =
         visual_html(
-          content: ~s|<Hero title="Welcome" subtitle="to Leaf" />|,
+          content: ~s|<Hero title="Leaf 0.5.0" subtitle="Readable atomic blocks" />|,
           preserve_tags: ["Hero"]
         )
 
-      assert html =~ ~s|class="leaf-atomic leaf-atomic-block"|
-      assert html =~ ~s|<span class="leaf-atomic-label">Hero</span>|
-      assert html =~ "leaf-atomic-attrs"
-      assert html =~ "title=&quot;Welcome&quot; subtitle=&quot;to Leaf&quot;"
+      assert html =~ ~s|<span class="leaf-atomic-name">Hero</span>|
+      assert html =~ ~s|<span class="leaf-atomic-title">Leaf 0.5.0</span>|
+      assert html =~ ~s|<span class="leaf-atomic-subtitle">Readable atomic blocks</span>|
+      # ...and nothing is left over to show as source. (The raw form is
+      # still in `data-leaf-raw` — that is the round trip, not the preview.)
+      refute html =~ "leaf-atomic-rest"
+    end
+
+    test "role synonyms are recognised" do
+      html =
+        visual_html(
+          content: ~s|<Panel heading="Ship it" tagline="Now with less code" kicker="Release" />|,
+          preserve_tags: ["Panel"]
+        )
+
+      assert html =~ ~s|<span class="leaf-atomic-eyebrow">Release</span>|
+      assert html =~ ~s|<span class="leaf-atomic-title">Ship it</span>|
+      assert html =~ ~s|<span class="leaf-atomic-subtitle">Now with less code</span>|
+    end
+
+    test "an attribute with no role falls through to the source line" do
+      html =
+        visual_html(
+          content: ~s|<Hero title="Welcome" variant="wide" columns="3" />|,
+          preserve_tags: ["Hero"]
+        )
+
+      assert html =~ ~s|<span class="leaf-atomic-title">Welcome</span>|
+      assert html =~ "leaf-atomic-rest"
+      assert html =~ "variant=&quot;wide&quot; columns=&quot;3&quot;"
+    end
+
+    # `label` names the block on its own and captions a button next to a
+    # destination — the same word doing two jobs.
+    test "label reads as a title alone and as a button next to a link" do
+      alone = visual_html(content: ~s|<Badge label="Beta" />|, preserve_tags: ["Badge"])
+      assert alone =~ ~s|<span class="leaf-atomic-title">Beta</span>|
+      refute alone =~ "leaf-atomic-cta"
+
+      with_link =
+        visual_html(content: ~s|<CTA label="Sign up" href="/join" />|, preserve_tags: ["CTA"])
+
+      assert with_link =~ ~s|<span class="leaf-atomic-cta-label">Sign up</span>|
+      assert with_link =~ ~s|<span class="leaf-atomic-cta-link">/join</span>|
     end
 
     test "children render as formatted text, not as a hidden payload" do
@@ -47,14 +87,16 @@ defmodule Leaf.PreservedTagsTest do
       refute html =~ ~s|<a href="/somewhere"|
     end
 
-    test "an image-ish attribute renders a thumbnail" do
+    test "an image-ish attribute renders as a banner" do
       html =
         visual_html(
           content: ~s|<Hero image="/img/hero.png" />|,
           preserve_tags: ["Hero"]
         )
 
-      assert html =~ ~s|<img class="leaf-atomic-media" src="/img/hero.png" alt="">|
+      assert html =~ ~s|class="leaf-atomic-media" src="/img/hero.png"|
+      # The banner is not also repeated as a leftover attribute.
+      refute html =~ "leaf-atomic-rest"
     end
 
     test "a picture-naming attribute takes any URL at face value" do
@@ -70,7 +112,7 @@ defmodule Leaf.PreservedTagsTest do
       assert html =~ ~s(src="https://placehold.co/200x80/png")
     end
 
-    test "a non-URL attribute value does not become a thumbnail" do
+    test "a non-URL attribute value does not become a banner" do
       html =
         visual_html(
           content: ~s|<Hero image="not a url" />|,
@@ -82,7 +124,7 @@ defmodule Leaf.PreservedTagsTest do
 
     # `src` is ambiguous — <Audio src="…mp3"> uses it too — so unlike
     # `image`/`poster`/`cover` it has to actually look like an image.
-    test "an ambiguous src only becomes a thumbnail when it looks like an image" do
+    test "an ambiguous src only becomes a banner when it looks like an image" do
       audio =
         visual_html(content: ~s|<Audio src="/track.mp3" />|, preserve_tags: ["Audio"])
 
@@ -94,16 +136,43 @@ defmodule Leaf.PreservedTagsTest do
       assert picture =~ ~s(src="/shot.jpg")
     end
 
-    test "an inline tag stays compact — no thumbnail, no rendered body" do
+    test "a tag with nothing to show collapses to its nameplate" do
+      html = visual_html(content: ~s|<Divider />|, preserve_tags: ["Divider"])
+
+      assert html =~ ~s|<span class="leaf-atomic-name">Divider</span>|
+      refute html =~ "leaf-atomic-preview"
+      refute html =~ "leaf-atomic-media"
+    end
+
+    # A bare `<Image>` mid-sentence is worse than useless — every one of
+    # them looks identical — so the fallback chain runs down to a filename
+    # before it gives up.
+    test "an inline tag always carries something that identifies it" do
+      for {content, expected} <- [
+            {~s|x <Image src="pic.png" alt="A cat" /> y|, "A cat"},
+            {~s|x <Image src="/img/pic.png" /> y|, "pic.png"},
+            {~s|x <Image src="pic.png" /> y|, "pic.png"},
+            {~s|x <Link href="/docs" /> y|, "/docs"}
+          ] do
+        html = visual_html(content: content, preserve_tags: ["Image", "Link"])
+        assert html =~ ~s|<span class="leaf-atomic-value">#{expected}</span>|
+      end
+    end
+
+    test "an inline tag stays the size of a word" do
       html =
         visual_html(
-          content: ~s|A paragraph with <Image src="/pic.png" /> inline.|,
+          content: ~s|A paragraph with <Image src="/pic.png" alt="A cat" /> inline.|,
           preserve_tags: ["Image"]
         )
 
       assert html =~ ~s|class="leaf-atomic leaf-atomic-inline"|
+      assert html =~ ~s|<span class="leaf-atomic-name">Image</span>|
+      # No banner, no rendered children, no leftover source in a chip that
+      # has to sit inside a sentence.
       refute html =~ "leaf-atomic-media"
       refute html =~ "leaf-atomic-body"
+      refute html =~ "leaf-atomic-rest"
     end
 
     test "the verbatim source survives in data-leaf-raw" do

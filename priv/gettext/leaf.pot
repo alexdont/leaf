@@ -75,6 +75,9 @@ msgstr ""
 msgid "Details / Accordion"
 msgstr ""
 
+msgid "Double-click to edit"
+msgstr ""
+
 msgid "Download .md"
 msgstr ""
 

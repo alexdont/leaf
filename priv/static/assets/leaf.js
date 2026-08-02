@@ -30,7 +30,7 @@
   // its own asset pipeline gets a copy that silently stays behind after
   // `mix deps.update leaf`, and a stale bundle looks exactly like a
   // current one until something it doesn't implement quietly no-ops.
-  window.LeafHooks.version = "0.5.0";
+  window.LeafHooks.version = "0.5.1";
 
   // =========================================================================
   // Reveal hidden spoilers on click (works for any .leaf-spoiler on the page,
@@ -137,53 +137,145 @@
     "  outline-offset: 2px;",
     "}",
 
-    // Atomic preserved blocks (custom/unknown tags) — non-editable, so the
-    // underlying XML can't be corrupted in place, but NOT opaque: the
-    // block form shows the tag's attributes, a thumbnail for any image-ish
-    // attribute, and its children rendered as formatted text. A chip that
-    // only said "⧉ Hero" hid exactly the content people open a document
-    // to read.
+    // Atomic preserved blocks (custom/unknown tags).
+    //
+    // Non-editable, so the underlying XML can't be corrupted in place — the
+    // dashed outline is this editor's established "you can't type in here"
+    // vocabulary and stays. What changed is the inside: known attributes
+    // are typeset by role (title, subtitle, media, call-to-action) in the
+    // editor's own prose voice instead of dumped as `title="…"` source.
+    // Reading your own document should not mean reading code.
+    //
+    // Two deliberate restraints. The nameplate sits top-RIGHT, handing the
+    // top-left landing spot to the writer's content. And the type scale
+    // stays close to prose rather than imitating a real published hero —
+    // Leaf has no idea what the host's Hero looks like, and a document with
+    // four of them still has to be readable. Monospace survives in exactly
+    // two places: the nameplate and the leftover-attribute line, i.e. the
+    // machine facts.
     ".content-editor-visual .leaf-atomic {",
-    "  user-select: all; border-radius: 0.375rem;",
-    "  border: 1px dashed var(--color-base-300, #d1d5db);",
-    "  background: color-mix(in oklab, var(--color-base-content, #1f2937) 6%, transparent);",
-    "  cursor: default;",
+    "  user-select: all; cursor: default;",
+    "  border-radius: 0.5rem;",
+    "  border: 1px dashed color-mix(in oklab, var(--color-base-content, #1f2937) 22%, transparent);",
+    "  background: color-mix(in oklab, var(--color-base-content, #1f2937) 3.5%, transparent);",
     "}",
+
+    // Inline: the size of a word, because it interrupts a sentence.
     ".content-editor-visual .leaf-atomic-inline {",
-    "  display: inline-block; vertical-align: middle;",
-    "  padding: 0.15em 0.55em; margin: 0.1em 0;",
-    "  font: 600 0.8em ui-monospace, monospace;",
+    "  display: inline-flex; align-items: baseline; gap: 0.35em;",
+    "  vertical-align: baseline; padding: 0.05em 0.5em; margin: 0 0.05em;",
+    "  border-radius: 0.35em;",
     "}",
+
     ".content-editor-visual .leaf-atomic-block {",
-    "  display: block; padding: 0.5em 0.7em; margin: 0.5em 0;",
+    "  display: block; position: relative; overflow: hidden;",
+    "  padding: 0.85rem 1rem 0.9rem; margin: 0.85em 0;",
+    "  transition: border-color 120ms ease, background-color 120ms ease;",
     "}",
     ".content-editor-visual .leaf-atomic-block:hover {",
-    "  border-color: color-mix(in oklab, var(--color-primary, #3b82f6) 60%, transparent);",
+    "  border-color: color-mix(in oklab, var(--color-primary, #3b82f6) 45%, transparent);",
+    "  background: color-mix(in oklab, var(--color-primary, #3b82f6) 4%, transparent);",
     "}",
-    ".content-editor-visual .leaf-atomic-label {",
-    "  font: 600 0.8em ui-monospace, monospace;",
+
+    // Nameplate — the tag's identity, and the only thing here that is a
+    // fact about the machine rather than about the content.
+    ".content-editor-visual .leaf-atomic-name {",
+    "  font: 600 0.68rem/1 ui-monospace, SFMono-Regular, monospace;",
+    "  letter-spacing: 0.08em; text-transform: uppercase;",
+    "  color: color-mix(in oklab, var(--color-primary, #3b82f6) 75%, var(--color-base-content, #1f2937));",
     "}",
-    ".content-editor-visual .leaf-atomic-block .leaf-atomic-label { display: block; }",
-    ".content-editor-visual .leaf-atomic-label::before { content: '⧉ '; opacity: 0.6; }",
-    ".content-editor-visual .leaf-atomic-attrs {",
-    "  font: 400 0.75em ui-monospace, SFMono-Regular, monospace;",
-    "  opacity: 0.6; word-break: break-word;",
+    ".content-editor-visual .leaf-atomic-block .leaf-atomic-name {",
+    "  position: absolute; top: 0; right: 0; z-index: 1;",
+    "  padding: 0.3rem 0.6rem 0.32rem;",
+    "  border-radius: 0 0.5rem 0 0.5rem;",
+    "  background: color-mix(in oklab, var(--color-base-100, #fff) 86%, var(--color-primary, #3b82f6));",
     "}",
-    ".content-editor-visual .leaf-atomic-block .leaf-atomic-attrs {",
-    "  display: block; margin-top: 0.1em;",
+
+    // Hover-only affordance: the block is editable, but saying so
+    // permanently would be noise on every block in the document.
+    ".content-editor-visual .leaf-atomic-hint {",
+    "  position: absolute; right: 0.75rem; bottom: 0.5rem;",
+    "  font: 400 0.68rem/1 ui-monospace, SFMono-Regular, monospace;",
+    "  color: color-mix(in oklab, var(--color-base-content, #1f2937) 45%, transparent);",
+    "  opacity: 0; transition: opacity 120ms ease; pointer-events: none;",
     "}",
-    ".content-editor-visual .leaf-atomic-inline .leaf-atomic-attrs { margin-left: 0.4em; }",
+    ".content-editor-visual .leaf-atomic-block:hover .leaf-atomic-hint { opacity: 1; }",
+    "@media (prefers-reduced-motion: reduce) {",
+    "  .content-editor-visual .leaf-atomic-block,",
+    "  .content-editor-visual .leaf-atomic-hint { transition: none; }",
+    "}",
+
+    // Media reads as a banner, not a floating thumbnail: full width,
+    // cropped to a calm letterbox so tall and wide art both behave.
     ".content-editor-visual .leaf-atomic-media {",
-    "  display: block; max-height: 5rem; width: auto; max-width: 100%;",
-    "  margin: 0.4em 0 0; border-radius: 0.25rem; cursor: default;",
+    "  display: block; width: 100%; height: 7.5rem; object-fit: cover;",
+    "  border-radius: 0.3rem; margin: 0 0 0.7rem; cursor: default;",
+    "  background: color-mix(in oklab, var(--color-base-content, #1f2937) 6%, transparent);",
+    "}",
+
+    ".content-editor-visual .leaf-atomic-preview { display: block; }",
+    ".content-editor-visual .leaf-atomic-eyebrow {",
+    "  display: block; font-size: 0.72em; font-weight: 600;",
+    "  letter-spacing: 0.06em; text-transform: uppercase;",
+    "  color: color-mix(in oklab, var(--color-base-content, #1f2937) 55%, transparent);",
+    "  margin-bottom: 0.15em;",
+    "}",
+    ".content-editor-visual .leaf-atomic-title {",
+    "  display: block; font-size: 1.15em; font-weight: 650; line-height: 1.25;",
+    "}",
+    // Reserve room for the nameplate on whatever lands on the first line —
+    // which is the title, but only when there is no banner for the plate to
+    // sit over instead.
+    ".content-editor-visual .leaf-atomic-block:not(.leaf-atomic-has-media)",
+    "  .leaf-atomic-preview > :first-child { padding-right: 5.5rem; }",
+    ".content-editor-visual .leaf-atomic-subtitle {",
+    "  display: block; margin-top: 0.2em; line-height: 1.45;",
+    "  color: color-mix(in oklab, var(--color-base-content, #1f2937) 72%, transparent);",
     "}",
     ".content-editor-visual .leaf-atomic-body {",
-    "  display: block; margin-top: 0.35em; font-size: 0.95em;",
-    "  border-top: 1px dashed color-mix(in oklab, var(--color-base-content, #1f2937) 15%, transparent);",
-    "  padding-top: 0.35em;",
+    "  display: block; margin-top: 0.5em; line-height: 1.5;",
     "}",
     ".content-editor-visual .leaf-atomic-body a {",
-    "  text-decoration: underline; color: var(--color-primary, #3b82f6);",
+    "  text-decoration: underline; text-underline-offset: 0.15em;",
+    "  color: var(--color-primary, #3b82f6);",
+    "}",
+    ".content-editor-visual .leaf-atomic-body img {",
+    "  max-height: 6rem; width: auto; margin: 0.4em 0 0; border-radius: 0.25rem;",
+    "}",
+
+    // A label with a destination is a button on the published page, so it
+    // previews as one — with the destination alongside, since "where does
+    // this go" is usually why you looked.
+    ".content-editor-visual .leaf-atomic-cta {",
+    "  display: inline-flex; align-items: baseline; gap: 0.5em;",
+    "  margin-top: 0.65em;",
+    "}",
+    ".content-editor-visual .leaf-atomic-cta-label {",
+    "  display: inline-block; padding: 0.2em 0.7em; border-radius: 999px;",
+    "  font-size: 0.85em; font-weight: 600;",
+    "  background: color-mix(in oklab, var(--color-primary, #3b82f6) 16%, transparent);",
+    "  color: color-mix(in oklab, var(--color-primary, #3b82f6) 90%, var(--color-base-content, #1f2937));",
+    "}",
+    ".content-editor-visual .leaf-atomic-cta-label::after { content: ' →'; opacity: 0.55; }",
+    ".content-editor-visual .leaf-atomic-cta-link {",
+    "  font: 400 0.75em ui-monospace, SFMono-Regular, monospace;",
+    "  color: color-mix(in oklab, var(--color-base-content, #1f2937) 50%, transparent);",
+    "  word-break: break-all;",
+    "}",
+
+    // Whatever had no role. Shown as source because for these there is
+    // nothing better to say — small and faint so they don't compete.
+    ".content-editor-visual .leaf-atomic-rest {",
+    "  display: block; margin-top: 0.6em;",
+    "  font: 400 0.72em/1.5 ui-monospace, SFMono-Regular, monospace;",
+    "  color: color-mix(in oklab, var(--color-base-content, #1f2937) 42%, transparent);",
+    "  word-break: break-word;",
+    "}",
+
+    // Inline value: whichever single attribute best says which one this is.
+    ".content-editor-visual .leaf-atomic-value {",
+    "  font-size: 0.9em;",
+    "  color: color-mix(in oklab, var(--color-base-content, #1f2937) 70%, transparent);",
     "}",
     // Hashtags. Opt-in — only rendered when the host configured a `#`
     // suggestion trigger, i.e. said that `#` means "tag" here.
@@ -4190,42 +4282,153 @@
         .replace(/"/g, "&quot;");
     },
 
-    // A chip built on the client — for a tag inserted at the caret, and
-    // for the optimistic redraw after an in-place source edit. It is
-    // deliberately plainer than the server's: the client has no markdown
-    // renderer, so the tag's children can't be shown formatted here. The
-    // server sends back the rich version a round trip later.
+    // Attribute-name → display-role map. Kept in step with the same lists
+    // in lib/leaf.ex, so a chip inserted at the caret looks like the one
+    // the server sends back rather than flickering between two designs.
+    _ATOMIC_ROLES: {
+      title: ["title", "heading", "headline", "name"],
+      eyebrow: ["kicker", "eyebrow", "overline", "badge", "category"],
+      subtitle: [
+        "subtitle", "subheading", "tagline", "description",
+        "summary", "caption", "blurb", "text", "body",
+      ],
+      link: ["href", "url", "link", "to"],
+      cta: ["label", "cta", "button", "action"],
+      image: [
+        "image", "img", "poster", "thumbnail", "thumb", "cover",
+        "background", "bg", "avatar", "photo", "banner",
+      ],
+    },
+
+    // A chip built on the client — for a tag inserted at the caret, and for
+    // the optimistic redraw after an in-place source edit. Same shape as
+    // the server's, minus the children: the client has no markdown
+    // renderer, so the rich version arrives a round trip later.
     _buildAtomicChip: function (raw, name) {
       var attrs = this._parseTagAttrs(raw);
-      var parts = ['<span class="leaf-atomic-label">' + this._escapeHtml(name) + "</span>"];
+      var roles = this._atomicRoles(attrs);
+      var esc = this._escapeHtml.bind(this);
+      var preview = [];
 
-      if (attrs) {
-        parts.push('<span class="leaf-atomic-attrs">' + this._escapeHtml(attrs) + "</span>");
+      function role(value, cls) {
+        if (value) preview.push('<span class="' + cls + '">' + esc(value) + "</span>");
       }
+
+      role(roles.eyebrow, "leaf-atomic-eyebrow");
+      role(roles.title, "leaf-atomic-title");
+      role(roles.subtitle, "leaf-atomic-subtitle");
+
+      if (roles.ctaLabel || roles.link) {
+        preview.push(
+          '<span class="leaf-atomic-cta"><span class="leaf-atomic-cta-label">' +
+          esc(roles.ctaLabel || roles.link) + "</span>" +
+          (roles.link && roles.ctaLabel
+            ? '<span class="leaf-atomic-cta-link">' + esc(roles.link) + "</span>"
+            : "") +
+          "</span>"
+        );
+      }
+
+      if (roles.rest.length) {
+        preview.push(
+          '<span class="leaf-atomic-rest">' +
+          esc(roles.rest.slice(0, 6).map(function (a) {
+            return a[0] + '="' + a[1] + '"';
+          }).join(" ")) +
+          "</span>"
+        );
+      }
+
+      var media = roles.media
+        ? '<img class="leaf-atomic-media" src="' + esc(roles.media) + '" alt="" loading="lazy">'
+        : "";
+
+      var content =
+        preview.length || media
+          ? media + '<span class="leaf-atomic-preview">' + preview.join("") + "</span>"
+          : "";
 
       return (
         '<span class="leaf-atomic leaf-atomic-block" contenteditable="false"' +
-        ' data-leaf-raw="' + this._escapeHtml(raw) + '"' +
-        ' data-leaf-tag="' + this._escapeHtml(name) + '"' +
-        ' title="' + this._escapeHtml(raw.replace(/\s+/g, " ").slice(0, 200)) + '">' +
-        parts.join("") +
+        ' data-leaf-raw="' + esc(raw) + '"' +
+        ' data-leaf-tag="' + esc(name) + '"' +
+        ' title="' + esc(raw.replace(/\s+/g, " ").slice(0, 200)) + '">' +
+        '<span class="leaf-atomic-name">' + esc(name) + "</span>" +
+        '<span class="leaf-atomic-hint">Double-click to edit</span>' +
+        content +
         "</span>"
       );
     },
 
-    // `key="value"` pairs from the OPENING tag only, as one summary line.
+    _atomicRoles: function (attrs) {
+      var map = this._ATOMIC_ROLES;
+      var urlish = /^(?:https?:\/\/|\/|\.\/|data:)\S*$/i;
+      var imagey = /^(?:data:image\/|.*\.(?:png|jpe?g|gif|webp|avif|svg)(?:[?#]|$))/i;
+
+      function take(names) {
+        for (var i = 0; i < attrs.length; i++) {
+          var k = attrs[i][0].toLowerCase();
+          if (names.indexOf(k) !== -1 && String(attrs[i][1]).trim() !== "") return attrs[i][1];
+        }
+        return "";
+      }
+
+      var media = "";
+      for (var i = 0; i < attrs.length; i++) {
+        var key = attrs[i][0].toLowerCase();
+        var value = attrs[i][1];
+        if (!urlish.test(value)) continue;
+        if (map.image.indexOf(key) !== -1 || (key === "src" && imagey.test(value))) {
+          media = value;
+          break;
+        }
+      }
+
+      var link = take(map.link);
+      var cta = take(map.cta);
+      var title = take(map.title);
+      var ctaLabel = "";
+
+      // `label` is a title on its own and a button caption next to a
+      // destination — same word, two jobs, told apart by whether there is
+      // anywhere to go.
+      if (!title && !link) {
+        title = cta;
+      } else if (!title) {
+        ctaLabel = cta;
+      } else {
+        ctaLabel = cta;
+      }
+
+      var eyebrow = take(map.eyebrow);
+      var subtitle = take(map.subtitle);
+      var claimed = [title, ctaLabel, link, media, eyebrow, subtitle].filter(Boolean);
+
+      return {
+        title: title,
+        eyebrow: eyebrow,
+        subtitle: subtitle,
+        media: media,
+        link: link,
+        ctaLabel: ctaLabel,
+        rest: attrs.filter(function (a) {
+          return claimed.indexOf(a[1]) === -1;
+        }),
+      };
+    },
+
+    // [name, value] pairs from the OPENING tag only — attributes on nested
+    // tags belong to those.
     _parseTagAttrs: function (raw) {
       var open = raw.match(/^\s*<[^>]*>/);
-      if (!open) return "";
+      if (!open) return [];
       var re = /([A-Za-z_:][\w.:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g;
       var out = [];
       var m;
-      while ((m = re.exec(open[0])) !== null && out.length < 6) {
-        var value = m[2] !== undefined ? m[2] : m[3] !== undefined ? m[3] : m[4];
-        if (value && value.length > 40) value = value.slice(0, 39) + "…";
-        out.push(m[1] + '="' + value + '"');
+      while ((m = re.exec(open[0])) !== null) {
+        out.push([m[1], m[2] !== undefined ? m[2] : m[3] !== undefined ? m[3] : m[4]]);
       }
-      return out.join(" ");
+      return out;
     },
 
     // -- Editing an atomic block in place --

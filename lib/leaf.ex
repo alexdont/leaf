@@ -212,12 +212,30 @@ defmodule Leaf do
   corrupted in place — and restored verbatim on the way back out, so the
   source round-trips byte for byte.
 
-  The block is not opaque: it shows the tag name, its attributes, a
-  thumbnail for any image-ish attribute (`src`, `image`, `poster`, …) and
-  the tag's own children rendered as formatted text — so links, emphasis
-  and images inside `<Header>…</Header>` are visible while you write.
-  **Double-click** a block to edit its raw source in place and Enter (or
-  the Save button) to commit; Escape cancels.
+  The block reads as a *preview of the component*, not as its source.
+  Known attribute names map to typographic roles and are typeset in the
+  editor's own prose voice:
+
+  | Role | Attribute names |
+  | --- | --- |
+  | Eyebrow | `kicker`, `eyebrow`, `overline`, `badge`, `category` |
+  | Title | `title`, `heading`, `headline`, `name`, and `label` with no link |
+  | Supporting text | `subtitle`, `subheading`, `tagline`, `description`, `summary`, `caption`, `blurb`, `text`, `body`, `alt` |
+  | Banner | `image`, `img`, `poster`, `thumbnail`, `cover`, `background`, `avatar`, `photo`, `banner`, and an image-shaped `src` |
+  | Call to action | `label`/`cta`/`button` next to `href`/`url`/`link`/`to` |
+
+  Children render as formatted text, so bold and links inside
+  `<Header>…</Header>` are visible while you write. Anything with no role
+  falls through to a small, faint source line — for those there is nothing
+  better to say. A tag with nothing to show collapses to its nameplate.
+
+  This is a convention, not a contract: Leaf has never seen your `<Hero>`,
+  so getting it wrong costs nothing beyond an attribute landing on the
+  source line. The scale stays close to prose on purpose — a placeholder
+  that reads like a document, not an imitation of the published component.
+
+  **Double-click** a block to edit its raw source in place; ⌘/Ctrl+Enter
+  or the Save button commits, Escape cancels.
 
   When `preserve_tags` is missing a tag that the content uses, Leaf emits
   a one-off `Logger.warning` naming it. Disable with:
@@ -3433,40 +3451,150 @@ defmodule Leaf do
     end)
   end
 
-  # Render one preserved custom tag as an atomic chip.
+  # Render one preserved custom tag as an atomic block.
   #
-  # The chip is `contenteditable="false"` and carries the verbatim source
+  # The block is `contenteditable="false"` and carries the verbatim source
   # in `data-leaf-raw` — that attribute, not the rendered preview, is what
   # the client serializes back, so everything below is free to be as rich
   # as it likes without any risk to the round trip.
   #
-  # It is deliberately not opaque. A chip showing only "⧉ Hero" tells the
-  # writer nothing about which Hero it is, and hides the text, links and
-  # images the tag actually wraps — which is most of the reason to look at
-  # a document at all. So a block chip shows the tag name, its attributes,
-  # a thumbnail for any image-ish attribute, and its children rendered as
-  # formatted text. Every child element here is phrasing content, because
-  # the block form still sits inside the `<p>` MDEx produced.
+  # What it renders is a *preview of the component*, not its source. A
+  # writer scanning their own document needs to know which component this
+  # is and roughly what it will say; `title="…" subtitle="…"` in monospace
+  # answers neither question without being read like code. So known
+  # attribute names are mapped to typographic roles — title, subtitle,
+  # eyebrow, media, call-to-action — and typeset in the editor's own prose
+  # voice. Only the attributes with no role left over are shown as source,
+  # small and faint, because for those there is nothing better to say.
+  #
+  # The scale is deliberately restrained: this is a placeholder that reads
+  # like prose, not an imitation of the published component. A document
+  # with four Heroes still has to be readable, and Leaf has no idea what
+  # the host's Hero actually looks like.
+  #
+  # Every child element is phrasing content, because the block form still
+  # sits inside the `<p>` MDEx produced.
   defp preserved_chip(raw, layout) do
     {name, attrs, inner} = parse_preserved_tag(raw)
-    escaped_raw = escape_attr(raw)
+    roles = attribute_roles(attrs)
 
-    parts = [
-      ~s(<span class="leaf-atomic-label">#{escape_text(name)}</span>),
-      preserved_attr_summary(attrs, layout),
-      preserved_media(attrs, layout),
-      preserved_inner_preview(inner, layout)
-    ]
-
-    classes =
+    body =
       case layout do
-        :block -> "leaf-atomic leaf-atomic-block"
-        :inline -> "leaf-atomic leaf-atomic-inline"
+        :inline -> inline_chip_body(name, roles, inner)
+        :block -> block_chip_body(name, roles, inner)
       end
 
-    ~s(<span class="#{classes}" contenteditable="false" data-leaf-raw="#{escaped_raw}") <>
+    # `has-media` lets the stylesheet know the nameplate is sitting over a
+    # banner rather than over the first line of text, so only the text case
+    # needs to reserve room for it.
+    classes =
+      case layout do
+        :inline -> "leaf-atomic leaf-atomic-inline"
+        :block when roles.media != "" -> "leaf-atomic leaf-atomic-block leaf-atomic-has-media"
+        :block -> "leaf-atomic leaf-atomic-block"
+      end
+
+    ~s(<span class="#{classes}" contenteditable="false" data-leaf-raw="#{escape_attr(raw)}") <>
       ~s( data-leaf-tag="#{escape_attr(name)}" title="#{escape_attr(preserved_tooltip(raw))}">) <>
-      Enum.join(parts) <> ~s(</span>)
+      body <> ~s(</span>)
+  end
+
+  # The nameplate sits in the top-RIGHT corner, which is the one structural
+  # choice here worth defending: it hands the primary reading position —
+  # top-left, where the eye lands — to the writer's own content, and puts
+  # the machine fact where it can be found but not tripped over.
+  defp block_chip_body(name, roles, inner) do
+    preview =
+      [
+        role_span(roles.eyebrow, "leaf-atomic-eyebrow"),
+        role_span(roles.title, "leaf-atomic-title"),
+        role_span(roles.subtitle, "leaf-atomic-subtitle"),
+        preserved_inner_preview(inner),
+        chip_cta(roles),
+        chip_rest_attrs(roles.rest)
+      ]
+      |> Enum.reject(&(&1 == ""))
+
+    nameplate = ~s(<span class="leaf-atomic-name">#{escape_text(name)}</span>)
+    hint = ~s(<span class="leaf-atomic-hint">#{escape_text(t("Double-click to edit"))}</span>)
+    media = chip_media(roles.media)
+
+    # A tag with nothing to show (`<Divider />`) collapses to the nameplate
+    # rather than opening an empty box.
+    content =
+      if preview == [] and media == "" do
+        ""
+      else
+        media <> ~s(<span class="leaf-atomic-preview">#{Enum.join(preview)}</span>)
+      end
+
+    nameplate <> hint <> content
+  end
+
+  # Inline tags interrupt a sentence, so they stay the size of a word: the
+  # tag name plus whichever single value best identifies *which* one it is.
+  # A bare `<Image>` in the middle of a paragraph is worse than useless —
+  # every one of them looks the same — so the fallback chain runs all the
+  # way down to a filename before it gives up.
+  defp inline_chip_body(name, roles, inner) do
+    value =
+      [
+        roles.title,
+        roles.subtitle,
+        roles.cta_label,
+        String.trim(inner),
+        file_label(roles.media),
+        file_label(roles.source),
+        roles.link
+      ]
+      |> Enum.find("", &(&1 not in ["", nil]))
+      |> truncate(40)
+
+    ~s(<span class="leaf-atomic-name">#{escape_text(name)}</span>) <>
+      if value == "",
+        do: "",
+        else: ~s(<span class="leaf-atomic-value">#{escape_text(value)}</span>)
+  end
+
+  defp role_span("", _class), do: ""
+
+  defp role_span(value, class) do
+    ~s(<span class="#{class}">#{escape_text(truncate(value, 240))}</span>)
+  end
+
+  defp chip_media(""), do: ""
+
+  defp chip_media(url) do
+    ~s(<img class="leaf-atomic-media" src="#{escape_attr(url)}" alt="" loading="lazy">)
+  end
+
+  # A label with a destination is a button on the published page, so it
+  # previews as one. The destination rides along, muted — knowing where a
+  # CTA points is usually the thing you came to check.
+  defp chip_cta(%{cta_label: "", link: ""}), do: ""
+
+  defp chip_cta(%{cta_label: label, link: link}) do
+    text = if label == "", do: link, else: label
+
+    ~s(<span class="leaf-atomic-cta"><span class="leaf-atomic-cta-label">) <>
+      escape_text(truncate(text, 60)) <>
+      ~s(</span>) <>
+      if(link == "" or label == "",
+        do: "",
+        else: ~s(<span class="leaf-atomic-cta-link">#{escape_text(truncate(link, 60))}</span>)
+      ) <>
+      ~s(</span>)
+  end
+
+  defp chip_rest_attrs([]), do: ""
+
+  defp chip_rest_attrs(attrs) do
+    text =
+      attrs
+      |> Enum.take(6)
+      |> Enum.map_join(" ", fn {k, v} -> ~s(#{k}="#{truncate(v, 32)}") end)
+
+    ~s(<span class="leaf-atomic-rest">#{escape_text(text)}</span>)
   end
 
   @preserved_attr_re ~r/([A-Za-z_:][\w.:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/
@@ -3505,30 +3633,82 @@ defmodule Leaf do
     {name, attrs, inner}
   end
 
-  # Attribute names whose value is worth showing as a picture rather than
-  # a string.
+  # Attribute names mapped to the role they play in the preview. Hosts name
+  # things variously, so each role takes the common synonyms; the first
+  # match on the tag wins.
   #
+  # There is no schema to consult — Leaf has never seen the host's `<Hero>`
+  # — so this is a convention, not a contract. Getting it wrong costs
+  # nothing: an unrecognised attribute falls through to the source line at
+  # the bottom, which is exactly where it was before.
+  @role_title ~w(title heading headline name)
+  @role_eyebrow ~w(kicker eyebrow overline badge category)
+  # `alt` earns a role because on a media component it is usually the only
+  # human-written thing on the tag.
+  @role_subtitle ~w(subtitle subheading tagline description summary caption blurb text body alt)
+  @role_link ~w(href url link to)
+  @role_cta ~w(label cta button action)
+
   # These name a picture outright, so any URL-ish value is taken at face
   # value — real image URLs routinely have no extension (CDN paths, signed
   # URLs, `placehold.co/200x80/png`), and demanding one means most real
   # content gets no thumbnail.
-  @preserved_image_attrs ~w(image img poster thumbnail thumb cover background bg avatar)
+  @preserved_image_attrs ~w(image img poster thumbnail thumb cover background bg avatar photo banner)
   # `src` is ambiguous — `<Audio src="…mp3">` uses it too — so it has to
   # actually look like an image before we draw one.
   @preserved_src_attrs ~w(src)
   @url_ref_re ~r{^(?:https?://|/|\./|data:)\S*$}i
   @image_ref_re ~r{^(?:data:image/|.*\.(?:png|jpe?g|gif|webp|avif|svg)(?:[?#]|$))}i
 
-  defp preserved_media(attrs, :block) do
-    attrs
-    |> Enum.find(&image_attr?/1)
-    |> case do
-      nil -> ""
-      {_k, url} -> ~s(<img class="leaf-atomic-media" src="#{escape_attr(url)}" alt="">)
-    end
+  # Sort a tag's attributes into display roles, keeping whatever is left
+  # over so nothing is silently dropped.
+  defp attribute_roles(attrs) do
+    media = Enum.find_value(attrs, "", fn attr -> if image_attr?(attr), do: elem(attr, 1) end)
+    link = take_role(attrs, @role_link)
+    cta = take_role(attrs, @role_cta)
+
+    # `label` is a title on its own and a button caption next to a
+    # destination — the same word doing two jobs, disambiguated by whether
+    # there is anywhere to go.
+    {title, cta_label} =
+      case {take_role(attrs, @role_title), cta, link} do
+        {"", label, ""} -> {label, ""}
+        {"", label, _link} -> {"", label}
+        {title, label, _} -> {title, label}
+      end
+
+    claimed =
+      [
+        title,
+        cta_label,
+        link,
+        media,
+        take_role(attrs, @role_eyebrow),
+        take_role(attrs, @role_subtitle)
+      ]
+      |> Enum.reject(&(&1 == ""))
+      |> MapSet.new()
+
+    %{
+      title: title,
+      eyebrow: take_role(attrs, @role_eyebrow),
+      subtitle: take_role(attrs, @role_subtitle),
+      media: media,
+      # Any source-ish attribute, URL-shaped or not. Never drawn as a
+      # picture — it exists so an inline chip can fall back to a filename
+      # rather than render as a bare tag name.
+      source: take_role(attrs, @preserved_image_attrs ++ @preserved_src_attrs),
+      link: link,
+      cta_label: cta_label,
+      rest: Enum.reject(attrs, fn {_k, v} -> v in claimed end)
+    }
   end
 
-  defp preserved_media(_attrs, :inline), do: ""
+  defp take_role(attrs, names) do
+    Enum.find_value(attrs, "", fn {k, v} ->
+      if String.downcase(k) in names and String.trim(v) != "", do: v
+    end)
+  end
 
   defp image_attr?({key, value}) do
     key = String.downcase(key)
@@ -3541,31 +3721,23 @@ defmodule Leaf do
     end
   end
 
-  defp preserved_attr_summary([], _layout), do: ""
+  # The last path segment of a URL — the only part of `https://cdn…/a/b/
+  # hero-2x.png?v=3` a person actually reads.
+  defp file_label(""), do: ""
 
-  defp preserved_attr_summary(attrs, layout) do
-    limit = if layout == :block, do: 6, else: 2
-
-    text =
-      attrs
-      |> Enum.take(limit)
-      |> Enum.map_join(" ", fn {k, v} -> ~s(#{k}="#{truncate(v, 40)}") end)
-
-    ~s(<span class="leaf-atomic-attrs">#{escape_text(text)}</span>)
+  defp file_label(url) do
+    url
+    |> String.split(["?", "#"])
+    |> hd()
+    |> String.split("/")
+    |> List.last()
+    |> Kernel.||("")
   end
 
-  defp preserved_inner_preview(inner, layout) do
-    trimmed = String.trim(inner)
-
-    cond do
-      trimmed == "" ->
-        ""
-
-      layout == :inline ->
-        ~s(<span class="leaf-atomic-attrs">#{escape_text(truncate(trimmed, 60))}</span>)
-
-      true ->
-        ~s(<span class="leaf-atomic-body">#{render_inner_markdown(trimmed)}</span>)
+  defp preserved_inner_preview(inner) do
+    case String.trim(inner) do
+      "" -> ""
+      trimmed -> ~s(<span class="leaf-atomic-body">#{render_inner_markdown(trimmed)}</span>)
     end
   end
 

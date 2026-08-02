@@ -1,16 +1,19 @@
 # Changelog
 
-## 0.5.0
+## 0.5.1
+
+> `0.5.0` was tagged but never published to Hex — its atomic-block preview
+> still read as an attribute dump. Everything below is the whole release.
 
 ### Upgrading
 
 - **Re-copy the JS bundle.** Almost everything below is a server↔client
   contract. A vendored copy of `priv/static/assets/leaf.js`, or a CDN pin,
-  must move with the dependency — pin `@v0.5.0`. A bundle left behind is
+  must move with the dependency — pin `@v0.5.1`. A bundle left behind is
   otherwise silent: the editor renders identically and just stops
   implementing things the server now expects (no `{:leaf_flushed, …}`
-  reply, no dirty re-baseline, atomic blocks styled as inline chips). Leaf
-  now warns in the console when the two disagree.
+  reply, no dirty re-baseline, atomic blocks with no styling for their
+  preview). Leaf now warns in the console when the two disagree.
 - **The fallback for a denied mode changed** from a hardcoded `:visual` to
   the first allowed mode. Only reachable when `mode:` names a mode the same
   editor denies.
@@ -20,14 +23,29 @@
 
 ### Added
 
-- **Atomic preserved blocks show their content.** A `preserve_tags` block
-  used to render as an opaque `⧉ Hero` chip, which hid the attributes, the
-  text and the links the tag wrapped — most of the reason to look at a
-  document at all. A block chip now shows the tag name, its attributes, a
-  thumbnail for any image-ish attribute (`image`, `poster`, `cover`, an
-  image `src`, …) and its children rendered as formatted text. The
-  serialized form is unchanged: `data-leaf-raw` still carries the verbatim
-  source, so the round trip stays byte-for-byte identical.
+- **Atomic preserved blocks read as a preview, not as source.** A
+  `preserve_tags` block used to render as an opaque `⧉ Hero` chip, hiding
+  the text, links and images the tag wrapped — most of the reason to look
+  at a document at all.
+
+  Known attribute names are now mapped to typographic roles and typeset in
+  the editor's own prose voice: `title`/`heading`/`headline` as a title,
+  `subtitle`/`tagline`/`description`/`alt` as supporting text,
+  `kicker`/`eyebrow`/`category` as an eyebrow, `image`/`cover`/`poster`
+  (or an image-shaped `src`) as a banner, and `label` + `href` as a
+  call-to-action with its destination. Children render as formatted text,
+  so bold and links inside `<Header>…</Header>` are visible. Attributes
+  with no role fall through to a small, faint source line — for those
+  there is nothing better to say. A tag with nothing to show collapses to
+  its nameplate instead of opening an empty box.
+
+  The scale stays close to prose deliberately: this is a placeholder that
+  reads like a document, not an imitation of the published component. Leaf
+  has never seen the host's `<Hero>`, and a document with four of them
+  still has to be readable.
+
+  The serialized form is unchanged — `data-leaf-raw` still carries the
+  verbatim source, so the round trip stays byte-for-byte identical.
 - **Editing an atomic block in place.** Double-click one to open a raw
   source editor for just that block; ⌘/Ctrl+Enter or Save commits, Escape
   cancels. Previously the only way to change a `<Showcase>` was to switch

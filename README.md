@@ -51,7 +51,7 @@ If you prefer not to use the `deps/` import path (e.g., non-standard project str
 ```javascript
 // Load Leaf from CDN
 const script = document.createElement("script");
-script.src = "https://cdn.jsdelivr.net/gh/alexdont/leaf@v0.5.0/priv/static/assets/leaf.js";
+script.src = "https://cdn.jsdelivr.net/gh/alexdont/leaf@v0.5.1/priv/static/assets/leaf.js";
 script.onload = () => {
   // Leaf is now available at window.LeafHooks
 };
@@ -158,11 +158,29 @@ A declared tag is pulled out before the markdown parser runs, rendered as a
 non-editable **atomic block** and restored verbatim on the way back, so the
 source round-trips byte for byte.
 
-The block is not opaque — it shows the tag name, its attributes, a thumbnail
-for any image-ish attribute (`image`, `poster`, `cover`, an image `src`, …) and
-its children rendered as formatted text, so links and emphasis inside
-`<Header>…</Header>` are visible while you write. **Double-click** a block to
-edit its raw source in place; ⌘/Ctrl+Enter or Save commits, Escape cancels.
+The block reads as a preview of the component, not as its source. Known
+attribute names map to typographic roles:
+
+| Role | Attribute names |
+|---|---|
+| Eyebrow | `kicker`, `eyebrow`, `overline`, `badge`, `category` |
+| Title | `title`, `heading`, `headline`, `name`, and `label` with no link |
+| Supporting text | `subtitle`, `subheading`, `tagline`, `description`, `summary`, `caption`, `blurb`, `text`, `body`, `alt` |
+| Banner | `image`, `img`, `poster`, `thumbnail`, `cover`, `background`, `avatar`, `photo`, `banner`, and an image-shaped `src` |
+| Call to action | `label`/`cta`/`button` next to `href`/`url`/`link`/`to` |
+
+Children render as formatted text, so bold and links inside
+`<Header>…</Header>` are visible while you write. Anything with no role falls
+through to a small, faint source line — for those there is nothing better to
+say. A tag with nothing to show collapses to its nameplate.
+
+This is a convention, not a contract: Leaf has never seen your `<Hero>`, so
+getting it wrong costs nothing beyond an attribute appearing on the source line.
+The scale stays close to prose on purpose — a placeholder that reads like a
+document, not an imitation of the published component.
+
+**Double-click** a block to edit its raw source in place; ⌘/Ctrl+Enter or Save
+commits, Escape cancels.
 
 Silence the warning (e.g. for content that legitimately contains prose like
 `<Not A Tag>`) with `config :leaf, warn_unpreserved_tags: false`.
