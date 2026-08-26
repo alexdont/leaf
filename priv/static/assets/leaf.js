@@ -1989,7 +1989,8 @@
       // The textarea keeps a native stack of its own, but it is wiped by every
       // programmatic write and cannot cross a mode switch. Drive ours instead.
       textarea.addEventListener("keydown", function (e) {
-        self._historyKeydown(e);
+        if (self._historyKeydown(e)) return;
+        self._maybeSurroundTextarea(e, textarea);
       });
     },
 
@@ -2021,7 +2022,8 @@
       });
 
       textarea.addEventListener("keydown", function (e) {
-        self._historyKeydown(e);
+        if (self._historyKeydown(e)) return;
+        self._maybeSurroundTextarea(e, textarea);
       });
     },
 
@@ -2217,6 +2219,10 @@
 
       // Before anything else: undo/redo must win over every shortcut below.
       if (this._historyKeydown(e)) return;
+
+      // Wrapping a selection has to come before the handlers that treat a
+      // printable key as replacing it.
+      if (this._maybeSurroundSelection(e)) return;
 
       var mod = e.ctrlKey || e.metaKey;
 
@@ -6748,6 +6754,108 @@
       this._sourceBlock = null;
       this._lastSourceStateKey = null;
       this._activeMatchKey = null;
+    },
+
+    // Typing an opening bracket or quote with text selected wraps the
+    // selection instead of replacing it: select `hello`, press `(`, get
+    // `(hello)` with `hello` still selected.
+    //
+    // Only openers. A closing character is left alone so it can still be typed
+    // literally, and so pressing `)` after a wrap does not nest again.
+    _SURROUND_PAIRS: {
+      "(": ")",
+      "[": "]",
+      "{": "}",
+      '"': '"',
+      "'": "'",
+      "`": "`"
+    },
+
+    // Returns true when the keystroke was consumed.
+    _maybeSurroundSelection: function (e) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return false;
+      if (this._readonly) return false;
+
+      var close = this._SURROUND_PAIRS[e.key];
+      if (!close) return false;
+
+      var sel = window.getSelection();
+      if (!sel || !sel.rangeCount || sel.isCollapsed) return false;
+
+      var range = sel.getRangeAt(0);
+      if (!this._visualEl || !this._visualEl.contains(range.commonAncestorContainer)) {
+        return false;
+      }
+      if (range.toString().length === 0) return false;
+
+      e.preventDefault();
+      this._historyCaptureNow("surround");
+
+      // Insert the CLOSING character first: putting the opener in first would
+      // shift every offset after it and invalidate the range's end.
+      //
+      // Inserting around the selection rather than replacing its text keeps
+      // whatever it contains — bold runs, links, a whole nested structure —
+      // which `execCommand("insertText")` would flatten to plain text.
+      var closeNode = document.createTextNode(close);
+      var closeAt = range.cloneRange();
+      closeAt.collapse(false);
+      closeAt.insertNode(closeNode);
+
+      var openNode = document.createTextNode(e.key);
+      var openAt = range.cloneRange();
+      openAt.collapse(true);
+      openAt.insertNode(openNode);
+
+      // Leave the original text selected between the two, so the wrap can be
+      // repeated — `(`, `[`, `"` in sequence nests as the user expects.
+      try {
+        var kept = document.createRange();
+        kept.setStartAfter(openNode);
+        kept.setEndBefore(closeNode);
+        sel.removeAllRanges();
+        sel.addRange(kept);
+      } catch (_e) {
+        /* content shifted — leave the caret where the browser put it */
+      }
+
+      this._visualEl.dispatchEvent(new Event("input", { bubbles: true }));
+      this._historyCapture("surround");
+      return true;
+    },
+
+    // The textarea counterpart, for markdown and html modes. `markdownFormat`
+    // already wraps a selection through `replaceRange`, which keeps the
+    // browser's own undo stack intact.
+    _maybeSurroundTextarea: function (e, textarea) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return false;
+      if (this._readonly || !textarea) return false;
+
+      var close = this._SURROUND_PAIRS[e.key];
+      if (!close) return false;
+      if (textarea.selectionStart === textarea.selectionEnd) return false;
+
+      e.preventDefault();
+      this._historyCaptureNow("surround");
+
+      var gid = this._editorId.replace(/-/g, "_") + "_markdown";
+      var fmt = window["markdownFormat_" + gid];
+
+      if (fmt && textarea === this._getMarkdownTextarea()) {
+        fmt(e.key, close);
+      } else {
+        var start = textarea.selectionStart;
+        var end = textarea.selectionEnd;
+        var value = textarea.value;
+
+        textarea.value =
+          value.slice(0, start) + e.key + value.slice(start, end) + close + value.slice(end);
+        textarea.setSelectionRange(start + 1, end + 1);
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+
+      this._historyCapture("surround");
+      return true;
     },
 
     // The next real item after `li`, or null at the end of the list.

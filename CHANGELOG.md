@@ -101,6 +101,15 @@
   an item coming back from the server arrived bare. Every path that assigns
   content wholesale now normalises empty items the same way.
 
+### Added
+
+- **Typing a bracket or quote with text selected wraps it.** Select `hello`,
+  press `(`, get `(hello)` with `hello` still selected so the wrap can be
+  stacked. Handles `(`, `[`, `{`, `"`, `'` and `` ` ``, in every mode. Only
+  openers: a closing character stays typeable, and pressing one after a wrap
+  does not nest again. The characters are inserted AROUND the selection rather
+  than replacing its text, so formatting inside it survives.
+
 ### Changed
 
 - **Toolbar actions no longer die on an empty row.** Measuring the caret
