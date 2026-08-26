@@ -103,6 +103,15 @@
 
 ### Changed
 
+- **The Task List toolbar button works without selecting text first.** It
+  appeared to do nothing on an empty line. The item WAS created — and then
+  removed the instant the caret left it, by the tidy-up that clears an
+  abandoned trailing bullet. An empty checkbox is not residue: it renders as a
+  tickable box and is exactly what the button is for, so task items are now
+  exempt from that tidy-up. Converting an empty line also leaves the item with
+  somewhere to type, which it previously did not. Enter continues the checklist
+  and, on an empty item, finishes it — as with bullets.
+
 - **A completed task item is struck through, not just faded.** Checking one off
   now reads as done at a glance, the way Obsidian renders it. The line is drawn
   by the item and skips the checkbox — CSS does not propagate text-decoration

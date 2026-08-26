@@ -286,3 +286,96 @@ test("hybrid: editing the first item's number renumbers the list", { skip }, () 
 test("hybrid: renumbering the first item back to 1 drops the attribute", { skip }, () => {
   assert.equal(renumberFirst('<ol start="19"><li>a</li></ol>', "1. a"), null);
 });
+
+
+// --------------------------------------------------------------------------
+// Task lists from the toolbar.
+//
+// Clicking the button appeared to do nothing unless text was selected first.
+// The item WAS created — and then removed the moment the caret left it, by the
+// same tidy-up that clears an abandoned trailing bullet. An empty checkbox is
+// not abandoned residue: it renders as a tickable box, and it is exactly what
+// the button is for.
+// --------------------------------------------------------------------------
+
+function taskEditor(html) {
+  const e = editor(html, "hybrid");
+
+  e._insertBlockAfterCurrent = (node) => e._visualEl.appendChild(node);
+  e._placeCaretIn = (n) => {
+    try {
+      caretAtEndOf(n);
+    } catch (_) {
+      /* nothing to place in an empty node */
+    }
+  };
+
+  return e;
+}
+
+test("the toolbar button on an empty line makes a checkbox with somewhere to type", { skip }, () => {
+  const e = taskEditor("<p><br></p>");
+  const block = e._visualEl.children[0];
+
+  e._getCurrentBlock = () => block;
+  e._insertTaskList();
+
+  const li = e._visualEl.querySelector("li.leaf-task");
+
+  assert.ok(li, "the button should create a task item");
+  assert.ok(li.querySelector(".leaf-task-box"), "it needs its checkbox");
+  e.cleanup();
+});
+
+test("a checkbox created on an empty line survives the caret leaving", { skip }, () => {
+  // The reported symptom: it looked as though nothing was created at all.
+  const e = taskEditor("<p><br></p><p>after</p>");
+  const block = e._visualEl.children[0];
+
+  e._getCurrentBlock = () => block;
+  e._insertTaskList();
+
+  const li = e._visualEl.querySelector("li.leaf-task");
+  caretAtEndOf(li);
+  e._sourceBlock = e._enterSourceMode(li);
+  e._exitSourceMode(e._sourceBlock);
+
+  const after = e._visualEl.querySelector("li.leaf-task");
+
+  assert.ok(after, "the checkbox must not be tidied away");
+  assert.ok(after.querySelector(".leaf-task-box"), "and its box must be rebuilt");
+  e.cleanup();
+});
+
+const taskLi = (text) =>
+  `<li class="leaf-task" data-checked="false"><span class="leaf-task-box" contenteditable="false"></span>${text}</li>`;
+
+test("Enter on a task item continues the checklist", { skip }, () => {
+  const e = taskEditor(`<ul>${taskLi("buy milk")}</ul>`);
+  const li = items(e)[0];
+
+  caretAtEndOf(li);
+  e._sourceBlock = e._enterSourceMode(li);
+  caretAtEndOf(e._sourceBlock);
+  e._maybeHandleSourceEnter();
+
+  assert.equal(items(e).length, 2);
+  assert.match(items(e)[1].textContent, /^- \[ \] /, "the new item carries a fresh unchecked box");
+  e.cleanup();
+});
+
+test("Enter on the last, empty task item finishes the checklist", { skip }, () => {
+  // The way out of a checklist, and the behaviour asked for: keep pressing
+  // Enter to add boxes, press it on an empty one to stop.
+  const e = taskEditor(`<ul>${taskLi("done")}${taskLi(ZWSP)}</ul>`);
+  const li = items(e)[1];
+
+  caretAtEndOf(li);
+  e._sourceBlock = e._enterSourceMode(li);
+  caretAtEndOf(e._sourceBlock);
+  e._maybeHandleSourceEnter();
+
+  assert.equal(items(e).length, 1);
+  assert.match(e._visualEl.innerHTML, /<p>/, "and lands in a paragraph below the list");
+  e.cleanup();
+});

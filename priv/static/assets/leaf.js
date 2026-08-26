@@ -8843,7 +8843,15 @@
         //
         // Same rule as Enter (see `_nextListSibling` in the keydown handler):
         // the tidy-up applies at the end of a list, never in the middle of one.
-        if (hasMarker && !this._nextListSibling(sourceBlock)) {
+        // A task item is exempt. An empty bullet is the residue of starting a
+        // line and changing your mind, but an empty CHECKBOX is a thing in its
+        // own right — it renders as a tickable box, and it is what the toolbar
+        // button produces. Clearing it on blur made that button look broken:
+        // clicking it appeared to do nothing unless text was selected first,
+        // because the item it created was removed the moment the caret left.
+        var isTaskSource = /^(- |\d+\. )\[[ xX]?\] /.test(liNormalized);
+
+        if (hasMarker && !isTaskSource && !this._nextListSibling(sourceBlock)) {
           var liContent = liNormalized
             .replace(/^(- |\d+\. )/, "")
             .replace(/^\[([ xX]?)\] /, "");
@@ -10742,10 +10750,16 @@
       if (isPlainBlock) {
         while (block.firstChild) li.appendChild(block.firstChild);
         block.parentNode.replaceChild(ul, block);
+        this._forgetSourceBlock(block);
       } else {
-        li.appendChild(document.createTextNode("​"));
         this._insertBlockAfterCurrent(ul);
       }
+
+      // Converting an EMPTY line moves nothing, so the item would be left with
+      // its checkbox and no text node — nowhere for the caret, and nothing to
+      // type into. Both branches go through the same helper so the button
+      // behaves the same on a blank line as on one with text.
+      this._ensureListItemPlaceholder(li);
 
       this._placeCaretIn(li);
       this._debouncedPushVisualChange();
