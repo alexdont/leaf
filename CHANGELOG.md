@@ -22,6 +22,13 @@
 - **Undo and redo buttons reflect availability.** They were always clickable,
   including with nothing to undo.
 
+- **The undo button no longer stays greyed out while Ctrl+Z works.** The
+  visual editor's history listener referenced a `self` its enclosing scope
+  never bound, so every keystroke threw inside the event handler and nothing
+  was captured. Ctrl+Z still appeared to work — the undo path captures for
+  itself before restoring — so a single undo jumped all the way back to the
+  state at mount rather than stepping.
+
 ### Added
 
 - Leaf owns an undo stack: snapshots of the active surface plus caret, one

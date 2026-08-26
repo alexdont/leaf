@@ -242,3 +242,48 @@ test("a readonly editor records nothing and undoes nothing", () => {
   assert.equal(e._history.length, before);
   assert.equal(e._historyUndo(), false);
 });
+
+test("the bundle never references an unbound `self`", () => {
+  // Regression: the visual editor's history listener was written as
+  // `function () { self._historyCapture("input"); }` inside `mounted()`, which
+  // defines no `self`. Every keystroke threw a ReferenceError, so nothing was
+  // ever captured — the undo button stayed greyed out while Ctrl+Z appeared to
+  // work, because the undo path captures for itself before restoring.
+  //
+  // Nothing in the running editor surfaces such a throw: it happens inside a
+  // DOM event listener, so it is swallowed into the console and the feature
+  // just silently does nothing. A static check is the cheapest guard.
+  const fs = require("node:fs");
+  const path = require("node:path");
+
+  const src = fs
+    .readFileSync(path.join(__dirname, "../../priv/static/assets/leaf.js"), "utf8")
+    .split("\n");
+
+  // Top-level members of the hook object, plus `mounted()`, bound the scopes a
+  // `var self = this` can live in.
+  const blockStarts = src
+    .map((line, i) => (/^    _?[a-zA-Z]+[:(]/.test(line) || line.trim() === "mounted() {" ? i : -1))
+    .filter((i) => i >= 0);
+
+  const offenders = [];
+
+  src.forEach((line, i) => {
+    const code = line.replace(/\/\/.*$/, "");
+    if (!/\bself\s*\./.test(code)) return;
+
+    const start = blockStarts.filter((b) => b <= i).pop() ?? 0;
+    const end = blockStarts.find((b) => b > i) ?? src.length;
+    const block = src.slice(start, end).join("\n");
+
+    if (!/\bself\s*=\s*this\b/.test(block)) {
+      offenders.push(`line ${i + 1}: ${line.trim().slice(0, 70)}`);
+    }
+  });
+
+  assert.deepEqual(
+    offenders,
+    [],
+    "`self` used where no enclosing scope binds it:\n" + offenders.join("\n")
+  );
+});

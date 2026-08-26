@@ -1540,9 +1540,12 @@
           this._onVisualInput.bind(this)
         );
 
-        this._visualEl.addEventListener("input", function () {
-          self._historyCapture("input");
-        });
+        this._visualEl.addEventListener(
+          "input",
+          function () {
+            this._historyCapture("input");
+          }.bind(this)
+        );
 
         this._visualEl.addEventListener(
           "keydown",
