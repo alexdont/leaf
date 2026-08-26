@@ -30,7 +30,7 @@
   // its own asset pipeline gets a copy that silently stays behind after
   // `mix deps.update leaf`, and a stale bundle looks exactly like a
   // current one until something it doesn't implement quietly no-ops.
-  window.LeafHooks.version = "0.5.1";
+  window.LeafHooks.version = "0.6.0";
 
   // =========================================================================
   // Reveal hidden spoilers on click (works for any .leaf-spoiler on the page,
@@ -1540,6 +1540,10 @@
           this._onVisualInput.bind(this)
         );
 
+        this._visualEl.addEventListener("input", function () {
+          self._historyCapture("input");
+        });
+
         this._visualEl.addEventListener(
           "keydown",
           this._onVisualKeydown.bind(this)
@@ -1581,6 +1585,10 @@
       this._registerMarkdownHelpers();
       this._setupMarkdownTextarea();
       this._setupHtmlTextarea();
+
+      // After the surfaces exist, so the opening state is step zero and the
+      // first edit has something to undo back to.
+      this._historyInit();
       this._setupGripDoubleClick();
       this._setupMenuPlacement();
       // Entirely inert unless the host passed `suggestions` — see
@@ -1932,9 +1940,16 @@
       this._markdownInputHandler = function () {
         self._debouncedPushMarkdownChange(textarea.value);
         self._updateCounts();
+        self._historyCapture("markdown-input");
       };
 
       textarea.addEventListener("input", this._markdownInputHandler);
+
+      // The textarea keeps a native stack of its own, but it is wiped by every
+      // programmatic write and cannot cross a mode switch. Drive ours instead.
+      textarea.addEventListener("keydown", function (e) {
+        self._historyKeydown(e);
+      });
     },
 
     _debouncedPushMarkdownChange: function (content) {
@@ -1961,6 +1976,11 @@
       textarea.addEventListener("input", function () {
         self._debouncedPushHtmlChange(textarea.value);
         self._updateCounts();
+        self._historyCapture("html-input");
+      });
+
+      textarea.addEventListener("keydown", function (e) {
+        self._historyKeydown(e);
       });
     },
 
@@ -2154,6 +2174,9 @@
       // further down.
       if (this._suggestKeydown(e)) return;
 
+      // Before anything else: undo/redo must win over every shortcut below.
+      if (this._historyKeydown(e)) return;
+
       var mod = e.ctrlKey || e.metaKey;
 
       // Select-all + Backspace/Delete: Chrome's native deletion leaves
@@ -2166,6 +2189,9 @@
         this._selectionCoversAllContent()
       ) {
         e.preventDefault();
+        // Capture BEFORE the wholesale reset. This is the case that made undo
+        // look most broken: select all, delete, Ctrl+Z, nothing comes back.
+        this._historyCaptureNow("select-all-delete");
         this._visualEl.innerHTML = "<p><br></p>";
         this._placeCaretIn(this._visualEl.firstChild);
         this._dragHandleBlock = null;
@@ -4842,6 +4868,9 @@
           });
 
           self._updateCounts();
+          // Record the newly-active surface, unless we are here BECAUSE of a
+          // restore — in that case the caller is about to write the content.
+          if (!self._historyRestoring) self._historyCaptureNow("mode:" + newMode);
         });
       });
     },
@@ -9564,6 +9593,372 @@
       }
     },
 
+    // =====================================================================
+    // Undo / redo history
+    // =====================================================================
+    //
+    // Leaf owns its history rather than delegating to the browser's, because
+    // the native stack cannot survive how this editor works:
+    //
+    //   * Every mode switch, every markdown→visual sync from the server and
+    //     every `set_content` replaces the surface's content wholesale.
+    //     Assigning `innerHTML` (or `value`) discards the native stack
+    //     entirely — the same trap `replaceRange` was written to avoid on the
+    //     textarea side, never addressed on the contenteditable side.
+    //   * `document.execCommand("undo")` only knows about edits execCommand
+    //     itself made. Leaf edits the DOM directly in many places (hybrid
+    //     source blocks, atomic tags, select-all delete), and none of that was
+    //     ever undoable.
+    //   * The textarea and the contenteditable keep SEPARATE native stacks, so
+    //     undo silently meant different things per tab and could never cross a
+    //     mode switch.
+    //
+    // The model is one array of snapshots plus a cursor, which is what makes
+    // redo fall out for free: undo walks the cursor back, redo walks it
+    // forward, and a fresh edit truncates whatever was ahead.
+    //
+    // A snapshot stores the RAW content of whichever surface was active, so
+    // restoring is a straight assignment with no conversion — markdown does
+    // not have to round-trip through the server to undo a keystroke. The mode
+    // rides along, so undoing across a mode switch returns you to the mode the
+    // edit happened in, which is the only honest answer: the content of that
+    // step only exists in that representation.
+
+    _HISTORY_LIMIT: 200,
+
+    _historyInit: function () {
+      this._history = [];
+      this._historyIndex = -1;
+      this._historyTimer = null;
+      // Set while restoring so the input events a restore fires cannot be
+      // captured as new edits — that would append the state we just undid and
+      // make undo appear to do nothing.
+      this._historyRestoring = false;
+      this._historyCaptureNow("init");
+    },
+
+    // Content of the surface the given mode edits. One place that knows the
+    // mapping, so capture and restore cannot disagree about it.
+    _historySurface: function (mode) {
+      mode = mode || this._mode;
+
+      if (mode === "markdown") return this._getMarkdownTextarea();
+      if (mode === "html") return this._getHtmlTextarea();
+      return this._visualEl;
+    },
+
+    _historyRead: function (mode) {
+      var el = this._historySurface(mode);
+      if (!el) return null;
+      return mode === "markdown" || mode === "html" ? el.value : el.innerHTML;
+    },
+
+    // Debounced: a burst of typing collapses into one entry, so undo steps
+    // through edits a person would recognise rather than one character at a
+    // time.
+    _historyCapture: function (reason) {
+      if (this._historyRestoring || this._readonly) return;
+
+      var self = this;
+      if (this._historyTimer) clearTimeout(this._historyTimer);
+      this._historyTimer = setTimeout(function () {
+        self._historyCaptureNow(reason);
+      }, 350);
+    },
+
+    // Immediate capture. Used before anything structural — a toolbar action, a
+    // select-all delete, a mode switch — so the step before it is on the stack
+    // even if the debounce has not fired yet.
+    _historyCaptureNow: function (reason) {
+      if (this._historyRestoring || this._readonly) return;
+      if (this._historyTimer) {
+        clearTimeout(this._historyTimer);
+        this._historyTimer = null;
+      }
+      if (!this._history) return;
+
+      var content = this._historyRead(this._mode);
+      if (content === null) return;
+
+      var top = this._history[this._historyIndex];
+      // Nothing changed — a toolbar action that was a no-op, or a second
+      // capture for the same keystroke. Refresh the selection so undo still
+      // returns the caret to where it most recently was.
+      if (top && top.mode === this._mode && top.content === content) {
+        top.selection = this._historySelection();
+        return;
+      }
+
+      // A new edit invalidates any redo future.
+      if (this._historyIndex < this._history.length - 1) {
+        this._history.length = this._historyIndex + 1;
+      }
+
+      this._history.push({
+        mode: this._mode,
+        content: content,
+        selection: this._historySelection(),
+        reason: reason || "edit"
+      });
+
+      if (this._history.length > this._HISTORY_LIMIT) {
+        // Drop the oldest. Snapshots are whole documents, so an unbounded
+        // stack in a long editing session is a real memory cost.
+        this._history.shift();
+      }
+
+      this._historyIndex = this._history.length - 1;
+      this._updateToolbarState();
+    },
+
+    _historyCanUndo: function () {
+      return !!this._history && this._historyIndex > 0;
+    },
+
+    _historyCanRedo: function () {
+      return !!this._history && this._historyIndex < this._history.length - 1;
+    },
+
+    _historyUndo: function () {
+      if (this._readonly) return false;
+      // Flush any pending keystrokes first, or the most recent typing would
+      // be skipped over instead of undone.
+      this._historyCaptureNow("pre-undo");
+      if (!this._historyCanUndo()) return false;
+
+      this._historyIndex -= 1;
+      this._historyApply(this._history[this._historyIndex]);
+      return true;
+    },
+
+    _historyRedo: function () {
+      if (this._readonly) return false;
+      if (!this._historyCanRedo()) return false;
+
+      this._historyIndex += 1;
+      this._historyApply(this._history[this._historyIndex]);
+      return true;
+    },
+
+    _historyApply: function (entry) {
+      if (!entry) return;
+
+      var self = this;
+      this._historyRestoring = true;
+
+      try {
+        if (entry.mode !== this._mode) this._historySetMode(entry.mode);
+
+        var el = this._historySurface(entry.mode);
+        if (el) {
+          if (entry.mode === "markdown" || entry.mode === "html") {
+            el.value = entry.content;
+          } else {
+            el.innerHTML = entry.content;
+          }
+          this._historyRestoreSelection(entry, el);
+        }
+      } finally {
+        // Cleared on a later tick: replacing content fires input events
+        // asynchronously in some engines, and capturing those would append the
+        // state we just restored.
+        setTimeout(function () {
+          self._historyRestoring = false;
+        }, 0);
+      }
+
+      this._historyAfterApply(entry);
+      this._updateToolbarState();
+    },
+
+    // Tell the server and the rest of the editor what changed, using the same
+    // paths a manual edit would, so a host LiveView sees an undo exactly as it
+    // sees typing.
+    _historyAfterApply: function (entry) {
+      if (entry.mode === "markdown") {
+        var ta = this._getMarkdownTextarea();
+        if (ta) this._debouncedPushMarkdownChange(ta.value);
+      } else if (entry.mode === "html") {
+        var html = this._getHtmlTextarea();
+        if (html && this._debouncedPushHtmlChange) {
+          this._debouncedPushHtmlChange(html.value);
+        }
+      } else {
+        this._debouncedPushVisualChange();
+      }
+
+      if (this._updateCounts) this._updateCounts();
+    },
+
+    // ---- selection ------------------------------------------------------
+    //
+    // A textarea offset is just a number. A contenteditable caret is stored as
+    // a character offset into the element's text, NOT as a node reference:
+    // restoring replaces every node, so any node held from before is detached
+    // by the time we would use it.
+
+    _historySelection: function () {
+      var mode = this._mode;
+
+      if (mode === "markdown" || mode === "html") {
+        var ta = this._historySurface(mode);
+        if (!ta) return null;
+        return { start: ta.selectionStart, end: ta.selectionEnd };
+      }
+
+      if (!this._visualEl) return null;
+
+      var sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return null;
+
+      var range = sel.getRangeAt(0);
+      if (!this._visualEl.contains(range.startContainer)) return null;
+
+      return {
+        start: this._historyTextOffset(range.startContainer, range.startOffset),
+        end: this._historyTextOffset(range.endContainer, range.endOffset)
+      };
+    },
+
+    // Characters of text before (container, offset) within the editor.
+    _historyTextOffset: function (container, offset) {
+      var walker = document.createTreeWalker(
+        this._visualEl,
+        NodeFilter.SHOW_TEXT,
+        null,
+        false
+      );
+
+      var count = 0;
+      var node;
+
+      while ((node = walker.nextNode())) {
+        if (node === container) return count + offset;
+        count += node.nodeValue.length;
+      }
+
+      // The caret sat on an element rather than in text (an empty paragraph,
+      // between blocks). Counting the text inside everything before it is the
+      // closest position that survives a re-render.
+      if (container && container.nodeType === 1) {
+        var before = 0;
+        for (var i = 0; i < offset && i < container.childNodes.length; i++) {
+          before += (container.childNodes[i].textContent || "").length;
+        }
+        return this._historyTextOffset(container, 0) === 0 ? before : count;
+      }
+
+      return count;
+    },
+
+    _historyRestoreSelection: function (entry, el) {
+      var sel = entry.selection;
+      if (!sel) return;
+
+      if (entry.mode === "markdown" || entry.mode === "html") {
+        try {
+          el.focus({ preventScroll: true });
+          el.setSelectionRange(sel.start, sel.end);
+        } catch (e) {
+          /* a detached or hidden textarea — nothing to place */
+        }
+        return;
+      }
+
+      var start = this._historyNodeAt(sel.start);
+      var end = sel.end === sel.start ? start : this._historyNodeAt(sel.end);
+      if (!start) return;
+
+      try {
+        var range = document.createRange();
+        range.setStart(start.node, start.offset);
+        range.setEnd((end || start).node, (end || start).offset);
+
+        var selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        this._visualEl.focus({ preventScroll: true });
+      } catch (e) {
+        /* content shifted under us — leave the caret where the browser put it */
+      }
+    },
+
+    // Inverse of _historyTextOffset: character offset back to a text node.
+    _historyNodeAt: function (offset) {
+      if (!this._visualEl) return null;
+
+      var walker = document.createTreeWalker(
+        this._visualEl,
+        NodeFilter.SHOW_TEXT,
+        null,
+        false
+      );
+
+      var count = 0;
+      var node;
+      var last = null;
+
+      while ((node = walker.nextNode())) {
+        var len = node.nodeValue.length;
+        if (count + len >= offset) return { node: node, offset: offset - count };
+        count += len;
+        last = node;
+      }
+
+      if (last) return { node: last, offset: last.nodeValue.length };
+      return { node: this._visualEl, offset: 0 };
+    },
+
+    // Undo can cross a mode switch, so applying an entry may have to change
+    // mode first. Driving the existing tab click reuses everything that hangs
+    // off a mode change — content sync, visibility, tab styling, the
+    // `mode_changed` push — instead of half-reimplementing it here.
+    _historySetMode: function (mode) {
+      var tab = this.el.querySelector('[data-mode-tab="' + mode + '"]');
+
+      if (tab) {
+        tab.click();
+        return;
+      }
+
+      // No switcher rendered (a single-mode editor, or a compact menu that is
+      // closed). Fall back to the minimum that makes the surface usable.
+      this._mode = mode;
+      if (this._applyModeVisibility) this._applyModeVisibility(mode);
+    },
+
+    // A wholly new document — a host calling set_content. The previous
+    // document's steps are not reachable from it, so keeping them would let
+    // undo resurrect content the host has replaced.
+    _historyReset: function () {
+      this._history = [];
+      this._historyIndex = -1;
+      this._historyRestoring = false;
+      this._historyCaptureNow("reset");
+    },
+
+    // Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl+Y. Shared by every surface so the
+    // shortcut behaves the same in all four modes.
+    _historyKeydown: function (e) {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return false;
+
+      var key = (e.key || "").toLowerCase();
+
+      if (key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        this._historyUndo();
+        return true;
+      }
+
+      if ((key === "z" && e.shiftKey) || key === "y") {
+        e.preventDefault();
+        this._historyRedo();
+        return true;
+      }
+
+      return false;
+    },
+
     _execToolbarAction: function (action) {
       // Fullscreen is a view-only toggle; let it run regardless of
       // readonly state or current mode so users can expand the viewer
@@ -9590,8 +9985,15 @@
 
       if (this._readonly) return;
 
+      // Snapshot before the action so it is undoable as one step, even if
+      // the typing debounce has not fired yet.
+      if (action !== "undo" && action !== "redo") {
+        this._historyCaptureNow("toolbar:" + action);
+      }
+
       if (this._mode === "markdown") {
         this._execMarkdownToolbarAction(action);
+        if (action !== "undo" && action !== "redo") this._historyCapture("toolbar");
         return;
       }
 
@@ -9752,11 +10154,11 @@
           }
           break;
         case "undo":
-          document.execCommand("undo", false, null);
-          break;
+          this._historyUndo();
+          return;
         case "redo":
-          document.execCommand("redo", false, null);
-          break;
+          this._historyRedo();
+          return;
         case "removeFormat":
           document.execCommand("removeFormat", false, null);
           document.execCommand("formatBlock", false, "p");
@@ -9836,8 +10238,12 @@
           if (!this._denyVideo) this.pushEventTo(this.el, "insert_request", { editor_id: this._editorId, type: "video" });
           break;
         case "removeFormat": break;
-        case "undo": break;
-        case "redo": break;
+        case "undo":
+          this._historyUndo();
+          break;
+        case "redo":
+          this._historyRedo();
+          break;
       }
     },
 
@@ -11229,6 +11635,20 @@
       buttons.forEach(function (btn) {
         var action = btn.dataset.toolbarAction;
         var active = false;
+
+        // Undo/redo are the only toolbar entries whose availability is knowable
+        // ahead of the click, and the only ones that are frequently a no-op.
+        // Reflecting it is what makes the stack legible: the button greys out
+        // at the bottom of the history instead of silently doing nothing.
+        if (action === "undo" || action === "redo") {
+          var enabled =
+            action === "undo" ? self._historyCanUndo() : self._historyCanRedo();
+
+          btn.disabled = !enabled;
+          btn.classList.toggle("btn-disabled", !enabled);
+          btn.setAttribute("aria-disabled", enabled ? "false" : "true");
+          return;
+        }
 
         switch (action) {
           case "bold":
@@ -13078,6 +13498,9 @@
           break;
 
         case "set_content":
+          // A new document: its predecessor's steps are not reachable from it,
+          // so keeping them would let undo resurrect replaced content.
+          this._historyReset();
           var content = payload.content || "";
           var html = payload.html || "<p><br></p>";
 

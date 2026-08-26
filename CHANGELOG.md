@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.6.0
+
+### Fixed
+
+- **Undo now works, in every mode.** Leaf had no history of its own and
+  delegated to the browser's, which could not survive how the editor works.
+  The button in markdown mode was a literal no-op (`case "undo": break;`)
+  while Ctrl+Z still worked there, so the two disagreed. In visual and hybrid
+  mode `document.execCommand("undo")` only ever saw edits execCommand itself
+  made — never Leaf's own DOM work — and the native stack was discarded
+  outright by every wholesale `innerHTML` write: markdown→visual sync, mode
+  switches, `set_content`, and select-all-then-delete during ordinary typing.
+  That last one was the most visible: select all, delete, Ctrl+Z, and nothing
+  came back.
+
+- **Undo survives a mode switch.** The markdown textarea and the visual
+  contenteditable kept separate native stacks, so undo silently meant
+  different things per tab and could never step across a switch.
+
+- **Undo and redo buttons reflect availability.** They were always clickable,
+  including with nothing to undo.
+
+### Added
+
+- Leaf owns an undo stack: snapshots of the active surface plus caret, one
+  array with a cursor so redo falls out of the same structure. Typing is
+  coalesced on a 350 ms debounce so one undo removes a word rather than a
+  character, and structural actions snapshot immediately so they are always a
+  single step. `Ctrl/Cmd+Z`, `Ctrl/Cmd+Shift+Z` and `Ctrl+Y` are handled on
+  every surface. The stack is capped at 200 entries; `set_content` starts a
+  new one, since a replaced document's history is not reachable from it.
+
 ## 0.5.1
 
 > `0.5.0` was tagged but never published to Hex — its atomic-block preview

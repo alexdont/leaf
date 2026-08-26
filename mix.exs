@@ -1,7 +1,7 @@
 defmodule Leaf.MixProject do
   use Mix.Project
 
-  @version "0.5.1"
+  @version "0.6.0"
   @source_url "https://github.com/alexdont/leaf"
 
   def project do
@@ -17,8 +17,40 @@ defmodule Leaf.MixProject do
       package: package(),
       docs: docs(),
       source_url: @source_url,
-      dialyzer: [plt_add_apps: [:mix]]
+      dialyzer: [plt_add_apps: [:mix]],
+      aliases: aliases()
     ]
+  end
+
+  defp aliases do
+    [
+      # The undo/redo stack is real logic living in the JS bundle, so the
+      # Elixir suite alone no longer covers this library. Runs after it, and
+      # skips rather than fails where node is unavailable — the Elixir tests
+      # remain the gate.
+      test: ["test", "test.js"],
+      "test.js": &run_js_tests/1
+    ]
+  end
+
+  # `node --test` over the pure logic exported from the hook bundle. Files are
+  # passed explicitly: with no arguments node walks the CWD looking for
+  # anything test-shaped, which would hand it deps/ and _build/ as well.
+  defp run_js_tests(_args) do
+    files = Path.wildcard("test/js/*.test.cjs")
+
+    cond do
+      files == [] ->
+        Mix.shell().info("[skip] no test/js/*.test.cjs files")
+
+      System.find_executable("node") == nil ->
+        Mix.shell().info("[skip] node not found — skipping test/js")
+
+      true ->
+        {output, status} = System.cmd("node", ["--test" | files], stderr_to_stdout: true)
+        IO.puts(output)
+        if status != 0, do: Mix.raise("JS tests failed")
+    end
   end
 
   def application do
