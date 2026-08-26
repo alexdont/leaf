@@ -1536,6 +1536,8 @@
       this._fallbackMode = this.el.dataset.fallbackMode || "hybrid";
       this._hashtags = this.el.dataset.hashtags === "true";
       this._wikiLinks = this.el.dataset.wikilinks === "true";
+      this._wikiLinksResolve = this.el.dataset.wikilinksResolve !== "false";
+      this._wikiLinksFollow = this.el.dataset.wikilinksFollow || "modifier";
       this._warnStaleBundle();
       this._debounceTimer = null;
       this._markdownDebounceTimer = null;
@@ -1819,6 +1821,8 @@
       // decides whether hashtags are decorated at all.
       this._hashtags = this.el.dataset.hashtags === "true";
       this._wikiLinks = this.el.dataset.wikilinks === "true";
+      this._wikiLinksResolve = this.el.dataset.wikilinksResolve !== "false";
+      this._wikiLinksFollow = this.el.dataset.wikilinksFollow || "modifier";
 
       // The host can widen or narrow the deny list at runtime. Falling back
       // to a hardcoded "visual" stopped being safe once :visual itself
@@ -6068,7 +6072,7 @@
     // document full of links should not produce a request per occurrence.
 
     _resolveWikiLinks: function () {
-      if (!this._wikiLinks || !this._visualEl) return;
+      if (!this._wikiLinks || !this._wikiLinksResolve || !this._visualEl) return;
 
       this._wikiLinkTargets = this._wikiLinkTargets || {};
 
@@ -6104,9 +6108,16 @@
       span.setAttribute("data-leaf-wikilink-exists", info.exists ? "true" : "false");
       if (info.href) span.setAttribute("data-leaf-wikilink-href", info.href);
 
-      // A tooltip is the only affordance a span gets for free; without it an
-      // unresolved link looks identical to a typo.
-      span.setAttribute("title", info.exists ? info.href || "" : "Not found");
+      // Only what the host supplied. Leaf ships no wording for this: a label
+      // like "Not found" belongs to the host, in the host's language, about the
+      // host's own idea of what a target is. Falls back to the href, which is
+      // data rather than prose.
+      var title = info.title || (info.exists ? info.href : null);
+      if (title) {
+        span.setAttribute("title", title);
+      } else {
+        span.removeAttribute("title");
+      }
     },
 
     _onWikiLinkTargets: function (payload) {
@@ -6145,16 +6156,18 @@
 
       if (!span || !this._visualEl.contains(span)) return;
 
-      // Which gesture follows a link depends on whether there is a caret to
-      // compete with:
+      // Which gesture follows a link is the host's call, declared as
+      // `follow: :modifier | :click`.
       //
-      //   read-only — a plain click follows; nothing else wants the click.
-      //   editable  — a bare click has to place the caret, so following takes
-      //               Ctrl/Cmd, the same gesture Obsidian uses in edit mode.
+      // `:modifier` is the default because in an editable surface a bare click
+      // has to place the caret — the gesture Obsidian uses in edit mode. A
+      // read-only surface has no caret competing for the click, so it is
+      // treated as `:click` regardless; requiring Ctrl to follow a link in a
+      // viewer would be strange.
       var withModifier = e.ctrlKey || e.metaKey;
-      var follows = this._readonly
-        ? !withModifier && !e.altKey && !e.shiftKey
-        : withModifier;
+      var plainClick = !withModifier && !e.altKey && !e.shiftKey;
+      var follows =
+        this._readonly || this._wikiLinksFollow === "click" ? plainClick : withModifier;
 
       if (!follows) return;
 

@@ -739,6 +739,8 @@ defmodule Leaf do
       data-leaf-js-version={js_version()}
       data-hashtags={to_string(hashtag_trigger?(@suggest_configs))}
       data-wikilinks={to_string(wiki_links_enabled?(@wiki_links))}
+      data-wikilinks-resolve={to_string(wiki_links_resolve?(@wiki_links))}
+      data-wikilinks-follow={wiki_links_follow(@wiki_links)}
       data-deny-links={to_string(:links in @deny)}
       data-deny-images={to_string(:images in @deny)}
       data-deny-video={to_string(:video in @deny)}
@@ -3472,9 +3474,24 @@ defmodule Leaf do
   # `[[…]]` is only a link if the host said so. Without the opt-in, the
   # brackets are left as literal text — a document using them for something
   # else should not sprout links.
-  defp wiki_links_enabled?(%{} = config), do: Map.get(config, :resolve, true) != false
-  defp wiki_links_enabled?(true), do: true
-  defp wiki_links_enabled?(_), do: false
+  #
+  # Decorating and RESOLVING are separate capabilities. A host that only wants
+  # the brackets to read as links — a viewer, or one whose targets are known to
+  # exist — sets `resolve: false` and is never asked to answer anything. Tying
+  # the two together would have made "render these as links" impossible without
+  # also implementing a resolver.
+  defp wiki_links_enabled?(nil), do: false
+  defp wiki_links_enabled?(false), do: false
+  defp wiki_links_enabled?(_), do: true
+
+  defp wiki_links_resolve?(%{} = config), do: Map.get(config, :resolve, true) != false
+  defp wiki_links_resolve?(other), do: wiki_links_enabled?(other)
+
+  # How a link is followed. `:modifier` (the default) keeps a bare click for the
+  # caret while editing; `:click` suits a surface where nothing competes for it.
+  # A host knows which its editor is; Leaf should not assume.
+  defp wiki_links_follow(%{} = config), do: to_string(Map.get(config, :follow, :modifier))
+  defp wiki_links_follow(_), do: "modifier"
 
   # `#` is only a tag sigil if the host said so by configuring a `#`
   # suggestion trigger. Without that, `#` is left alone — a document using
@@ -3499,14 +3516,22 @@ defmodule Leaf do
   defp normalize_link_target(%{} = info) do
     href = Map.get(info, :href) || Map.get(info, "href")
 
+    title = Map.get(info, :title) || Map.get(info, "title")
+
     %{
       href: if(is_binary(href), do: href, else: nil),
-      exists: Map.get(info, :exists, Map.get(info, "exists", is_binary(href))) == true
+      exists: Map.get(info, :exists, Map.get(info, "exists", is_binary(href))) == true,
+      # Optional tooltip. Leaf ships no wording of its own for this: a label
+      # like "Not found" is the host's to write, in the host's language, about
+      # the host's own idea of what a target is.
+      title: if(is_binary(title), do: title, else: nil)
     }
   end
 
-  defp normalize_link_target(href) when is_binary(href), do: %{href: href, exists: true}
-  defp normalize_link_target(_), do: %{href: nil, exists: false}
+  defp normalize_link_target(href) when is_binary(href),
+    do: %{href: href, exists: true, title: nil}
+
+  defp normalize_link_target(_), do: %{href: nil, exists: false, title: nil}
 
   # Replace each occurrence of a preserved tag with an inert text token,
   # returning {protected_markdown, %{token => original_source}}.

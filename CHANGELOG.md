@@ -117,6 +117,13 @@
   want a modal or a "create this note" flow. Ctrl/Cmd-click follows while
   editing, a plain click follows in a read-only surface.
 
+  Decorating and resolving are independent: `%{resolve: false}` renders the
+  links without ever asking the host to answer, for a viewer or a host whose
+  targets are known to exist. `%{follow: :click}` lets a bare click follow while
+  editing, where the default keeps it for the caret. Leaf ships no wording for
+  an unresolved target — a label like "Not found" is the host's to write, in
+  the host's language, and rides along in the resolution reply.
+
   Off unless configured, so a document using `[[…]]` for something else is
   untouched.
 

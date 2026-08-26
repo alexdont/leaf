@@ -16,6 +16,8 @@ function wikiEditor(html, opts = {}) {
   const e = editor(html || "<p>x</p>", "hybrid");
 
   e._wikiLinks = true;
+  e._wikiLinksResolve = opts.resolve !== false;
+  e._wikiLinksFollow = opts.follow || "modifier";
   e._hashtags = true;
   e._readonly = !!opts.readonly;
   e._editorId = "wl";
@@ -235,5 +237,56 @@ test("a click reports the target, not a destination", { skip }, () => {
 
   assert.equal(payload.target, "Ideas");
   assert.equal(payload.href, "/notes/abc");
+  e.cleanup();
+});
+
+
+// --------------------------------------------------------------------------
+// Staying generic.
+//
+// Leaf provides the capability; the host decides how it behaves. Nothing here
+// should assume what a "target" is, what language the host speaks, or which
+// gesture its surface wants.
+// --------------------------------------------------------------------------
+
+test("resolve: false decorates without ever asking the host", { skip }, () => {
+  // A viewer, or a host whose targets are known to exist, should be able to
+  // render the brackets as links without implementing a resolver.
+  const e = wikiEditor(LINKS, { resolve: false });
+
+  e._resolveWikiLinks();
+
+  assert.equal(e.pushed.length, 0);
+  assert.equal(e._visualEl.querySelectorAll(".leaf-wikilink").length, 3);
+  e.cleanup();
+});
+
+test("Leaf invents no wording for a missing target", { skip }, () => {
+  // "Not found" is the host's to write, in the host's language, about the
+  // host's own idea of what a target is.
+  const e = wikiEditor(LINKS);
+
+  e._onWikiLinkTargets({ targets: { Ideas: { exists: false } } });
+
+  assert.equal(e._visualEl.querySelector("[data-leaf-wikilink]").getAttribute("title"), null);
+  e.cleanup();
+});
+
+test("a host-supplied tooltip is used verbatim", { skip }, () => {
+  const e = wikiEditor(LINKS);
+
+  e._onWikiLinkTargets({ targets: { Ideas: { exists: false, title: "Note niet gevonden" } } });
+
+  assert.equal(
+    e._visualEl.querySelector("[data-leaf-wikilink]").getAttribute("title"),
+    "Note niet gevonden"
+  );
+  e.cleanup();
+});
+
+test("follow: click lets a bare click follow while editing", { skip }, () => {
+  const e = wikiEditor(LINKS, { follow: "click" });
+
+  assert.equal(clickFirstLink(e, {}).length, 1);
   e.cleanup();
 });
