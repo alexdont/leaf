@@ -29,6 +29,15 @@
   itself before restoring — so a single undo jumped all the way back to the
   state at mount rather than stepping.
 
+- **A deliberately empty list item no longer disappears.** An `<li>` with no
+  content renders at zero height and gives the caret nowhere to sit, and the
+  marker hides with it — so leaving a bullet blank and clicking away looked
+  like the bullet had been deleted. It never was: the Enter-split path drops a
+  zero-width placeholder into a new item for exactly this reason, but that
+  placeholder is a client-side artifact stripped on the way out to markdown, so
+  an item coming back from the server arrived bare. Every path that assigns
+  content wholesale now normalises empty items the same way.
+
 ### Added
 
 - Leaf owns an undo stack: snapshots of the active surface plus caret, one

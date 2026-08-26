@@ -1652,6 +1652,7 @@
             // the inner `<p>` otherwise traps Enter inside the item.
             this._stripInterBlockWhitespace(this._visualEl);
             this._unwrapLooseListItems(this._visualEl);
+            this._ensureListItemPlaceholders(this._visualEl);
             // DOM was replaced — old block references are stale
             this._dragHandleBlock = null;
           }
@@ -4975,6 +4976,7 @@
           // Set innerHTML directly; hybrid uses the same contenteditable.
           if (this._visualEl) {
             this._visualEl.innerHTML = rawHtml || "<p><br></p>";
+            this._ensureListItemPlaceholders(this._visualEl);
           }
         } else if (to === "markdown") {
           // Client-side HTML→markdown conversion
@@ -6650,6 +6652,48 @@
           }
           child = next;
         }
+      }
+    },
+
+    // Give every empty `<li>` a caret home.
+    //
+    // An item with no content renders at zero height and offers the caret
+    // nowhere to sit, so it looks deleted even though it is still in the
+    // document. Chrome also tends to hide the bullet/number for such an item.
+    //
+    // The Enter-split path already knows this — it drops a ZWSP into a newly
+    // created item for exactly this reason. The problem was that the
+    // placeholder is a client-side artifact: it is stripped on the way out to
+    // markdown (correctly — it must not become content), so every empty item
+    // that comes BACK from the server arrives bare. Deliberately leaving a
+    // bullet empty and then clicking away made it vanish, because the sync
+    // round-trip dropped the only thing making it visible.
+    //
+    // Applied wherever content is assigned wholesale, so the two paths that
+    // can produce an empty item agree about how it renders. The ZWSP is
+    // stripped again by the markdown scrubbers, so this changes nothing about
+    // what the document serializes to.
+    _ensureListItemPlaceholders: function (root) {
+      if (!root) return;
+
+      var items = root.querySelectorAll("li");
+
+      for (var i = 0; i < items.length; i++) {
+        var li = items[i];
+
+        var raw = li.textContent || "";
+
+        // Already carries a placeholder. Checked BEFORE the emptiness test,
+        // which strips zero-width characters: without this the item collects a
+        // fresh ZWSP on every sync, growing an invisible run of them.
+        if (/[\u200B\uFEFF]/.test(raw)) continue;
+
+        // Anything that already gives the item height — text, a nested list,
+        // an image, a task box — means there is nothing to fix.
+        if (/\S/.test(raw)) continue;
+        if (li.querySelector("ul, ol, img, br, input, .leaf-task-box")) continue;
+
+        li.appendChild(document.createTextNode("\u200B"));
       }
     },
 
@@ -13509,6 +13553,7 @@
 
           if (this._visualEl) {
             this._visualEl.innerHTML = html;
+            this._ensureListItemPlaceholders(this._visualEl);
           }
 
           var markdownTextarea = this._getMarkdownTextarea();
