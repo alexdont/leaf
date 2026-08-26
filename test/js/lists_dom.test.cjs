@@ -222,3 +222,67 @@ test("an adjacent list is reported as the next item", { skip }, () => {
   assert.equal(next.textContent, "three");
   e.cleanup();
 });
+
+
+// --------------------------------------------------------------------------
+// Ordered lists that do not start at 1, in hybrid mode.
+// --------------------------------------------------------------------------
+
+function renumberFirst(html, typed) {
+  const e = editor(html, "hybrid");
+  const first = items(e)[0];
+
+  first.setAttribute("data-leaf-source", "li");
+  first.textContent = typed;
+  e._renderListItemFromSource = (src) => {
+    const li = document.createElement("li");
+    const body = src.replace(/^(- |\d+\. )/, "");
+    if (body) li.appendChild(document.createTextNode(body));
+    return li;
+  };
+  e._renderBlockFromSource = () => document.createElement("p");
+  e._exitListItemToParagraph = () => {};
+
+  e._exitSourceMode(first);
+
+  const start = e._visualEl.querySelector("ol").getAttribute("start");
+  e.cleanup();
+  return start;
+}
+
+test("hybrid: the revealed marker shows the number the item displays", { skip }, () => {
+  // It used to reveal `1. ` for the first item of an `<ol start="19">`, which
+  // both lied about the item and renumbered the list once serialized.
+  const e = editor('<ol start="19"><li>nineteen</li><li>twenty</li></ol>', "hybrid");
+  const first = items(e)[0];
+
+  caretAtEndOf(first);
+  const src = e._enterSourceMode(first);
+
+  assert.match(src.textContent, /^19\. /);
+  e.cleanup();
+});
+
+test("hybrid: Enter continues from the displayed number", { skip }, () => {
+  const e = editor('<ol start="19"><li>nineteen</li><li>twenty</li></ol>', "hybrid");
+  const first = items(e)[0];
+
+  caretAtEndOf(first);
+  e._sourceBlock = e._enterSourceMode(first);
+  caretAtEndOf(e._sourceBlock);
+  e._maybeHandleSourceEnter();
+
+  assert.match(e._visualEl.innerHTML, /20\. /, readable(e._visualEl));
+  e.cleanup();
+});
+
+test("hybrid: editing the first item's number renumbers the list", { skip }, () => {
+  // The only place a hand-typed number can live: CommonMark takes the start
+  // from the first item, and the attribute belongs to the <ol>. Without this
+  // the number was stripped with the marker and the list snapped back.
+  assert.equal(renumberFirst("<ol><li>a</li><li>b</li></ol>", "19. a"), "19");
+});
+
+test("hybrid: renumbering the first item back to 1 drops the attribute", { skip }, () => {
+  assert.equal(renumberFirst('<ol start="19"><li>a</li></ol>', "1. a"), null);
+});

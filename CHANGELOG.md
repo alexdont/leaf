@@ -37,6 +37,16 @@
   list, where exiting is the only thing it can reasonably mean, the behaviour
   is unchanged.
 
+- **Ordered lists no longer renumber themselves from 1.** A list can start at
+  19 — continuing one interrupted by a paragraph, or numbering steps on from an
+  earlier section — and CommonMark preserves that as `<ol start="19">`. The
+  serializer counted from 1 regardless, so every trip out to markdown silently
+  rewrote the numbering; switching modes was where it showed. The start is now
+  read from the list, hybrid reveals the number an item actually displays
+  rather than its position, and typing a number on the FIRST item renumbers the
+  list. Later items are left alone: their numbers carry no meaning in markdown,
+  and renumbering from one of them would move everything above it.
+
 - **A blank row survives at the end of a list that another list follows.**
   Editing produces adjacent lists more readily than it looks: deleting an
   item's `- ` marker breaks that item out to a paragraph and moves everything

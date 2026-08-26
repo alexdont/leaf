@@ -67,3 +67,43 @@ test("nested lists survive round-tripping", { skip }, () => {
 test("an item's text is preserved verbatim", { skip }, () => {
   assert.equal(markdownOf("<ul><li>hello world</li></ul>"), "- hello world");
 });
+
+
+// ---------------------------------------------------------------------------
+// Ordered lists that do not start at 1.
+//
+// Authors write them: a list continuing one interrupted by a paragraph, or
+// steps numbered on from an earlier section. CommonMark preserves it — `19.`
+// renders as `<ol start="19">` — but the serializer counted from 1 regardless,
+// so every trip out to markdown silently renumbered the document. Switching
+// modes was the visible symptom.
+// ---------------------------------------------------------------------------
+
+test("a list starting at 19 keeps its numbering", { skip }, () => {
+  assert.equal(
+    markdownOf('<ol start="19"><li>nineteen</li><li>twenty</li><li>twenty-one</li></ol>'),
+    "19. nineteen\n20. twenty\n21. twenty-one"
+  );
+});
+
+test("a list with no start attribute still counts from 1", { skip }, () => {
+  assert.equal(markdownOf("<ol><li>one</li><li>two</li></ol>"), "1. one\n2. two");
+});
+
+test("an explicit start of 1 and no start agree", { skip }, () => {
+  assert.equal(
+    markdownOf('<ol start="1"><li>one</li></ol>'),
+    markdownOf("<ol><li>one</li></ol>")
+  );
+});
+
+test("a nested list keeps its own start", { skip }, () => {
+  const md = markdownOf('<ol start="19"><li>a<ol start="3"><li>inner</li></ol></li></ol>');
+
+  assert.match(md, /^19\. a$/m);
+  assert.match(md, /^ {3}3\. inner$/m);
+});
+
+test("a malformed start attribute falls back to 1 rather than NaN", { skip }, () => {
+  assert.equal(markdownOf('<ol start="abc"><li>one</li></ol>'), "1. one");
+});

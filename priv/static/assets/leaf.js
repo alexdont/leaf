@@ -1065,13 +1065,25 @@
     return false;
   }
 
+  // Where an `<ol>` starts counting. Authors write lists that begin at 19 —
+  // continuing one interrupted by a paragraph, or numbering steps that carry on
+  // from an earlier section — and CommonMark preserves that: `19.` renders as
+  // `<ol start="19">`. Renumbering from 1 on the way back to markdown silently
+  // rewrote the document.
+  function listStart(listNode) {
+    var raw = listNode.getAttribute && listNode.getAttribute("start");
+    var parsed = parseInt(raw, 10);
+
+    return isNaN(parsed) ? 1 : parsed;
+  }
+
   function convertList(listNode, type, indent) {
     indent = indent || "";
     // Nested content must be indented past the parent marker ("- " → 2
     // chars, "1. " → 3) for CommonMark to treat it as nested.
     var childIndent = indent + (type === "ol" ? "   " : "  ");
     var items = [];
-    var index = 1;
+    var index = type === "ol" ? listStart(listNode) : 1;
     for (var i = 0; i < listNode.children.length; i++) {
       var child = listNode.children[i];
       var childTag = child.tagName.toLowerCase();
@@ -8355,9 +8367,15 @@
           listParent.tagName &&
           listParent.tagName.toLowerCase() === "ol"
         ) {
-          var liIndex =
-            Array.prototype.indexOf.call(listParent.children, block) + 1;
-          liMarker = liIndex + ". ";
+          // Position within the list PLUS where the list starts counting —
+          // revealing `1. ` for the first item of an `<ol start="19">` both
+          // lied about what the item shows and, once serialized, renumbered
+          // the document.
+          var liOffset = Array.prototype.indexOf.call(listParent.children, block);
+          var liStartAttr = parseInt(listParent.getAttribute("start"), 10);
+          var liFirst = isNaN(liStartAttr) ? 1 : liStartAttr;
+
+          liMarker = liOffset + liFirst + ". ";
         } else {
           liMarker = "- ";
         }
@@ -8824,6 +8842,37 @@
               this._syntaxMutating = false;
             }
             return;
+          }
+        }
+      }
+
+      // Editing the FIRST item's number is how a list gets renumbered by hand:
+      // in CommonMark only that number counts, and the rest follow from it. It
+      // is carried on the `<ol>` rather than the item, so without this the
+      // number typed in source mode was stripped with the marker and the list
+      // snapped back to where it started — the "it reverts the numbers"
+      // complaint. Later items are deliberately ignored: their numbers are not
+      // meaningful in markdown and renumbering from one of them would move
+      // every item above it.
+      if (origTag === "li") {
+        var numList = sourceBlock.parentNode;
+
+        if (
+          numList &&
+          numList.tagName &&
+          numList.tagName.toLowerCase() === "ol" &&
+          numList.firstElementChild === sourceBlock
+        ) {
+          var typedNum = sourceText.replace(/\u00a0/g, " ").match(/^(\d+)\. /);
+
+          if (typedNum) {
+            var typedStart = parseInt(typedNum[1], 10);
+
+            if (typedStart === 1) {
+              numList.removeAttribute("start");
+            } else {
+              numList.setAttribute("start", String(typedStart));
+            }
           }
         }
       }
