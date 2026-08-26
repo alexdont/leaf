@@ -8744,12 +8744,18 @@
           return;
         }
 
-        // An empty list item — just the `- ` / `N. ` marker (and maybe an
-        // empty `[ ] ` checkbox), no content — that the cursor LEAVES is
-        // visual noise (a stray bullet). Drop it instead of rendering an
-        // empty bullet; if that empties the list, drop the list too. This
-        // is the blur counterpart to the empty-item Enter/Backspace exits.
-        if (hasMarker) {
+        // An empty list item the cursor LEAVES is dropped — but only when it
+        // is the last thing in the list.
+        //
+        // A trailing empty bullet is the residue of starting an item and
+        // changing your mind, so clearing it keeps the document tidy. One with
+        // items BELOW it is the opposite: a blank line somebody deliberately
+        // left inside a list, and deleting it on blur meant a row could not be
+        // left empty at all — it vanished the moment the caret moved away.
+        //
+        // Same rule as Enter (see `_nextListSibling` in the keydown handler):
+        // the tidy-up applies at the end of a list, never in the middle of one.
+        if (hasMarker && !this._nextListSibling(sourceBlock)) {
           var liContent = liNormalized
             .replace(/^(- |\d+\. )/, "")
             .replace(/^\[([ xX]?)\] /, "");
@@ -8775,6 +8781,10 @@
         // helper strips the revealed `- ` / `N. ` marker and re-forms a
         // checkbox.
         rendered = this._renderListItemFromSource(sourceText);
+        // A kept-empty item renders with no content at all, which is invisible
+        // and un-clickable — give it a caret home the same way every other
+        // path does.
+        this._ensureListItemPlaceholder(rendered);
       } else {
         rendered = this._renderBlockFromSource(sourceText);
       }

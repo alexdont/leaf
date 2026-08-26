@@ -37,6 +37,13 @@
   list, where exiting is the only thing it can reasonably mean, the behaviour
   is unchanged.
 
+- **An empty bullet in the middle of a list survives the caret leaving it.**
+  In hybrid mode, leaving a block re-renders it from its markdown source, and
+  that path deleted an empty list item outright — reasonable for a trailing
+  bullet somebody abandoned, wrong for a blank row deliberately left inside a
+  list, which vanished the moment the caret moved away. The tidy-up now applies
+  only at the end of a list, matching the Enter rule.
+
 - **A bullet made by pressing Enter at the end of a line is no longer invisible
   from birth.** The new item's emptiness was decided by `firstChild`, but
   `Range.extractContents()` hands back a fragment holding an empty text node

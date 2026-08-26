@@ -239,3 +239,91 @@ test("an empty task item gets a caret home despite its checkbox", () => {
 
   assert.equal(item._appended.length, 1);
 });
+
+// ---------------------------------------------------------------------------
+// Hybrid mode: leaving an empty item.
+//
+// The reported bug lived here, not in the visual editor. Hybrid re-renders a
+// block from its markdown source when the caret leaves it, and that path
+// DELETED an empty list item outright — "visual noise", per its comment. True
+// for a trailing bullet somebody abandoned; wrong for a blank row deliberately
+// left inside a list, which vanished the moment the caret moved away.
+// ---------------------------------------------------------------------------
+
+function sourceLi(markerText) {
+  return {
+    // nodeType matters: `_nextListSibling` walks siblings element-wise, so a
+    // stub without it reads as "nothing follows" and every item looks like the
+    // last one in its list.
+    nodeType: ELEMENT_NODE,
+    textContent: markerText,
+    nextSibling: null,
+    getAttribute: (name) => (name === "data-leaf-source" ? "li" : null),
+    hasAttribute: () => true,
+  };
+}
+
+function listAround(items) {
+  const list = {
+    tagName: "UL",
+    _removed: [],
+    firstElementChild: items[0],
+    parentNode: { removeChild: noop },
+    removeChild(child) {
+      this._removed.push(child);
+    },
+    replaceChild(fresh, old) {
+      this._replaced = { fresh, old };
+    },
+  };
+  items.forEach((item, i) => {
+    item.parentNode = list;
+    item.nextSibling = items[i + 1] || null;
+  });
+  return list;
+}
+
+function exiting() {
+  const e = Object.create(proto);
+  e._mode = "hybrid";
+  e._syntaxMutating = false;
+  e._renderListItemFromSource = () => ({ querySelector: () => null, textContent: "", _appended: [], appendChild(n) { this._appended.push(n); } });
+  e._renderBlockFromSource = () => ({});
+  e._exitListItemToParagraph = noop;
+  e._ensureListItemPlaceholder = proto._ensureListItemPlaceholder;
+  return e;
+}
+
+test("an empty item in the middle of a list survives the caret leaving", () => {
+  const items = [sourceLi("- one"), sourceLi("- "), sourceLi("- three")];
+  const list = listAround(items);
+  const e = exiting();
+
+  e._exitSourceMode(items[1]);
+
+  assert.deepEqual(list._removed, [], "the middle item must not be dropped");
+  assert.ok(list._replaced, "it should be re-rendered in place instead");
+});
+
+test("an empty item at the END of a list is still tidied away", () => {
+  // A trailing bullet is the residue of starting an item and changing your
+  // mind; clearing it is the point of the tidy-up.
+  const items = [sourceLi("- one"), sourceLi("- ")];
+  const list = listAround(items);
+  const e = exiting();
+
+  e._exitSourceMode(items[1]);
+
+  assert.equal(list._removed.length, 1);
+  assert.equal(list._removed[0], items[1]);
+});
+
+test("an item with content is never dropped, wherever it sits", () => {
+  const items = [sourceLi("- one"), sourceLi("- two")];
+  const list = listAround(items);
+  const e = exiting();
+
+  e._exitSourceMode(items[1]);
+
+  assert.deepEqual(list._removed, []);
+});
