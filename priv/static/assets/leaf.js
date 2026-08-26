@@ -1536,6 +1536,7 @@
       this._fallbackMode = this.el.dataset.fallbackMode || "hybrid";
       this._hashtags = this.el.dataset.hashtags === "true";
       this._wikiLinks = this.el.dataset.wikilinks === "true";
+      this._collabOperations = this.el.dataset.collabOperations === "true";
       this._wikiLinksResolve = this.el.dataset.wikilinksResolve !== "false";
       this._wikiLinksFollow = this.el.dataset.wikilinksFollow || "modifier";
       this._warnStaleBundle();
@@ -1821,6 +1822,7 @@
       // decides whether hashtags are decorated at all.
       this._hashtags = this.el.dataset.hashtags === "true";
       this._wikiLinks = this.el.dataset.wikilinks === "true";
+      this._collabOperations = this.el.dataset.collabOperations === "true";
       this._wikiLinksResolve = this.el.dataset.wikilinksResolve !== "false";
       this._wikiLinksFollow = this.el.dataset.wikilinksFollow || "modifier";
 
@@ -2049,6 +2051,7 @@
           content: content,
           dirty: self._computeDirty(content),
         });
+        self._emitOperation(content);
       }, this._debounceMs);
     },
 
@@ -3129,6 +3132,7 @@
             markdown: markdown,
             dirty: this._computeDirty(markdown),
           });
+          this._emitOperation(markdown);
         }.bind(this),
         this._debounceMs
       );
@@ -7084,6 +7088,97 @@
 
       this._historyCapture("surround");
       return true;
+    },
+
+    // =====================================================================
+    // Operation-shaped changes
+    // =====================================================================
+    //
+    // Leaf's wire contract is a snapshot: `content_changed` carries the whole
+    // markdown after a debounce. Two concurrent snapshots cannot be merged —
+    // from a before and an after you cannot tell an insert from a delete from
+    // a rewrite — which is the first thing that has to change for more than one
+    // person to be in a document.
+    //
+    // So alongside the snapshot, emit what actually changed: one splice against
+    // the last state we sent. The host applies it to whatever it keeps the
+    // truth in (a `Y.Text` under `y_ex`, say). Leaf holds no CRDT and takes no
+    // dependency for this; it just stops throwing away what it already knows.
+    //
+    // Entirely additive and opt-in. A host that only wants the markdown sees
+    // exactly the traffic it always did.
+
+    // The minimal single splice turning `before` into `after`: trim the common
+    // prefix, then the common suffix, and whatever is left in the middle is the
+    // edit. Typing, pasting, deleting a selection — all one splice. A change
+    // touching two distant places collapses into one splice spanning both,
+    // which is coarser but never wrong.
+    //
+    // Null when nothing changed, so an idle re-render emits nothing.
+    _spliceBetween: function (before, after) {
+      if (before === after) return null;
+
+      before = before || "";
+      after = after || "";
+
+      var start = 0;
+      var limit = Math.min(before.length, after.length);
+
+      while (start < limit && before.charCodeAt(start) === after.charCodeAt(start)) {
+        start++;
+      }
+
+      var endBefore = before.length;
+      var endAfter = after.length;
+
+      while (
+        endBefore > start &&
+        endAfter > start &&
+        before.charCodeAt(endBefore - 1) === after.charCodeAt(endAfter - 1)
+      ) {
+        endBefore--;
+        endAfter--;
+      }
+
+      return {
+        at: start,
+        remove: endBefore - start,
+        insert: after.slice(start, endAfter)
+      };
+    },
+
+    // Diff against the last state SENT, not the last state seen. That is what
+    // makes the debounce harmless: however many keystrokes it swallowed, the
+    // splice still describes the whole distance from what the host last heard.
+    _emitOperation: function (markdown) {
+      if (!this._collabOperations) return;
+
+      var previous = this._lastSentMarkdown;
+
+      // First call establishes the baseline. There is no operation from
+      // "nothing known" to the opening document — the host already has that.
+      if (typeof previous !== "string") {
+        this._lastSentMarkdown = markdown;
+        return;
+      }
+
+      var splice = this._spliceBetween(previous, markdown);
+      if (!splice) return;
+
+      this._lastSentMarkdown = markdown;
+      this._operationSeq = (this._operationSeq || 0) + 1;
+
+      this.pushEventTo(this.el, "operation", {
+        editor_id: this._editorId,
+        at: splice.at,
+        remove: splice.remove,
+        insert: splice.insert,
+        seq: this._operationSeq,
+        // Length of the text this splice applies to. A host holding a document
+        // of a different length knows it has diverged, rather than applying an
+        // operation at an offset that means something else now.
+        base_length: previous.length
+      });
     },
 
     // The next real item after `li`, or null at the end of the list.

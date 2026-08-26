@@ -465,6 +465,12 @@ defmodule Leaf do
   # exist. Off by default, so a document using `[[…]]` for something else is
   # untouched.
   attr(:wiki_links, :any, default: nil)
+
+  # Multi-user editing. `%{operations: true}` makes the editor emit what
+  # CHANGED alongside the snapshot it already sends, which is what a host needs
+  # to merge two people's edits. Off by default; a host that only wants the
+  # markdown sees exactly the traffic it always did.
+  attr(:collaboration, :any, default: nil)
   attr(:gettext_backend, :any, default: nil)
   attr(:upload_handler, :any, default: nil)
   attr(:sync_input_name, :string, default: nil)
@@ -541,6 +547,7 @@ defmodule Leaf do
      |> assign_new(:save_status, fn -> nil end)
      |> assign_new(:suggestions, fn -> [] end)
      |> assign_new(:wiki_links, fn -> nil end)
+     |> assign_new(:collaboration, fn -> nil end)
      |> assign_new(:gettext_backend, fn -> nil end)
      |> assign_new(:readonly, fn -> false end)
      |> assign_new(:upload_handler, fn -> nil end)
@@ -738,6 +745,7 @@ defmodule Leaf do
       data-sync-input-name={@sync_input_name}
       data-leaf-js-version={js_version()}
       data-hashtags={to_string(hashtag_trigger?(@suggest_configs))}
+      data-collab-operations={to_string(collab_operations?(@collaboration))}
       data-wikilinks={to_string(wiki_links_enabled?(@wiki_links))}
       data-wikilinks-resolve={to_string(wiki_links_resolve?(@wiki_links))}
       data-wikilinks-follow={wiki_links_follow(@wiki_links)}
@@ -2493,6 +2501,32 @@ defmodule Leaf do
     {:noreply, socket |> assign(:mode, mode_atom) |> assign(:content, content)}
   end
 
+  # One splice against the state the host last heard about. `remove` characters
+  # at `at` are replaced by `insert`.
+  #
+  # This is the operation-shaped counterpart to `content_changed`, which stays
+  # exactly as it was — a host that wants snapshots is unaffected. `base_length`
+  # is the length of the text the splice applies to, so a host holding a
+  # document of a different length can tell it has diverged instead of applying
+  # an offset that no longer means what it meant.
+  def handle_event("operation", %{"at" => at, "remove" => remove} = params, socket)
+      when is_integer(at) and is_integer(remove) do
+    send(
+      self(),
+      {:leaf_operation,
+       %{
+         editor_id: socket.assigns.id,
+         at: at,
+         remove: remove,
+         insert: to_string(Map.get(params, "insert", "")),
+         seq: Map.get(params, "seq"),
+         base_length: Map.get(params, "base_length")
+       }}
+    )
+
+    {:noreply, socket}
+  end
+
   # The client has found `[[…]]` targets it has no answer for yet. Only the host
   # knows which notes exist, so it does the resolving and replies with
   # `action: :link_targets`.
@@ -3483,6 +3517,10 @@ defmodule Leaf do
   defp wiki_links_enabled?(nil), do: false
   defp wiki_links_enabled?(false), do: false
   defp wiki_links_enabled?(_), do: true
+
+  defp collab_operations?(%{} = config), do: Map.get(config, :operations, false) == true
+  defp collab_operations?(true), do: true
+  defp collab_operations?(_), do: false
 
   defp wiki_links_resolve?(%{} = config), do: Map.get(config, :resolve, true) != false
   defp wiki_links_resolve?(other), do: wiki_links_enabled?(other)
