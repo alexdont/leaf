@@ -318,7 +318,23 @@
     "  width: 0.28em; height: 0.55em; border: solid var(--color-base-100, #fff);",
     "  border-width: 0 2px 2px 0; transform: rotate(45deg);",
     "}",
-    ".content-editor-visual li.leaf-task[data-checked='true'] { opacity: 0.65; }",
+    // A completed item reads as done at a glance: muted and struck through,
+    // the way Obsidian and every other task list renders one.
+    //
+    // The line is drawn by the `<li>`, but does NOT cross the checkbox: CSS
+    // does not propagate text-decoration into atomic inline-level boxes, and
+    // `.leaf-task-box` is `display: inline-block`. Striking the box as well as
+    // the label would make the tick unreadable.
+    ".content-editor-visual li.leaf-task[data-checked='true'] {",
+    "  opacity: 0.65; text-decoration: line-through;",
+    "  text-decoration-thickness: from-font;",
+    "}",
+    // Not while the line is being edited. In hybrid the block under the cursor
+    // shows its markdown source — `- [x] label` — and striking through the
+    // syntax you are editing makes it hard to read.
+    ".content-editor-visual li.leaf-task[data-checked='true'][data-leaf-source] {",
+    "  text-decoration: none;",
+    "}",
 
     // Collapsible details / accordion blocks
     ".content-editor-visual details {",

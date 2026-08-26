@@ -101,6 +101,16 @@
   an item coming back from the server arrived bare. Every path that assigns
   content wholesale now normalises empty items the same way.
 
+### Changed
+
+- **A completed task item is struck through, not just faded.** Checking one off
+  now reads as done at a glance, the way Obsidian renders it. The line is drawn
+  by the item and skips the checkbox — CSS does not propagate text-decoration
+  into atomic inline-level boxes, and the box is `display: inline-block` — so
+  the tick stays readable. It is suppressed while the item is being edited in
+  hybrid mode, where the block under the cursor shows its markdown source and a
+  line through `- [x] label` would only get in the way.
+
 ### Added
 
 - DOM-level tests for the editor (`test/js/*_dom.test.cjs`), driving keydown
