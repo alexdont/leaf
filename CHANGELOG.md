@@ -37,6 +37,15 @@
   list, where exiting is the only thing it can reasonably mean, the behaviour
   is unchanged.
 
+- **A bullet made by pressing Enter at the end of a line is no longer invisible
+  from birth.** The new item's emptiness was decided by `firstChild`, but
+  `Range.extractContents()` hands back a fragment holding an empty text node
+  when the caret sat at the end of a line — so the item had a child, reported
+  itself occupied, skipped the placeholder that gives it height, and rendered
+  as nothing. Emptiness is now measured by text. This was the actual cause of
+  bullets appearing to clear themselves; the sync-path fix below was real but
+  addressed a later symptom of the same missing placeholder.
+
 - **A deliberately empty list item no longer disappears.** An `<li>` with no
   content renders at zero height and gives the caret nowhere to sit, and the
   marker hides with it — so leaving a bullet blank and clicking away looked

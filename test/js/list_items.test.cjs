@@ -116,9 +116,10 @@ test("an item that arrives with a placeholder is left alone", () => {
 });
 
 test("items with their own height are left alone", () => {
-  // A nested list, an image, a <br> or a task box all render on their own;
-  // adding a placeholder would put a stray text node before them.
-  for (const child of ["ul", "ol", "img", "br", "input", ".leaf-task-box"]) {
+  // A nested list, an image, a <br> or a checkbox all render on their own;
+  // adding a placeholder would put a stray text node before them. A task BOX
+  // is deliberately not in this list — see the task-item case below.
+  for (const child of ["ul", "ol", "img", "br", "input"]) {
     const item = li("", [child]);
 
     proto._ensureListItemPlaceholders(root([item]));
@@ -201,4 +202,40 @@ test("whitespace before a real item is skipped, not mistaken for the end", () =>
 
 test("a null item is a no-op rather than a throw", () => {
   assert.equal(proto._nextListSibling(null), null);
+});
+
+
+// ---------------------------------------------------------------------------
+// The single-item form, and the defect that made every new bullet invisible.
+// ---------------------------------------------------------------------------
+
+test("an item holding a child but no text still gets a placeholder", () => {
+  // The real shape: `Range.extractContents()` hands back a fragment containing
+  // an EMPTY TEXT NODE when the caret sat at the end of a line. The old check
+  // was `!newLi.firstChild`, which such an item passes — so splitting at the
+  // end of a bullet, the ordinary way to make the next one, produced an item
+  // that had a child, reported itself occupied, and rendered at zero height.
+  // Invisible from birth, not cleared later.
+  const item = li("", []);
+  item.firstChild = { nodeType: 3, textContent: "" };
+
+  proto._ensureListItemPlaceholder(item);
+
+  assert.equal(item._appended.length, 1);
+});
+
+test("the single-item form reports whether it did anything", () => {
+  assert.equal(proto._ensureListItemPlaceholder(li("")), true);
+  assert.equal(proto._ensureListItemPlaceholder(li("text")), false);
+  assert.equal(proto._ensureListItemPlaceholder(null), false);
+});
+
+test("an empty task item gets a caret home despite its checkbox", () => {
+  // The box is not content: without a text node the label has nowhere to be
+  // typed and the caret nowhere to sit.
+  const item = li("", [".leaf-task-box"]);
+
+  proto._ensureListItemPlaceholder(item);
+
+  assert.equal(item._appended.length, 1);
 });

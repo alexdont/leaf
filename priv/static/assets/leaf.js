@@ -2692,10 +2692,8 @@
               // Both items need a caret home: the new one to be typed into,
               // and the one being left behind to stay visible now that it is
               // staying (see _ensureListItemPlaceholders).
-              midLi.appendChild(document.createTextNode("​"));
-              if (!this._firstTextDescendant(block)) {
-                block.appendChild(document.createTextNode("​"));
-              }
+              this._ensureListItemPlaceholder(midLi);
+              this._ensureListItemPlaceholder(block);
 
               liParent.insertBefore(midLi, block.nextSibling);
 
@@ -2796,18 +2794,11 @@
           // scrubbers.
           // A task item always has the box as firstChild, so emptiness is
           // measured by the lack of a text node after it.
-          var liNeedsPlaceholder = isTaskLi
-            ? !this._firstTextDescendant(newLi)
-            : !newLi.firstChild;
-          if (liNeedsPlaceholder) {
-            newLi.appendChild(document.createTextNode("​"));
-          }
+          this._ensureListItemPlaceholder(newLi);
           liParent.insertBefore(newLi, block.nextSibling);
-          // If we left the source `<li>` empty, drop in a `<br>` so it
-          // still renders with height.
-          if (!block.firstChild) {
-            block.appendChild(document.createElement("br"));
-          }
+          // The item we split away from can be left blank too — splitting at
+          // the very start of a line moves everything into the new item.
+          this._ensureListItemPlaceholder(block);
           var liNewRange = document.createRange();
           var firstText = this._firstTextDescendant(newLi);
           if (firstText) {
@@ -6741,24 +6732,39 @@
       if (!root) return;
 
       var items = root.querySelectorAll("li");
-
       for (var i = 0; i < items.length; i++) {
-        var li = items[i];
-
-        var raw = li.textContent || "";
-
-        // Already carries a placeholder. Checked BEFORE the emptiness test,
-        // which strips zero-width characters: without this the item collects a
-        // fresh ZWSP on every sync, growing an invisible run of them.
-        if (/[\u200B\uFEFF]/.test(raw)) continue;
-
-        // Anything that already gives the item height — text, a nested list,
-        // an image, a task box — means there is nothing to fix.
-        if (/\S/.test(raw)) continue;
-        if (li.querySelector("ul, ol, img, br, input, .leaf-task-box")) continue;
-
-        li.appendChild(document.createTextNode("\u200B"));
+        this._ensureListItemPlaceholder(items[i]);
       }
+    },
+
+    // The single-item form, and the one every caller should reach for.
+    //
+    // Emptiness is measured by TEXT, not by `firstChild`. That distinction is
+    // the whole bug: `Range.extractContents()` hands back a fragment holding an
+    // empty text node when the caret sat at the end of a line, so a freshly
+    // split item had a `firstChild` and looked occupied while rendering at zero
+    // height. Splitting at the end of a bullet — the ordinary way to make the
+    // next one — therefore produced an item that was invisible from birth.
+    _ensureListItemPlaceholder: function (li) {
+      if (!li) return false;
+
+      var raw = li.textContent || "";
+
+      // Already carries a placeholder. Checked BEFORE the emptiness test,
+      // which ignores zero-width characters: without this the item collects a
+      // fresh one on every pass, growing an invisible run of them.
+      if (/[\u200B\uFEFF]/.test(raw)) return false;
+
+      // Real text means there is nothing to fix.
+      if (/\S/.test(raw)) return false;
+
+      // Elements that give the item height on their own. A task box is NOT
+      // one: an empty task item still needs somewhere for the caret to sit and
+      // the label to be typed.
+      if (li.querySelector("ul, ol, img, br, input")) return false;
+
+      li.appendChild(document.createTextNode("\u200B"));
+      return true;
     },
 
     // Unwrap "loose" list items. CommonMark renders a list whose items
