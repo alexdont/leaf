@@ -8056,16 +8056,20 @@
         liContentEmpty = liContentRest.length === 0;
       }
 
-      // List item: empty source-mode `<li>` + Enter exits the list.
-      // Like the blockquote-exit branch below — drop the empty item,
-      // split the `<ul>` / `<ol>` if necessary, place a fresh `<p>` in
-      // between (or after the list when the empty item is the trailing
-      // one). Without this branch the source-mode Enter would just
-      // split the empty `<li>` into two empty `<li>`s and the user
-      // could never escape the list with the keyboard.
+      // List item: an empty source-mode `<li>` + Enter exits the list, but
+      // only as the LAST item. Drop the empty item and place a fresh `<p>`
+      // after the list — the keyboard escape from a list, which without this
+      // branch would not exist.
+      //
+      // With items still below, that reading is wrong: the blank row is one
+      // the user is deliberately keeping, and removing it means a list can
+      // never contain an empty line. There the fall-through is exactly right —
+      // its own comment describes it as splitting the empty item "into two
+      // empty `<li>`s", which is the blank row kept plus a new one under it.
       if (
         isLi &&
         liContentEmpty &&
+        !this._nextListSibling(oldBlock) &&
         parent.tagName &&
         (parent.tagName.toLowerCase() === "ul" ||
           parent.tagName.toLowerCase() === "ol")

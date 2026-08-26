@@ -37,6 +37,13 @@
   list, where exiting is the only thing it can reasonably mean, the behaviour
   is unchanged.
 
+- **Enter on an empty bullet mid-list keeps it and opens another.** Hybrid mode
+  has its own Enter handler for source-mode blocks, which exited the list
+  whenever the item held nothing but its `- ` marker — wherever that item sat.
+  It now exits only as the last item of a list, matching the blur rule below.
+  The keyboard escape from a list is unchanged where it is the only sensible
+  reading.
+
 - **An empty bullet in the middle of a list survives the caret leaving it.**
   In hybrid mode, leaving a block re-renders it from its markdown source, and
   that path deleted an empty list item outright — reasonable for a trailing
