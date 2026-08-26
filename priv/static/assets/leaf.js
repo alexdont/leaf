@@ -2331,6 +2331,7 @@
               // logical end of the previous item so the next Enter
               // builds a fresh sibling.
               bsList.removeChild(bsBlock);
+              this._forgetSourceBlock(bsBlock);
               var bsRange = document.createRange();
               var lastNode = prevLi.lastChild;
               while (
@@ -2363,6 +2364,7 @@
               var bsP = document.createElement("p");
               bsP.appendChild(document.createElement("br"));
               bsListParent.replaceChild(bsP, bsList);
+              this._forgetSourceBlock(bsBlock);
               var bsRange2 = document.createRange();
               bsRange2.setStart(bsP, 0);
               bsRange2.collapse(true);
@@ -6701,6 +6703,25 @@
       }
     },
 
+    // Drop the source-block tracking when `block` is being removed from the
+    // document.
+    //
+    // `_sourceBlock` is a live node reference. Detaching the node it points at
+    // without clearing it leaves the editor believing it is still editing a
+    // block that is no longer in the document — and the stale
+    // `_lastSourceStateKey` / `_activeMatchKey` alongside it make the next
+    // refresh of a genuinely different block compare against the dead one's
+    // state. Every other path that removes a source block does this; the
+    // Backspace merge did not, which is why list handling went wrong only
+    // AFTER deleting an empty row.
+    _forgetSourceBlock: function (block) {
+      if (!block || this._sourceBlock !== block) return;
+
+      this._sourceBlock = null;
+      this._lastSourceStateKey = null;
+      this._activeMatchKey = null;
+    },
+
     // The next real item after `li`, or null at the end of the list.
     //
     // Element-wise on purpose: a text node between items (pretty-printed
@@ -6714,6 +6735,26 @@
         if (sib.nodeType === Node.ELEMENT_NODE) return sib;
         if (sib.nodeType === Node.TEXT_NODE && /\S/.test(sib.textContent)) return sib;
         sib = sib.nextSibling;
+      }
+
+      // Nothing further in this list — but a list DIRECTLY followed by another
+      // list is one list as far as the reader is concerned, and editing has
+      // several ways of producing that pair. Deleting an item's `- ` marker
+      // breaks it out to a `<p>` and moves the items below it into a second
+      // list; delete that paragraph and the two lists close up against each
+      // other, looking exactly like the single list they render as.
+      //
+      // Without this, a blank row at the end of the first list counted as the
+      // last item of the document's list while bullets were plainly visible
+      // under it, and the tidy-up removed it. Anything else in between — a
+      // paragraph, a heading — means the author really did end the list, so
+      // only an immediately adjacent one counts.
+      var list = li && li.parentNode;
+      var after = list && list.nextElementSibling;
+      var afterTag = after && after.tagName ? after.tagName.toLowerCase() : "";
+
+      if (afterTag === "ul" || afterTag === "ol") {
+        return after.firstElementChild || after;
       }
 
       return null;

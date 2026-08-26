@@ -155,3 +155,70 @@ test("hybrid: an item with content is never dropped", { skip }, () => {
   assert.equal(items(e).length, 3);
   e.cleanup();
 });
+
+// --------------------------------------------------------------------------
+// Two lists that read as one.
+//
+// Editing produces adjacent lists more easily than it looks. Deleting an
+// item's `- ` marker breaks that item out to a paragraph and moves everything
+// below it into a SECOND list; delete the paragraph and the two close up
+// against each other, rendering as the single continuous list the author sees.
+//
+// A blank row at the end of the first list then had no next sibling, so the
+// tidy-up removed it while bullets were plainly visible underneath — the
+// "sometimes" in the report, and why it looked like nothing was checking what
+// followed.
+// --------------------------------------------------------------------------
+
+function afterLeaving(html, index) {
+  const e = editor(html, "hybrid");
+
+  e._renderListItemFromSource = (src) => {
+    const li = document.createElement("li");
+    const body = src.replace(/^(- |\d+\. )/, "");
+    if (body) li.appendChild(document.createTextNode(body));
+    return li;
+  };
+  e._renderBlockFromSource = () => document.createElement("p");
+  e._exitListItemToParagraph = () => {};
+
+  const before = items(e).length;
+  e._exitSourceMode(items(e)[index]);
+  const after = items(e).length;
+
+  e.cleanup();
+  return { before, after, kept: before === after };
+}
+
+test("hybrid: a blank row survives when another list follows immediately", { skip }, () => {
+  const r = afterLeaving(`<ul><li>one</li>${source("- ")}</ul><ul><li>three</li></ul>`, 1);
+
+  assert.ok(r.kept, `expected the row to be kept, went ${r.before} -> ${r.after}`);
+});
+
+test("hybrid: a paragraph between the lists means the author ended one", { skip }, () => {
+  // Not a continuation — the tidy-up is right to fire here.
+  const r = afterLeaving(
+    `<ul><li>one</li>${source("- ")}</ul><p>text</p><ul><li>three</li></ul>`,
+    1
+  );
+
+  assert.equal(r.kept, false);
+});
+
+test("hybrid: the last list on the page still tidies its trailing blank row", { skip }, () => {
+  const r = afterLeaving(`<ul><li>one</li>${source("- ")}</ul>`, 1);
+
+  assert.equal(r.kept, false);
+});
+
+test("an adjacent list is reported as the next item", { skip }, () => {
+  const e = editor(`<ul><li>one</li><li>two</li></ul><ul><li>three</li></ul>`, "hybrid");
+  const last = items(e)[1];
+
+  const next = e._nextListSibling(last);
+
+  assert.ok(next, "the following list's first item should be found");
+  assert.equal(next.textContent, "three");
+  e.cleanup();
+});

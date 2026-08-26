@@ -37,6 +37,21 @@
   list, where exiting is the only thing it can reasonably mean, the behaviour
   is unchanged.
 
+- **A blank row survives at the end of a list that another list follows.**
+  Editing produces adjacent lists more readily than it looks: deleting an
+  item's `- ` marker breaks that item out to a paragraph and moves everything
+  below it into a second list, and deleting the paragraph closes the two up
+  against each other. They render as one continuous list, but a blank row at
+  the end of the first had no next item, so it was tidied away while bullets
+  were plainly visible underneath. A directly adjacent list now counts as a
+  continuation; anything else between them still means the list ended.
+
+- **Deleting an empty row no longer leaves the editor tracking a removed
+  block.** The Backspace merge detached the item without clearing
+  `_sourceBlock`, so the editor went on believing it was editing a node that
+  had left the document — which is why list handling misbehaved specifically
+  after deleting a row.
+
 - **An empty bullet is visible after a page load.** The normaliser that gives
   an empty item a caret home was wired into the three paths that assign content
   after mount, and not into mount itself — so content LiveView rendered into
