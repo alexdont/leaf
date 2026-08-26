@@ -21,3 +21,7 @@ leaf-*.tar
 
 # Temporary files, for example, from tests.
 /tmp/
+
+# Test-only: jsdom for the DOM tests in test/js. Installed with
+# `npm install` in this directory; never shipped in the hex package.
+/node_modules/

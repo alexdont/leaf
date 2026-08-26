@@ -33,9 +33,15 @@ defmodule Leaf.MixProject do
     ]
   end
 
-  # `node --test` over the pure logic exported from the hook bundle. Files are
-  # passed explicitly: with no arguments node walks the CWD looking for
-  # anything test-shaped, which would hand it deps/ and _build/ as well.
+  # `node --test` over the shipped hook bundle. Files are passed explicitly:
+  # with no arguments node walks the CWD looking for anything test-shaped,
+  # which would hand it deps/, _build/ and node_modules/ as well.
+  #
+  # `*_dom.test.cjs` drive the editor against a real DOM and need jsdom, a
+  # devDependency in package.json. Without it they skip themselves with a
+  # message, so a clone that never ran `npm install` still passes — the
+  # stubbed tests are the floor, the DOM tests are the ones that catch DOM
+  # bugs. Install with `npm install` in this directory.
   defp run_js_tests(_args) do
     files = Path.wildcard("test/js/*.test.cjs")
 

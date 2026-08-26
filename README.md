@@ -429,6 +429,34 @@ looks ordinary, it captures nothing. Two guards:
   what catches a **vendored** copy of `leaf.js` that stayed behind after
   `mix deps.update leaf`. `Leaf.js_version/0` exposes the same value server-side.
 
+## Running the tests
+
+```bash
+mix test          # Elixir suite, then the JS suite
+```
+
+The JS half covers logic that lives in `priv/static/assets/leaf.js` — the undo
+stack, list editing, HTML→markdown — and comes in two kinds:
+
+- `test/js/*.test.cjs` stub the DOM and cover the parts that are pure state.
+  They need nothing beyond Node.
+- `test/js/*_dom.test.cjs` drive the editor against a real DOM via jsdom, and
+  cover the parts a stub cannot reach: keydown handlers, `Range` splitting,
+  and the HTML parsing `htmlToMarkdown` is built on.
+
+jsdom is a test-only dependency and is **not** required to use leaf — the
+shipped bundle has none. Install it once to run the DOM tests:
+
+```bash
+npm install
+```
+
+Without it those tests skip with a message rather than failing, so a fresh
+clone still passes `mix test`. They are worth installing for, though: several
+list and undo defects shipped past a green stubbed suite, because a stub cannot
+tell "has a child node" from "has text", and cannot run a keydown handler at
+all.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

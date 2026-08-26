@@ -71,6 +71,13 @@
 
 ### Added
 
+- DOM-level tests for the editor (`test/js/*_dom.test.cjs`), driving keydown
+  handlers, `Range` splitting and `htmlToMarkdown` against jsdom. jsdom is a
+  test-only dependency and is not required to use leaf; without it those tests
+  skip rather than fail. Added because several list and undo defects in this
+  release shipped past a green stubbed suite — a stub cannot tell "has a child
+  node" from "has text", and cannot run a keydown handler at all.
+
 - Leaf owns an undo stack: snapshots of the active surface plus caret, one
   array with a cursor so redo falls out of the same structure. Typing is
   coalesced on a 350 ms debounce so one undo removes a word rather than a

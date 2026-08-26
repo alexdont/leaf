@@ -1,0 +1,11 @@
+{
+  "name": "leaf-test",
+  "private": true,
+  "description": "Test-only dependencies for the DOM tests in test/js. Not published, and not needed to USE leaf — the shipped bundle has no dependencies.",
+  "scripts": {
+    "test": "node --test test/js/*.test.cjs"
+  },
+  "devDependencies": {
+    "jsdom": "^27.0.0"
+  }
+}
