@@ -37,6 +37,13 @@
   list, where exiting is the only thing it can reasonably mean, the behaviour
   is unchanged.
 
+- **An empty bullet is visible after a page load.** The normaliser that gives
+  an empty item a caret home was wired into the three paths that assign content
+  after mount, and not into mount itself — so content LiveView rendered into
+  the page arrived as bare `<li></li>`: no height, nothing to click. After a
+  reload a deliberately blank row was invisible, and a click aimed at it landed
+  in a neighbouring item.
+
 - **Enter on an empty bullet mid-list keeps it and opens another.** Hybrid mode
   has its own Enter handler for source-mode blocks, which exited the list
   whenever the item held nothing but its `- ` marker — wherever that item sat.

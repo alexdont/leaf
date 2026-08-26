@@ -287,3 +287,25 @@ test("the bundle never references an unbound `self`", () => {
     "`self` used where no enclosing scope binds it:\n" + offenders.join("\n")
   );
 });
+
+test("mounted() normalises list items", () => {
+  // Wiring, not logic — and this class of gap has bitten repeatedly. The
+  // normaliser was wired into the three SYNC paths and not into mount, so
+  // content LiveView rendered into the page on load kept bare `<li></li>`
+  // items: no height, nothing to click, so a click aimed at a blank row landed
+  // in a neighbouring item and the next keystroke acted on that one.
+  const fs = require("node:fs");
+  const path = require("node:path");
+
+  const src = fs.readFileSync(
+    path.join(__dirname, "../../priv/static/assets/leaf.js"),
+    "utf8"
+  );
+
+  const mounted = src.slice(src.indexOf("mounted() {"), src.indexOf("_onVisualInput: function"));
+
+  assert.ok(
+    /_ensureListItemPlaceholders\(/.test(mounted),
+    "mounted() must normalise list items — server-rendered content needs the same treatment as synced content"
+  );
+});

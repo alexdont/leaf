@@ -1589,6 +1589,15 @@
       this._setupMarkdownTextarea();
       this._setupHtmlTextarea();
 
+      // The content LiveView rendered into the page came from the server the
+      // same way a sync does, so it needs the same normalising — and this is
+      // the only path that was missing it. An empty list item arrives as a
+      // bare `<li></li>`, which has no height and nothing to click, so after a
+      // reload a deliberately blank row was invisible: a click aimed at it
+      // landed in a neighbouring item, and the next keystroke acted on that
+      // one instead.
+      if (this._visualEl) this._ensureListItemPlaceholders(this._visualEl);
+
       // After the surfaces exist, so the opening state is step zero and the
       // first edit has something to undo back to.
       this._historyInit();
