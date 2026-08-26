@@ -459,6 +459,12 @@ defmodule Leaf do
   )
 
   attr(:suggestions, :list, default: [])
+
+  # Obsidian-style `[[Target]]` links. `%{resolve: true}` turns the decoration
+  # on and asks the host to resolve targets; only the host knows which notes
+  # exist. Off by default, so a document using `[[…]]` for something else is
+  # untouched.
+  attr(:wiki_links, :any, default: nil)
   attr(:gettext_backend, :any, default: nil)
   attr(:upload_handler, :any, default: nil)
   attr(:sync_input_name, :string, default: nil)
@@ -534,6 +540,7 @@ defmodule Leaf do
      |> assign_new(:protect_navigation, fn -> false end)
      |> assign_new(:save_status, fn -> nil end)
      |> assign_new(:suggestions, fn -> [] end)
+     |> assign_new(:wiki_links, fn -> nil end)
      |> assign_new(:gettext_backend, fn -> nil end)
      |> assign_new(:readonly, fn -> false end)
      |> assign_new(:upload_handler, fn -> nil end)
@@ -624,6 +631,18 @@ defmodule Leaf do
        query: to_string(Map.get(assigns, :query, "")),
        seq: Map.get(assigns, :seq),
        results: normalize_suggestion_results(Map.get(assigns, :results, []))
+     })}
+  end
+
+  # Reply to a `{:leaf_resolve_links, …}` request. `seq` is echoed back so the
+  # client can drop an answer a later edit already superseded — the same guard
+  # the suggestion round trip uses, and for the same reason: typing routinely
+  # outruns a server round trip.
+  def update(%{action: :link_targets} = assigns, socket) do
+    {:ok,
+     push_event(socket, "leaf-link-targets:#{socket.assigns.id}", %{
+       seq: Map.get(assigns, :seq),
+       targets: normalize_link_targets(Map.get(assigns, :targets, %{}))
      })}
   end
 
@@ -719,6 +738,7 @@ defmodule Leaf do
       data-sync-input-name={@sync_input_name}
       data-leaf-js-version={js_version()}
       data-hashtags={to_string(hashtag_trigger?(@suggest_configs))}
+      data-wikilinks={to_string(wiki_links_enabled?(@wiki_links))}
       data-deny-links={to_string(:links in @deny)}
       data-deny-images={to_string(:images in @deny)}
       data-deny-video={to_string(:video in @deny)}
@@ -2471,6 +2491,43 @@ defmodule Leaf do
     {:noreply, socket |> assign(:mode, mode_atom) |> assign(:content, content)}
   end
 
+  # The client has found `[[…]]` targets it has no answer for yet. Only the host
+  # knows which notes exist, so it does the resolving and replies with
+  # `action: :link_targets`.
+  def handle_event("resolve_links", %{"targets" => targets} = params, socket)
+      when is_list(targets) do
+    send(
+      self(),
+      {:leaf_resolve_links,
+       %{
+         editor_id: socket.assigns.id,
+         targets: Enum.filter(targets, &is_binary/1),
+         seq: Map.get(params, "seq")
+       }}
+    )
+
+    {:noreply, socket}
+  end
+
+  # A wiki link was clicked. Leaf does not navigate: where a target lives is the
+  # host's question, and it may want a modal, a new tab or a "create this note"
+  # flow instead of a plain navigation.
+  def handle_event("link_clicked", %{"target" => target} = params, socket)
+      when is_binary(target) do
+    send(
+      self(),
+      {:leaf_link_clicked,
+       %{
+         editor_id: socket.assigns.id,
+         target: target,
+         heading: params["heading"],
+         href: params["href"]
+       }}
+    )
+
+    {:noreply, socket}
+  end
+
   def handle_event("suggest", %{"trigger" => trigger, "query" => query} = params, socket) do
     send(
       self(),
@@ -3394,7 +3451,8 @@ defmodule Leaf do
         |> restore_preserved_tags(store)
       end
 
-    if Map.get(opts, :hashtags, false), do: decorate_hashtags(html), else: html
+    html = if Map.get(opts, :hashtags, false), do: decorate_hashtags(html), else: html
+    if Map.get(opts, :wiki_links, false), do: decorate_wiki_links(html), else: html
   end
 
   # The per-render knobs the markdown→HTML pass needs, read off the
@@ -3406,9 +3464,17 @@ defmodule Leaf do
         socket.assigns
         |> Map.get(:suggestions, [])
         |> normalized_suggestions()
-        |> hashtag_trigger?()
+        |> hashtag_trigger?(),
+      wiki_links: wiki_links_enabled?(socket.assigns[:wiki_links])
     }
   end
+
+  # `[[…]]` is only a link if the host said so. Without the opt-in, the
+  # brackets are left as literal text — a document using them for something
+  # else should not sprout links.
+  defp wiki_links_enabled?(%{} = config), do: Map.get(config, :resolve, true) != false
+  defp wiki_links_enabled?(true), do: true
+  defp wiki_links_enabled?(_), do: false
 
   # `#` is only a tag sigil if the host said so by configuring a `#`
   # suggestion trigger. Without that, `#` is left alone — a document using
@@ -3418,6 +3484,29 @@ defmodule Leaf do
   end
 
   defp hashtag_trigger?(_), do: false
+
+  # `%{"target" => %{href: …, exists: bool}}`, tolerant of string or atom keys
+  # and of a bare href string, so a host can answer in whichever shape is
+  # natural without the client having to guess.
+  defp normalize_link_targets(targets) when is_map(targets) do
+    Map.new(targets, fn {target, info} ->
+      {to_string(target), normalize_link_target(info)}
+    end)
+  end
+
+  defp normalize_link_targets(_), do: %{}
+
+  defp normalize_link_target(%{} = info) do
+    href = Map.get(info, :href) || Map.get(info, "href")
+
+    %{
+      href: if(is_binary(href), do: href, else: nil),
+      exists: Map.get(info, :exists, Map.get(info, "exists", is_binary(href))) == true
+    }
+  end
+
+  defp normalize_link_target(href) when is_binary(href), do: %{href: href, exists: true}
+  defp normalize_link_target(_), do: %{href: nil, exists: false}
 
   # Replace each occurrence of a preserved tag with an inert text token,
   # returning {protected_markdown, %{token => original_source}}.
@@ -3974,6 +4063,71 @@ defmodule Leaf do
   defp decorate_hashtags_text(text) do
     Regex.replace(@hashtag_re, text, ~s(\\1<span class="leaf-hashtag">#\\2</span>))
   end
+
+  # Wrap `[[Target]]` in a decoration span so wiki links read as links rather
+  # than literal brackets. Deliberately a `<span>`, never an `<a>`: `convertNode`
+  # serializes an unknown span as its own text, so the markdown stays `[[Target]]`
+  # and the round trip is unchanged — whereas an `<a>` would serialize as
+  # `[label](href)` and rewrite the document into ordinary markdown links.
+  #
+  # Three shapes, matching Obsidian: `[[Target]]`, `[[Target|Alias]]` and
+  # `[[Target#Heading]]`. The visible text is the alias where one is given, the
+  # target otherwise; the target and heading ride along as data attributes so
+  # the client can ask the host to resolve them.
+  #
+  # Skips `<pre>`, `<code>` and `<a>` for the same reason hashtags do: inside
+  # them the brackets are literal, or already part of a link.
+  @wiki_link_re ~r/\[\[([^\[\]|#]+?)(?:#([^\[\]|]+?))?(?:\|([^\[\]]+?))?\]\]/
+  @wiki_link_skip_re ~r{(<(?:pre|code|a)\b[^>]*>.*?</(?:pre|code|a)>)}is
+
+  defp decorate_wiki_links(html) do
+    html
+    |> String.split(@wiki_link_skip_re, include_captures: true)
+    |> Enum.map_join("", &decorate_wiki_links_chunk/1)
+  end
+
+  defp decorate_wiki_links_chunk(chunk) do
+    if Regex.match?(~r/^<(?:pre|code|a)\b/i, chunk) do
+      chunk
+    else
+      chunk
+      |> String.split(~r/(<[^>]*>)/, include_captures: true)
+      |> Enum.map_join("", &decorate_wiki_links_text/1)
+    end
+  end
+
+  defp decorate_wiki_links_text("<" <> _ = tag), do: tag
+
+  defp decorate_wiki_links_text(text) do
+    Regex.replace(@wiki_link_re, text, fn _whole, target, heading, alias_text ->
+      wiki_link_span(String.trim(target), String.trim(heading), String.trim(alias_text))
+    end)
+  end
+
+  defp wiki_link_span(target, heading, alias_text) do
+    label = if alias_text == "", do: display_target(target, heading), else: alias_text
+
+    # The raw source is carried verbatim so the client can rebuild the exact
+    # `[[…]]` text without re-deriving it from the parts.
+    raw = "[[" <> target <> heading_suffix(heading) <> alias_suffix(alias_text) <> "]]"
+
+    ~s(<span class="leaf-wikilink" data-leaf-wikilink="#{escape_attr(target)}") <>
+      heading_attr(heading) <>
+      ~s( data-leaf-wikilink-raw="#{escape_attr(raw)}">) <>
+      escape_text(label) <> "</span>"
+  end
+
+  defp display_target(target, ""), do: target
+  defp display_target(target, heading), do: target <> " › " <> heading
+
+  defp heading_suffix(""), do: ""
+  defp heading_suffix(heading), do: "#" <> heading
+
+  defp alias_suffix(""), do: ""
+  defp alias_suffix(alias_text), do: "|" <> alias_text
+
+  defp heading_attr(""), do: ""
+  defp heading_attr(heading), do: ~s( data-leaf-wikilink-heading="#{escape_attr(heading)}")
 
   # Custom component tags that the host forgot to declare in
   # `preserve_tags` are the single most expensive mistake this library

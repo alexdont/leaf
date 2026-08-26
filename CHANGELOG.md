@@ -103,6 +103,23 @@
 
 ### Added
 
+- **Obsidian-style `[[wiki-links]]`.** Opt in with `wiki_links={%{resolve: true}}`
+  and `[[Target]]`, `[[Target|Alias]]` and `[[Target#Heading]]` render as link
+  tokens in the visual and hybrid surfaces while the markdown stays exactly as
+  written. Only the host knows which notes exist, so Leaf asks:
+
+      {:leaf_resolve_links, %{editor_id: id, targets: [...], seq: n}}
+      send_update(Leaf, id: id, action: :link_targets, seq: n, targets: %{...})
+
+  Unresolved targets are styled distinctly, as Obsidian mutes them. Clicking one
+  emits `{:leaf_link_clicked, %{editor_id, target, heading, href}}` — Leaf never
+  navigates, because where a target lives is the host's question, and it may
+  want a modal or a "create this note" flow. Ctrl/Cmd-click follows while
+  editing, a plain click follows in a read-only surface.
+
+  Off unless configured, so a document using `[[…]]` for something else is
+  untouched.
+
 - **Typing a bracket or quote with text selected wraps it.** Select `hello`,
   press `(`, get `(hello)` with `hello` still selected so the wrap can be
   stacked. Handles `(`, `[`, `{`, `"`, `'`, `` ` ``, `*` and `_`, in every

@@ -279,6 +279,19 @@
     "}",
     // Hashtags. Opt-in — only rendered when the host configured a `#`
     // suggestion trigger, i.e. said that `#` means "tag" here.
+    // Wiki links. `data-leaf-wikilink-exists="false"` is set by the host's
+    // resolution reply; until an answer arrives a link is styled as ordinary,
+    // so a slow round trip does not flash every link as broken.
+    ".content-editor-visual .leaf-wikilink {",
+    "  color: var(--color-primary, #3b82f6); cursor: pointer;",
+    "  text-decoration: underline; text-decoration-style: dotted;",
+    "  text-underline-offset: 0.15em;",
+    "}",
+    ".content-editor-visual .leaf-wikilink[data-leaf-wikilink-exists='false'] {",
+    "  color: color-mix(in oklab, var(--color-base-content, #1f2937) 45%, transparent);",
+    "  text-decoration-style: dashed;",
+    "}",
+
     ".content-editor-visual .leaf-hashtag {",
     "  font-style: italic; font-weight: 500;",
     "  color: color-mix(in oklab, var(--color-primary, #3b82f6) 85%, var(--color-base-content, #1f2937));",
@@ -1052,6 +1065,14 @@
         ) {
           return "";
         }
+        // A wiki link displays its ALIAS (`[[Ideas|my notes]]` shows "my
+        // notes") or `Target › Heading`, so serializing the span's text —
+        // which is what an undecorated span does, and what a hashtag relies on
+        // — would write the label back and lose the link. Emit the source it
+        // carries instead.
+        if (node.classList && node.classList.contains("leaf-wikilink")) {
+          return node.getAttribute("data-leaf-wikilink-raw") || inner;
+        }
         if (
           node.classList &&
           node.classList.contains("leaf-spoiler")
@@ -1514,6 +1535,7 @@
       this._denyHtmlMode = this.el.dataset.denyHtmlMode === "true";
       this._fallbackMode = this.el.dataset.fallbackMode || "hybrid";
       this._hashtags = this.el.dataset.hashtags === "true";
+      this._wikiLinks = this.el.dataset.wikilinks === "true";
       this._warnStaleBundle();
       this._debounceTimer = null;
       this._markdownDebounceTimer = null;
@@ -1582,6 +1604,13 @@
 
         this._visualEl.addEventListener("paste", this._onPaste.bind(this));
 
+        this._visualEl.addEventListener(
+          "click",
+          function (e) {
+            this._onWikiLinkClick(e);
+          }.bind(this)
+        );
+
         if (
           this._visualEl.innerHTML.trim() === "" ||
           this._visualEl.innerHTML === "<br>"
@@ -1625,6 +1654,7 @@
       // landed in a neighbouring item, and the next keystroke acted on that
       // one instead.
       if (this._visualEl) this._ensureListItemPlaceholders(this._visualEl);
+      this._resolveWikiLinks();
 
       // After the surfaces exist, so the opening state is step zero and the
       // first edit has something to undo back to.
@@ -1674,6 +1704,14 @@
         this._handleCommand.bind(this)
       );
 
+      // The host's answer to a `resolve_links` request.
+      this.handleEvent(
+        "leaf-link-targets:" + this._editorId,
+        function (payload) {
+          this._onWikiLinkTargets(payload || {});
+        }.bind(this)
+      );
+
       // Handle HTML content pushed from server (markdown→visual sync)
       this.handleEvent(
         "leaf-set-html:" + this._editorId,
@@ -1690,6 +1728,7 @@
             this._stripInterBlockWhitespace(this._visualEl);
             this._unwrapLooseListItems(this._visualEl);
             this._ensureListItemPlaceholders(this._visualEl);
+            this._resolveWikiLinks();
             // DOM was replaced — old block references are stale
             this._dragHandleBlock = null;
           }
@@ -1779,6 +1818,7 @@
       // A host can add or drop the `#` trigger at runtime, which is what
       // decides whether hashtags are decorated at all.
       this._hashtags = this.el.dataset.hashtags === "true";
+      this._wikiLinks = this.el.dataset.wikilinks === "true";
 
       // The host can widen or narrow the deny list at runtime. Falling back
       // to a hardcoded "visual" stopped being safe once :visual itself
@@ -5916,14 +5956,33 @@
     // a block round-tripped through source mode.
     _textWithLineBreaks: function (text) {
       if (text.indexOf("\n") === -1) {
-        return this._textWithHashtags(text);
+        return this._textWithDecorations(text);
       }
       var out = [];
       var parts = text.split("\n");
       for (var i = 0; i < parts.length; i++) {
         if (i > 0) out.push(document.createElement("br"));
-        if (parts[i]) out = out.concat(this._textWithHashtags(parts[i]));
+        if (parts[i]) out = out.concat(this._textWithDecorations(parts[i]));
       }
+      return out;
+    },
+
+    // Both inline decorations, applied in turn. Wiki links first: their
+    // brackets can contain a `#`, and running the hashtag pass first would
+    // tokenise the heading part of `[[Note#Section]]` as a tag and leave the
+    // link unmatched.
+    _textWithDecorations: function (text) {
+      var nodes = this._textWithWikiLinks(text);
+      var out = [];
+
+      for (var i = 0; i < nodes.length; i++) {
+        if (nodes[i].nodeType === Node.TEXT_NODE) {
+          out = out.concat(this._textWithHashtags(nodes[i].textContent));
+        } else {
+          out.push(nodes[i]);
+        }
+      }
+
       return out;
     },
 
@@ -5956,6 +6015,156 @@
       }
       if (last < text.length) out.push(document.createTextNode(text.slice(last)));
       return out.length ? out : [document.createTextNode(text)];
+    },
+
+    // `[[Target]]` → a decoration span, so a wiki link reads as a link rather
+    // than literal brackets in the rendered form of a hybrid block. Mirrors
+    // `decorate_wiki_links/1` on the server; both are gated on the host having
+    // opted in, so a document using `[[…]]` for something else is untouched.
+    //
+    // A span, never an `<a>`: `convertNode` serializes an unknown span as its
+    // own text, so the source stays `[[Target]]`. An `<a>` would serialize as
+    // `[label](href)` and quietly rewrite every wiki link into an ordinary
+    // markdown link.
+    _WIKI_LINK_RE: /\[\[([^\[\]|#]+?)(?:#([^\[\]|]+?))?(?:\|([^\[\]]+?))?\]\]/g,
+
+    _textWithWikiLinks: function (text) {
+      if (!this._wikiLinks || !text || text.indexOf("[[") === -1) {
+        return text ? [document.createTextNode(text)] : [];
+      }
+
+      var re = new RegExp(this._WIKI_LINK_RE.source, "g");
+      var out = [];
+      var last = 0;
+      var m;
+
+      while ((m = re.exec(text)) !== null) {
+        if (m.index > last) out.push(document.createTextNode(text.slice(last, m.index)));
+
+        var target = (m[1] || "").trim();
+        var heading = (m[2] || "").trim();
+        var alias = (m[3] || "").trim();
+
+        var span = document.createElement("span");
+        span.className = "leaf-wikilink";
+        span.setAttribute("data-leaf-wikilink", target);
+        if (heading) span.setAttribute("data-leaf-wikilink-heading", heading);
+        span.setAttribute("data-leaf-wikilink-raw", m[0]);
+        span.textContent = alias || (heading ? target + " \u203a " + heading : target);
+
+        out.push(span);
+        last = m.index + m[0].length;
+      }
+
+      if (last < text.length) out.push(document.createTextNode(text.slice(last)));
+      return out.length ? out : [document.createTextNode(text)];
+    },
+
+    // ---- wiki-link resolution ------------------------------------------
+    //
+    // Only the host knows which notes exist, so the client collects the targets
+    // it has no answer for and asks. Answers are cached for the life of the
+    // editor: the same target usually appears many times in a note, and a
+    // document full of links should not produce a request per occurrence.
+
+    _resolveWikiLinks: function () {
+      if (!this._wikiLinks || !this._visualEl) return;
+
+      this._wikiLinkTargets = this._wikiLinkTargets || {};
+
+      var spans = this._visualEl.querySelectorAll("[data-leaf-wikilink]");
+      var pending = [];
+      var seen = {};
+
+      for (var i = 0; i < spans.length; i++) {
+        var target = spans[i].getAttribute("data-leaf-wikilink");
+        if (!target) continue;
+
+        if (Object.prototype.hasOwnProperty.call(this._wikiLinkTargets, target)) {
+          this._applyWikiLinkTarget(spans[i], this._wikiLinkTargets[target]);
+        } else if (!seen[target]) {
+          seen[target] = true;
+          pending.push(target);
+        }
+      }
+
+      if (!pending.length) return;
+
+      this._wikiLinkSeq = (this._wikiLinkSeq || 0) + 1;
+      this.pushEventTo(this.el, "resolve_links", {
+        editor_id: this._editorId,
+        targets: pending,
+        seq: this._wikiLinkSeq
+      });
+    },
+
+    _applyWikiLinkTarget: function (span, info) {
+      if (!span || !info) return;
+
+      span.setAttribute("data-leaf-wikilink-exists", info.exists ? "true" : "false");
+      if (info.href) span.setAttribute("data-leaf-wikilink-href", info.href);
+
+      // A tooltip is the only affordance a span gets for free; without it an
+      // unresolved link looks identical to a typo.
+      span.setAttribute("title", info.exists ? info.href || "" : "Not found");
+    },
+
+    _onWikiLinkTargets: function (payload) {
+      // Drop an answer a later edit already superseded.
+      if (payload.seq && this._wikiLinkSeq && payload.seq < this._wikiLinkSeq) return;
+
+      this._wikiLinkTargets = this._wikiLinkTargets || {};
+
+      var targets = payload.targets || {};
+      for (var key in targets) {
+        if (Object.prototype.hasOwnProperty.call(targets, key)) {
+          this._wikiLinkTargets[key] = targets[key];
+        }
+      }
+
+      if (!this._visualEl) return;
+
+      var spans = this._visualEl.querySelectorAll("[data-leaf-wikilink]");
+      for (var i = 0; i < spans.length; i++) {
+        var t = spans[i].getAttribute("data-leaf-wikilink");
+        if (t && this._wikiLinkTargets[t]) {
+          this._applyWikiLinkTarget(spans[i], this._wikiLinkTargets[t]);
+        }
+      }
+    },
+
+    // Leaf reports the click and does nothing else. Where a target lives is the
+    // host's question — it may want a modal, a new tab, or a "create this note"
+    // flow for one that does not exist yet.
+    _onWikiLinkClick: function (e) {
+      if (!this._wikiLinks) return;
+
+      var span = e.target && e.target.closest
+        ? e.target.closest("[data-leaf-wikilink]")
+        : null;
+
+      if (!span || !this._visualEl.contains(span)) return;
+
+      // Which gesture follows a link depends on whether there is a caret to
+      // compete with:
+      //
+      //   read-only — a plain click follows; nothing else wants the click.
+      //   editable  — a bare click has to place the caret, so following takes
+      //               Ctrl/Cmd, the same gesture Obsidian uses in edit mode.
+      var withModifier = e.ctrlKey || e.metaKey;
+      var follows = this._readonly
+        ? !withModifier && !e.altKey && !e.shiftKey
+        : withModifier;
+
+      if (!follows) return;
+
+      e.preventDefault();
+      this.pushEventTo(this.el, "link_clicked", {
+        editor_id: this._editorId,
+        target: span.getAttribute("data-leaf-wikilink"),
+        heading: span.getAttribute("data-leaf-wikilink-heading"),
+        href: span.getAttribute("data-leaf-wikilink-href")
+      });
     },
 
     _buildFormattedFragment: function (text) {
@@ -9687,6 +9896,15 @@
               walk(c);
               pushMarker("](" + href + ")");
             }
+            continue;
+          }
+
+          // A wiki link's SOURCE is `[[Target|Alias]]`, while its text is the
+          // label. Walking it would put the label into the source and lose the
+          // link — the same trap as in `convertNode`. Emit what it carries.
+          if (c.classList && c.classList.contains("leaf-wikilink")) {
+            source += c.getAttribute("data-leaf-wikilink-raw") || c.textContent;
+            prevWasBr = false;
             continue;
           }
 
