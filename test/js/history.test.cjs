@@ -309,3 +309,4 @@ test("mounted() normalises list items", () => {
     "mounted() must normalise list items — server-rendered content needs the same treatment as synced content"
   );
 });
+

@@ -10075,34 +10075,27 @@
     },
 
     // Characters of text before (container, offset) within the editor.
+    //
+    // A Range does this correctly for both kinds of caret position: one inside
+    // a text node, and one ON an element with a child index — which is where
+    // the caret sits on any empty block. The previous version walked text
+    // nodes and, when the container was an element the walk could not find,
+    // called ITSELF with the same element: unconditional infinite recursion.
+    // It threw "too much recursion" out of the capture that runs before every
+    // toolbar action, so on an empty row the action never ran at all.
     _historyTextOffset: function (container, offset) {
-      var walker = document.createTreeWalker(
-        this._visualEl,
-        NodeFilter.SHOW_TEXT,
-        null,
-        false
-      );
+      if (!container || !this._visualEl) return 0;
 
-      var count = 0;
-      var node;
+      try {
+        var range = document.createRange();
+        range.setStart(this._visualEl, 0);
+        range.setEnd(container, offset);
 
-      while ((node = walker.nextNode())) {
-        if (node === container) return count + offset;
-        count += node.nodeValue.length;
+        return range.toString().length;
+      } catch (e) {
+        // Container outside the editor, or an offset the node cannot take.
+        return 0;
       }
-
-      // The caret sat on an element rather than in text (an empty paragraph,
-      // between blocks). Counting the text inside everything before it is the
-      // closest position that survives a re-render.
-      if (container && container.nodeType === 1) {
-        var before = 0;
-        for (var i = 0; i < offset && i < container.childNodes.length; i++) {
-          before += (container.childNodes[i].textContent || "").length;
-        }
-        return this._historyTextOffset(container, 0) === 0 ? before : count;
-      }
-
-      return count;
     },
 
     _historyRestoreSelection: function (entry, el) {

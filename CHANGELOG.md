@@ -103,6 +103,14 @@
 
 ### Changed
 
+- **Toolbar actions no longer die on an empty row.** Measuring the caret
+  recursed without end whenever it sat ON an element rather than in text —
+  which is every empty block. The resulting "too much recursion" was thrown by
+  the history capture that runs before each toolbar action, so the action never
+  ran: on an empty row the buttons did nothing, while the same click on a row
+  with text worked, because a caret in text returned before reaching that
+  branch.
+
 - **The Task List toolbar button works without selecting text first.** It
   appeared to do nothing on an empty line. The item WAS created — and then
   removed the instant the caret left it, by the tidy-up that clears an
