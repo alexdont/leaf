@@ -29,6 +29,14 @@
   itself before restoring — so a single undo jumped all the way back to the
   state at mount rather than stepping.
 
+- **Enter on an empty bullet only leaves the list at the end of one.** With
+  further items below, that gesture used to delete the blank item and cut the
+  list in two around it. Mid-list it now continues the list — the blank item
+  stays and a fresh one opens under it — because leaving is not a sensible
+  reading of Enter when there is still list below the cursor. At the end of a
+  list, where exiting is the only thing it can reasonably mean, the behaviour
+  is unchanged.
+
 - **A deliberately empty list item no longer disappears.** An `<li>` with no
   content renders at zero height and gives the caret nowhere to sit, and the
   marker hides with it — so leaving a bullet blank and clicking away looked

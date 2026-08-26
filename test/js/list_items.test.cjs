@@ -38,6 +38,7 @@ global.document = {
   createTextNode: (text) => ({ nodeType: 3, textContent: text }),
 };
 if (!global.navigator) global.navigator = { userAgent: "node" };
+global.Node = { ELEMENT_NODE: 1, TEXT_NODE: 3 };
 global.getComputedStyle = () => ({});
 
 require("../../priv/static/assets/leaf.js");
@@ -139,4 +140,65 @@ test("the empty item in the middle of a list is the one fixed", () => {
 
 test("a missing root is a no-op rather than a throw", () => {
   assert.doesNotThrow(() => proto._ensureListItemPlaceholders(null));
+});
+
+// ---------------------------------------------------------------------------
+// Enter on an empty item: continue mid-list, exit only at the end.
+// ---------------------------------------------------------------------------
+
+const ELEMENT_NODE = 1;
+const TEXT_NODE = 3;
+
+function node(type, text = "") {
+  return { nodeType: type, textContent: text, nextSibling: null };
+}
+
+function chain(nodes) {
+  nodes.forEach((n, i) => (n.nextSibling = nodes[i + 1] || null));
+  return nodes;
+}
+
+test("an item followed by another item is mid-list", () => {
+  // Enter here must continue the list, not exit it.
+  const [first, second] = chain([node(ELEMENT_NODE), node(ELEMENT_NODE)]);
+
+  assert.equal(proto._nextListSibling(first), second);
+});
+
+test("the last item has no following sibling", () => {
+  const last = node(ELEMENT_NODE);
+
+  assert.equal(proto._nextListSibling(last), null);
+});
+
+test("whitespace between items does not make the last item look mid-list", () => {
+  // Pretty-printed server HTML leaves text nodes between <li>s, and the
+  // stripper only runs on synced content. Counting one as "something follows"
+  // would stop Enter ever exiting a list.
+  const first = node(ELEMENT_NODE);
+  const gap = node(TEXT_NODE, "\n  ");
+  chain([first, gap]);
+
+  assert.equal(proto._nextListSibling(first), null);
+});
+
+test("meaningful text after an item does count", () => {
+  const first = node(ELEMENT_NODE);
+  const stray = node(TEXT_NODE, "trailing text");
+  chain([first, stray]);
+
+  assert.equal(proto._nextListSibling(first), stray);
+});
+
+test("whitespace before a real item is skipped, not mistaken for the end", () => {
+  const first = node(ELEMENT_NODE);
+  const gap = node(TEXT_NODE, "\n");
+  const second = node(ELEMENT_NODE);
+  chain([first, gap, second]);
+
+  assert.equal(proto._nextListSibling(first), second);
+});
+
+test("a null item is a no-op rather than a throw", () => {
+  assert.equal(proto._nextListSibling(null), null);
 });

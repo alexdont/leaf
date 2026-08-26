@@ -2670,6 +2670,52 @@
           var liText = (block.textContent || "").replace(/[​ ]/g, "").trim();
           if (liText === "") {
             e.preventDefault();
+
+            // Leaving the list is only a sensible reading of Enter-on-empty
+            // when there is nothing after this item. With further items below,
+            // the same gesture used to delete the blank one and cut the list
+            // in two around it — which is not what someone pressing Enter in
+            // the middle of a list is asking for. There, continue the list
+            // instead: keep the blank item and open a fresh one under it.
+            if (this._nextListSibling(block)) {
+              var midLi = document.createElement("li");
+
+              if (isTaskLi) {
+                midLi.className = "leaf-task";
+                midLi.setAttribute("data-checked", "false");
+                var midBox = document.createElement("span");
+                midBox.className = "leaf-task-box";
+                midBox.setAttribute("contenteditable", "false");
+                midLi.appendChild(midBox);
+              }
+
+              // Both items need a caret home: the new one to be typed into,
+              // and the one being left behind to stay visible now that it is
+              // staying (see _ensureListItemPlaceholders).
+              midLi.appendChild(document.createTextNode("​"));
+              if (!this._firstTextDescendant(block)) {
+                block.appendChild(document.createTextNode("​"));
+              }
+
+              liParent.insertBefore(midLi, block.nextSibling);
+
+              var midRange = document.createRange();
+              var midText = this._firstTextDescendant(midLi);
+
+              if (midText) {
+                midRange.setStart(midText, midText.textContent === "​" ? 1 : 0);
+              } else {
+                midRange.setStart(midLi, 0);
+              }
+
+              midRange.collapse(true);
+              var midSel = window.getSelection();
+              midSel.removeAllRanges();
+              midSel.addRange(midRange);
+              this._visualEl.dispatchEvent(new Event("input", { bubbles: true }));
+              return;
+            }
+
             var liGrandparent = liParent && liParent.parentNode;
             if (liGrandparent && liParent) {
               var trailingItems = [];
@@ -6653,6 +6699,24 @@
           child = next;
         }
       }
+    },
+
+    // The next real item after `li`, or null at the end of the list.
+    //
+    // Element-wise on purpose: a text node between items (pretty-printed
+    // server HTML leaves them, and `_stripInterBlockWhitespace` only runs on
+    // synced content) would otherwise read as "something follows" and turn the
+    // last item in a list into a middle one.
+    _nextListSibling: function (li) {
+      var sib = li && li.nextSibling;
+
+      while (sib) {
+        if (sib.nodeType === Node.ELEMENT_NODE) return sib;
+        if (sib.nodeType === Node.TEXT_NODE && /\S/.test(sib.textContent)) return sib;
+        sib = sib.nextSibling;
+      }
+
+      return null;
     },
 
     // Give every empty `<li>` a caret home.
