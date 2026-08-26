@@ -6762,13 +6762,19 @@
     //
     // Only openers. A closing character is left alone so it can still be typed
     // literally, and so pressing `)` after a wrap does not nest again.
+    // `*` and `_` are symmetric like the quotes, and wrap into markdown
+    // emphasis: `*hello*` reads as italic once serialized, `**hello**` as bold
+    // if the wrap is repeated. Included because reaching for them around a
+    // selection is the same gesture as reaching for a bracket.
     _SURROUND_PAIRS: {
       "(": ")",
       "[": "]",
       "{": "}",
       '"': '"',
       "'": "'",
-      "`": "`"
+      "`": "`",
+      "*": "*",
+      _: "_"
     },
 
     // Returns true when the keystroke was consumed.

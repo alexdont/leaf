@@ -20,6 +20,8 @@ const PAIRS = [
   ['"', '"hello" world'],
   ["'", "'hello' world"],
   ["`", "`hello` world"],
+  ["*", "*hello* world"],
+  ["_", "_hello_ world"],
 ];
 
 function pressWithSelection(e, key, range) {
@@ -190,4 +192,19 @@ test("a textarea with no selection types the character", { skip }, () => {
 
   assert.equal(r.handled, false);
   assert.equal(r.value, "hello");
+});
+
+test("wrapping with * twice gives markdown bold", { skip }, () => {
+  // The natural consequence of stacking a symmetric pair, and a useful one.
+  const e = editor("<p>hello</p>", "hybrid");
+  const range = document.createRange();
+  range.selectNodeContents(e._visualEl.children[0]);
+
+  pressWithSelection(e, "*", range);
+  e._maybeSurroundSelection(
+    new window.KeyboardEvent("keydown", { key: "*", bubbles: true, cancelable: true })
+  );
+
+  assert.equal(e._visualEl.textContent, "**hello**");
+  e.cleanup();
 });

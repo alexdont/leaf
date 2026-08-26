@@ -105,7 +105,9 @@
 
 - **Typing a bracket or quote with text selected wraps it.** Select `hello`,
   press `(`, get `(hello)` with `hello` still selected so the wrap can be
-  stacked. Handles `(`, `[`, `{`, `"`, `'` and `` ` ``, in every mode. Only
+  stacked. Handles `(`, `[`, `{`, `"`, `'`, `` ` ``, `*` and `_`, in every
+  mode — the last two wrap into markdown emphasis, and stacking `*` twice
+  gives bold. Only
   openers: a closing character stays typeable, and pressing one after a wrap
   does not nest again. The characters are inserted AROUND the selection rather
   than replacing its text, so formatting inside it survives.
