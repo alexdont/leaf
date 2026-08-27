@@ -289,3 +289,118 @@ test("an edit is not written across a placeholder", { skip: dom.skip }, () => {
 
   e.cleanup();
 });
+
+// ---------------------------------------------------------------------------
+// Line breaks need a position of their own
+// ---------------------------------------------------------------------------
+//
+// Without one, the end of a line and the start of the next are the same
+// offset, and an edit sent at that offset lands in whichever of the two the
+// receiver resolves it to. That is how one tab ended up with "a body what" /
+// "peach tree" while the other had "a bodych tree what" / "pea".
+
+test("the end of a line and the start of the next are different offsets", { skip: dom.skip }, () => {
+  const e = awarenessEditor("<ul><li>alpha</li><li>beta</li></ul>", "hybrid");
+
+  assert.equal(e._visibleText(e._visualEl), "alpha\nbeta");
+
+  const endOfAlpha = e._visibleNodeAt(5);
+  const startOfBeta = e._visibleNodeAt(6);
+
+  assert.equal(endOfAlpha.node.nodeValue, "alpha");
+  assert.equal(endOfAlpha.offset, 5);
+  assert.equal(startOfBeta.node.nodeValue, "beta");
+  assert.equal(startOfBeta.offset, 0);
+
+  e.cleanup();
+});
+
+test("an edit at the start of a line does not land on the one above", { skip: dom.skip }, () => {
+  const e = awarenessEditor("<ul><li>alpha</li><li>beta</li></ul>", "hybrid");
+
+  e._applyRemoteFastPath({ rendered: { at: 6, remove: 0, insert: "X" } });
+
+  assert.equal(e._visibleText(e._visualEl), "alpha\nXbeta");
+
+  e.cleanup();
+});
+
+test("an edit at the end of a line stays on it", { skip: dom.skip }, () => {
+  const e = awarenessEditor("<ul><li>alpha</li><li>beta</li></ul>", "hybrid");
+
+  e._applyRemoteFastPath({ rendered: { at: 5, remove: 0, insert: "X" } });
+
+  assert.equal(e._visibleText(e._visualEl), "alphaX\nbeta");
+
+  e.cleanup();
+});
+
+test("a removal reaching across a line break is left to the slow path", { skip: dom.skip }, () => {
+  const e = awarenessEditor("<ul><li>alpha</li><li>beta</li></ul>", "hybrid");
+
+  assert.equal(
+    e._applyRemoteFastPath({ rendered: { at: 3, remove: 5, insert: "" } }),
+    false,
+    "the shortcut cannot delete across a line it does not model"
+  );
+  assert.equal(e._visibleText(e._visualEl), "alpha\nbeta", "and must not have half-done it");
+
+  e.cleanup();
+});
+
+// An empty list item holds no text node at all, so the break around it cannot
+// be inferred from text — and a session that has put a placeholder in one
+// would otherwise see a line where a session that has not sees nothing.
+test("an empty line counts the same with or without its placeholder", { skip: dom.skip }, () => {
+  const bare = awarenessEditor("<ul><li>alpha</li><li></li></ul>", "hybrid");
+  const held = awarenessEditor("<ul><li>alpha</li><li>" + ZWSP + "</li></ul>", "hybrid");
+
+  assert.equal(bare._visibleText(bare._visualEl), "alpha\n");
+  assert.equal(
+    held._visibleText(held._visualEl),
+    bare._visibleText(bare._visualEl),
+    "two sessions on the same document must read the same text"
+  );
+
+  bare.cleanup();
+  held.cleanup();
+});
+
+test("headings and paragraphs are separated too", { skip: dom.skip }, () => {
+  const e = awarenessEditor("<h1>Title</h1><p>body</p>");
+
+  assert.equal(e._visibleText(e._visualEl), "Title\nbody");
+
+  e.cleanup();
+});
+
+// Inline formatting is not a line break — a bold run inside a sentence must
+// not split it.
+test("inline elements do not introduce a break", { skip: dom.skip }, () => {
+  const e = awarenessEditor("<p>a <strong>bold</strong> word</p>");
+
+  assert.equal(e._visibleText(e._visualEl), "a bold word");
+
+  e.cleanup();
+});
+
+// An empty line between two others is a position that belongs to no line's
+// text. There is nothing for the shortcut to edit there, so it must decline
+// and let the server's HTML place it.
+test("an empty line between two others is left to the slow path", { skip: dom.skip }, () => {
+  const e = awarenessEditor("<ul><li>a</li><li></li><li>b</li></ul>", "hybrid");
+
+  assert.equal(e._visibleText(e._visualEl), "a\n\nb");
+
+  const point = e._visibleNodeAt(2);
+  assert.equal(point.boundary, true, "offset 2 is the empty line itself");
+
+  assert.equal(
+    e._applyRemoteFastPath({ rendered: { at: 2, remove: 0, insert: "X" } }),
+    false,
+    "there is no text node that position belongs to"
+  );
+  assert.equal(e._visibleText(e._visualEl), "a\n\nb", "and nothing may have been written");
+
+  e.cleanup();
+});

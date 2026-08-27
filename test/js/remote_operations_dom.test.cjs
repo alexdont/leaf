@@ -198,7 +198,9 @@ test("hybrid source markers do not drag the caret", { skip: dom.skip }, () => {
   sel.removeAllRanges();
   sel.addRange(range);
 
-  assert.equal(e._visibleOffset(item, item.textContent.length), 9, "Title + what");
+  // "Title", the list item — the line breaks between blocks count now, so the
+  // end of "what" sits one past where it did when they did not.
+  assert.equal(e._visibleOffset(item, item.textContent.length), 10, "Title \n what");
 
   // A peer appends a second item — nothing before this caret changes.
   remote(
@@ -209,7 +211,7 @@ test("hybrid source markers do not drag the caret", { skip: dom.skip }, () => {
 
   assert.equal(
     caretOffset(e),
-    9,
+    10,
     "caret must stay at the end of 'what', not be pulled back by the marker"
   );
 

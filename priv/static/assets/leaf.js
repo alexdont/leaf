@@ -3467,41 +3467,46 @@
       }
     },
 
-    // Inverse of _visibleOffset: a marker-free offset back to a text node.
+    // Inverse of _visibleOffset. `boundary` marks a position sitting on a line
+    // break, which belongs to neither line: fine for showing a caret, not for
+    // placing text.
     _visibleNodeAt: function (offset) {
-      if (!this._visualEl) return null;
-
-      var walker = document.createTreeWalker(this._visualEl, NodeFilter.SHOW_TEXT, null, false);
+      var segments = this._visibleSegments();
       var count = 0;
-      var node;
       var last = null;
 
-      while ((node = walker.nextNode())) {
-        if (this._inSourceMarker(node)) continue;
+      for (var i = 0; i < segments.length; i++) {
+        var segment = segments[i];
 
-        var value = node.nodeValue || "";
-        var length = this._visibleChars(value).length;
+        if (!segment.node) {
+          if (count === offset) {
+            var next = this._nextTextSegment(segments, i);
+            if (next) return { node: next.node, offset: 0, boundary: true };
+          }
+          count += 1;
+          continue;
+        }
 
-        if (count + length >= offset) {
+        if (count + segment.text.length >= offset) {
           // Back from a visible offset to a real one, stepping over any
           // placeholders sitting in this node.
           var wanted = offset - count;
           var raw = 0;
           var seen = 0;
 
-          while (raw < value.length && seen < wanted) {
-            if (this._visibleChars(value.charAt(raw))) seen++;
+          while (raw < segment.raw.length && seen < wanted) {
+            if (this._visibleChars(segment.raw.charAt(raw))) seen++;
             raw++;
           }
 
-          return { node: node, offset: raw };
+          return { node: segment.node, offset: raw, boundary: false };
         }
 
-        count += length;
-        last = node;
+        count += segment.text.length;
+        last = segment.node;
       }
 
-      if (last) return { node: last, offset: last.nodeValue.length };
+      if (last) return { node: last, offset: last.nodeValue.length, boundary: false };
       return null;
     },
 
@@ -7548,16 +7553,71 @@
     // Excluding them also gives every session the same coordinates for the
     // same document, which is what makes a peer's caret position meaningful
     // here rather than only in the editor it came from.
-    _visibleText: function (root) {
-      if (!root) return "";
+    // The document as a run of characters every session agrees on, built once
+    // and reused by the three functions below.
+    //
+    // Line breaks between blocks are part of it, and they come from the
+    // ELEMENTS rather than the text. Without a position of their own, the end
+    // of one line and the start of the next are the same offset, and an edit
+    // sent at that offset lands in whichever of the two the receiver happens
+    // to resolve it to — which is how "a body" and "peach tree" became
+    // "a bodych tree" in one tab and not the other. And they cannot be
+    // inferred from text nodes, because an empty list item holds none at all:
+    // a session that has put a placeholder in one would then see a line where
+    // a session that has not sees nothing.
+    _visibleSegments: function (root) {
+      var scope = root || this._visualEl;
+      if (!scope) return [];
 
-      var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
-      var out = "";
+      var walker = document.createTreeWalker(
+        scope,
+        NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
+        null,
+        false
+      );
+
+      var segments = [];
+      var length = 0;
       var node;
 
       while ((node = walker.nextNode())) {
-        if (!this._inSourceMarker(node, root)) out += this._visibleChars(node.nodeValue);
+        if (node.nodeType === 1) {
+          // Nothing emitted yet means this is the outermost block opening,
+          // not a break between two lines.
+          if (length > 0 && this._BLOCK_TAGS.test(node.tagName)) {
+            segments.push({ node: null, text: "\n", raw: "\n" });
+            length += 1;
+          }
+          continue;
+        }
+
+        if (this._inSourceMarker(node, scope)) continue;
+
+        var raw = node.nodeValue || "";
+        var text = this._visibleChars(raw);
+        segments.push({ node: node, text: text, raw: raw });
+        length += text.length;
       }
+
+      return segments;
+    },
+
+    // Tag-driven rather than computed: this runs against detached and
+    // still-loading DOM, where getComputedStyle has nothing useful to say.
+    _BLOCK_TAGS: /^(?:P|DIV|LI|H[1-6]|BLOCKQUOTE|PRE|TD|TH|FIGCAPTION|DT|DD|SECTION|ARTICLE|ASIDE|HEADER|FOOTER|MAIN|NAV|ADDRESS|FIELDSET|TABLE|CAPTION|HR)$/,
+
+    _nextTextSegment: function (segments, from) {
+      for (var i = from; i < segments.length; i++) {
+        if (segments[i].node) return segments[i];
+      }
+      return null;
+    },
+
+    _visibleText: function (root) {
+      var segments = this._visibleSegments(root);
+      var out = "";
+
+      for (var i = 0; i < segments.length; i++) out += segments[i].text;
 
       return out;
     },
@@ -7585,9 +7645,7 @@
       return false;
     },
 
-    // A DOM position as an offset into _visibleText. Built from the raw offset
-    // rather than by walking, so it inherits _historyTextOffset's handling of
-    // carets parked on an element rather than in a text node.
+    // A DOM position as an offset into _visibleText.
     _visibleOffset: function (container, offset) {
       if (!container || !this._visualEl) return 0;
 
@@ -7600,27 +7658,44 @@
         return 0;
       }
 
-      var walker = document.createTreeWalker(this._visualEl, NodeFilter.SHOW_TEXT, null, false);
+      var segments = this._visibleSegments();
       var count = 0;
-      var node;
+      var pendingBreaks = 0;
 
-      while ((node = walker.nextNode())) {
-        if (this._inSourceMarker(node)) continue;
+      for (var i = 0; i < segments.length; i++) {
+        var segment = segments[i];
 
-        var value = node.nodeValue || "";
-        var take;
-
-        if (node === container) {
-          take = offset;
-        } else if (boundary.comparePoint(node, value.length) <= 0) {
-          take = value.length;
-        } else if (boundary.comparePoint(node, 0) > 0) {
-          break;
-        } else {
-          take = value.length;
+        // A line break only counts once something after it does.
+        if (!segment.node) {
+          pendingBreaks += 1;
+          continue;
         }
 
-        count += this._visibleChars(value.slice(0, take)).length;
+        var take;
+        var reached = false;
+
+        if (segment.node === container) {
+          take = offset;
+          reached = true;
+        } else {
+          try {
+            if (boundary.comparePoint(segment.node, segment.raw.length) <= 0) {
+              take = segment.raw.length;
+            } else if (boundary.comparePoint(segment.node, 0) > 0) {
+              break;
+            } else {
+              take = segment.raw.length;
+            }
+          } catch (e) {
+            break;
+          }
+        }
+
+        count += pendingBreaks;
+        pendingBreaks = 0;
+        count += this._visibleChars(segment.raw.slice(0, take)).length;
+
+        if (reached) break;
       }
 
       return count;
@@ -7650,6 +7725,8 @@
 
       var point = this._visibleNodeAt(rendered.at || 0);
       if (!point || !point.node || point.node.nodeType !== 3) return false;
+      // On a line break, belonging to neither line — the slow path decides.
+      if (point.boundary) return false;
       if (this._inSourceMarker(point.node)) return false;
 
       // The whole edit has to sit inside this one text node. Past its end we
