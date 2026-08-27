@@ -176,3 +176,62 @@ test("a remote edit with no local caret is applied without placing one", { skip:
 
   e.cleanup();
 });
+
+// Hybrid mode shows the block under the caret as raw markdown, in
+// leaf-source-marker spans. Those exist in this editor's DOM and never in the
+// server's HTML, so a textContent diff counted them as a deletion and pulled
+// the caret backwards out of what the user was typing.
+test("hybrid source markers do not drag the caret", { skip: dom.skip }, () => {
+  const e = dom.editor(
+    '<h1>Title</h1><ul><li data-leaf-source="li">' +
+      '<span class="leaf-source-marker leaf-list-marker">- </span>what</li></ul>',
+    "hybrid"
+  );
+  e._currentMarkdown = () => "# Title\n\n- what";
+
+  // Caret at the end of "what", where someone typing that item would have it.
+  const item = e._visualEl.querySelector("li").lastChild;
+  const range = document.createRange();
+  range.setStart(item, item.textContent.length);
+  range.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+
+  assert.equal(e._visibleOffset(item, item.textContent.length), 9, "Title + what");
+
+  // A peer appends a second item — nothing before this caret changes.
+  remote(
+    e,
+    "<h1>Title</h1><ul><li>what</li><li>next</li></ul>",
+    { at: 15, remove: 0, insert: "\n- next", content: "# Title\n\n- what\n- next" }
+  );
+
+  assert.equal(
+    caretOffset(e),
+    9,
+    "caret must stay at the end of 'what', not be pulled back by the marker"
+  );
+
+  e.cleanup();
+});
+
+test("_visibleText excludes source markers, _visibleOffset agrees with it", { skip: dom.skip }, () => {
+  const e = dom.editor(
+    '<ul><li data-leaf-source="li">' +
+      '<span class="leaf-source-marker leaf-list-marker">- </span>item</li></ul>',
+    "hybrid"
+  );
+
+  assert.equal(e._visualEl.textContent, "- item", "the marker is really in the DOM");
+  assert.equal(e._visibleText(e._visualEl), "item", "and must not be in the comparison text");
+
+  const text = e._visualEl.querySelector("li").lastChild;
+  assert.equal(e._visibleOffset(text, 4), 4, "offsets are measured in marker-free text");
+
+  // A caret inside the marker collapses to where the marker begins.
+  const marker = e._visualEl.querySelector(".leaf-source-marker").firstChild;
+  assert.equal(e._visibleOffset(marker, 1), 0);
+
+  e.cleanup();
+});

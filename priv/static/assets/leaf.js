@@ -1537,6 +1537,7 @@
       this._hashtags = this.el.dataset.hashtags === "true";
       this._wikiLinks = this.el.dataset.wikilinks === "true";
       this._collabOperations = this.el.dataset.collabOperations === "true";
+      this._collabAwareness = this.el.dataset.collabAwareness === "true";
       this._wikiLinksResolve = this.el.dataset.wikilinksResolve !== "false";
       this._wikiLinksFollow = this.el.dataset.wikilinksFollow || "modifier";
       this._warnStaleBundle();
@@ -1707,6 +1708,14 @@
         this._handleCommand.bind(this)
       );
 
+      // Where everyone else's caret is.
+      this.handleEvent(
+        "leaf-peer-cursors:" + this._editorId,
+        function (payload) {
+          this._renderPeerCursors((payload && payload.cursors) || []);
+        }.bind(this)
+      );
+
       // Someone else's edit, to be applied without moving this user's caret.
       this.handleEvent(
         "leaf-remote-operation:" + this._editorId,
@@ -1829,6 +1838,7 @@
       this._hashtags = this.el.dataset.hashtags === "true";
       this._wikiLinks = this.el.dataset.wikilinks === "true";
       this._collabOperations = this.el.dataset.collabOperations === "true";
+      this._collabAwareness = this.el.dataset.collabAwareness === "true";
       this._wikiLinksResolve = this.el.dataset.wikilinksResolve !== "false";
       this._wikiLinksFollow = this.el.dataset.wikilinksFollow || "modifier";
 
@@ -1899,6 +1909,25 @@
           this._onSelectionChange
         );
         this._onSelectionChange = null;
+      }
+      if (this._awarenessTimer) {
+        clearTimeout(this._awarenessTimer);
+        this._awarenessTimer = null;
+      }
+      if (this._onAwarenessSelectionChange) {
+        document.removeEventListener(
+          "selectionchange",
+          this._onAwarenessSelectionChange
+        );
+        this._onAwarenessSelectionChange = null;
+      }
+      if (this._onAwarenessBlur) {
+        this.el.removeEventListener("focusout", this._onAwarenessBlur);
+        this._onAwarenessBlur = null;
+      }
+      if (this._onAwarenessResize) {
+        window.removeEventListener("resize", this._onAwarenessResize);
+        this._onAwarenessResize = null;
       }
       if (this._beforeUnloadHandler) {
         window.removeEventListener("beforeunload", this._beforeUnloadHandler);
@@ -3224,6 +3253,226 @@
         };
         document.addEventListener("selectionchange", this._onSelectionChange);
       }
+
+      // Awareness is its own opt-in: a host can want carets without wanting
+      // the selection events, and vice versa.
+      if (this._collabAwareness) {
+        this._onAwarenessSelectionChange = function () {
+          if (self._awarenessTimer) return;
+          self._awarenessTimer = setTimeout(function () {
+            self._awarenessTimer = null;
+            self._emitAwareness();
+          }, 120);
+        };
+
+        document.addEventListener("selectionchange", this._onAwarenessSelectionChange);
+
+        // Leaving tells the others to drop our caret, rather than leaving it
+        // parked wherever we last were.
+        this._onAwarenessBlur = function () {
+          self._emitAwareness(true);
+        };
+        this.el.addEventListener("focusout", this._onAwarenessBlur);
+
+        // The carets are absolute pixels, so anything that reflows the text
+        // leaves them pointing at the wrong character until redrawn.
+        this._onAwarenessResize = function () {
+          if (self._peerCursors && self._peerCursors.length) {
+            self._renderPeerCursors(self._peerCursors);
+          }
+        };
+        window.addEventListener("resize", this._onAwarenessResize);
+      }
+    },
+
+    // ===================================================================
+    // Awareness: where everyone's caret is
+    // ===================================================================
+
+    _emitAwareness: function (blurred) {
+      if (!this._collabAwareness) return;
+
+      var offset = null;
+      var focused = !blurred;
+
+      if (focused) {
+        if (this._mode === "markdown") {
+          var ta = this._getMarkdownTextarea();
+          offset = ta && document.activeElement === ta ? ta.selectionStart : null;
+        } else if (this._visualEl) {
+          var sel = window.getSelection();
+          if (sel && sel.rangeCount && this._visualEl.contains(sel.getRangeAt(0).startContainer)) {
+            var range = sel.getRangeAt(0);
+            offset = this._visibleOffset(range.startContainer, range.startOffset);
+          }
+        }
+      }
+
+      if (offset === null) focused = false;
+      // Nothing changed — do not spend a round trip saying so.
+      if (focused === this._lastAwarenessFocused && offset === this._lastAwarenessOffset) return;
+
+      this._lastAwarenessFocused = focused;
+      this._lastAwarenessOffset = offset;
+
+      this.pushEventTo(this.el, "awareness", {
+        editor_id: this._editorId,
+        offset: offset,
+        focused: focused
+      });
+    },
+
+    // The layer the carets are drawn on. Created lazily and kept out of the
+    // editable area, so nothing here can end up in the document.
+    _peerCursorLayer: function () {
+      if (this._peerLayer && this._peerLayer.parentNode) return this._peerLayer;
+      if (!this.el) return null;
+
+      var layer = document.createElement("div");
+      layer.className = "leaf-peer-cursors";
+      layer.setAttribute("aria-hidden", "true");
+      // Set one property at a time rather than via cssText: a single value a
+      // CSSOM does not recognise makes it discard the whole declaration.
+      this._style(layer, {
+        position: "absolute",
+        top: "0",
+        left: "0",
+        right: "0",
+        bottom: "0",
+        pointerEvents: "none",
+        overflow: "hidden",
+        zIndex: "5"
+      });
+
+      // The carets are positioned against this box, so it has to be one.
+      var position = "";
+      try {
+        position = window.getComputedStyle(this.el).position;
+      } catch (e) {
+        /* no view — fall through and set it anyway */
+      }
+      if (!position || position === "static") this.el.style.position = "relative";
+
+      this.el.appendChild(layer);
+      this._peerLayer = layer;
+      return layer;
+    },
+
+    _style: function (el, styles) {
+      for (var key in styles) {
+        if (Object.prototype.hasOwnProperty.call(styles, key)) {
+          try {
+            el.style[key] = styles[key];
+          } catch (e) {
+            /* a value this engine will not take — skip it, keep the rest */
+          }
+        }
+      }
+    },
+
+    _renderPeerCursors: function (cursors) {
+      this._peerCursors = cursors || [];
+
+      var layer = this._peerCursorLayer();
+      if (!layer) return;
+
+      while (layer.firstChild) layer.removeChild(layer.firstChild);
+      if (!this._peerCursors.length || !this._visualEl) return;
+
+      var host = this.el.getBoundingClientRect();
+
+      for (var i = 0; i < this._peerCursors.length; i++) {
+        var cursor = this._peerCursors[i];
+        var rect = this._rectAtVisibleOffset(cursor.offset);
+        if (!rect) continue;
+
+        var caret = document.createElement("div");
+        caret.className = "leaf-peer-caret";
+        this._style(caret, {
+          position: "absolute",
+          width: "2px",
+          pointerEvents: "none",
+          borderRadius: "1px",
+          backgroundColor: cursor.color || "#888",
+          left: rect.left - host.left + "px",
+          top: rect.top - host.top + "px",
+          height: (rect.height || 16) + "px"
+        });
+
+        if (cursor.label) {
+          var label = document.createElement("span");
+          label.className = "leaf-peer-caret-label";
+          label.textContent = cursor.label;
+          this._style(label, {
+            position: "absolute",
+            bottom: "100%",
+            left: "-1px",
+            whiteSpace: "nowrap",
+            fontSize: "10px",
+            lineHeight: "1.4",
+            padding: "0 4px",
+            borderRadius: "3px",
+            color: "#fff",
+            backgroundColor: cursor.color || "#888"
+          });
+          caret.appendChild(label);
+        }
+
+        layer.appendChild(caret);
+      }
+    },
+
+    // A screen rectangle for a marker-free text offset. A collapsed range
+    // reports no rects in some engines, so fall back to measuring the
+    // character next to it.
+    _rectAtVisibleOffset: function (offset) {
+      var point = this._visibleNodeAt(offset || 0);
+      if (!point) return null;
+
+      try {
+        var range = document.createRange();
+        range.setStart(point.node, point.offset);
+        range.collapse(true);
+
+        var rect = range.getBoundingClientRect();
+        if (rect && (rect.height || rect.width)) return rect;
+
+        var length = point.node.nodeValue ? point.node.nodeValue.length : 0;
+        if (point.offset < length) {
+          range.setEnd(point.node, point.offset + 1);
+        } else if (point.offset > 0) {
+          range.setStart(point.node, point.offset - 1);
+        } else {
+          return null;
+        }
+
+        rect = range.getBoundingClientRect();
+        return rect && (rect.height || rect.width) ? rect : null;
+      } catch (e) {
+        return null;
+      }
+    },
+
+    // Inverse of _visibleOffset: a marker-free offset back to a text node.
+    _visibleNodeAt: function (offset) {
+      if (!this._visualEl) return null;
+
+      var walker = document.createTreeWalker(this._visualEl, NodeFilter.SHOW_TEXT, null, false);
+      var count = 0;
+      var node;
+      var last = null;
+
+      while ((node = walker.nextNode())) {
+        if (this._inSourceMarker(node)) continue;
+
+        var length = node.nodeValue.length;
+        if (count + length >= offset) return { node: node, offset: offset - count };
+        count += length;
+        last = node;
+      }
+
+      if (last) return { node: last, offset: last.nodeValue.length };
+      return null;
     },
 
     _emitSelectionChanged: function () {
@@ -7179,10 +7428,27 @@
       this._historyRestoring = true;
 
       try {
+        var visual = null;
+
         if (this._mode === "markdown") {
           this._applyRemoteToTextarea(this._getMarkdownTextarea(), payload);
         } else if (this._mode !== "html") {
-          this._applyRemoteToVisual(payload);
+          visual = this._applyRemoteToVisual(payload);
+        }
+
+        // The peers' carets are offsets into the text that just changed. The
+        // shift is already known — it is the same one this user's caret took —
+        // so move them now rather than showing them in the wrong place until
+        // their owners next touch the keyboard.
+        if (visual && this._peerCursors && this._peerCursors.length) {
+          var shifted = [];
+          for (var i = 0; i < this._peerCursors.length; i++) {
+            var peer = this._peerCursors[i];
+            shifted.push(
+              Object.assign({}, peer, { offset: this._shiftOffset(peer.offset || 0, visual) })
+            );
+          }
+          this._peerCursors = shifted;
         }
 
         // Measure the next local splice from what we now actually hold. Not
@@ -7192,6 +7458,11 @@
         this._lastSentMarkdown = this._currentMarkdown();
         this._syncFormInput(this._lastSentMarkdown);
         this._updateCounts();
+
+        // Every character just moved; the carets are drawn at pixel positions.
+        if (this._peerCursors && this._peerCursors.length) {
+          this._renderPeerCursors(this._peerCursors);
+        }
       } finally {
         // Cleared on a later tick, for the same reason _historyApply does it:
         // input events from replacing content arrive asynchronously.
@@ -7224,6 +7495,75 @@
       }
     },
 
+    // Rendered text with hybrid mode's raw-markdown markers left out.
+    //
+    // In hybrid the block under the caret shows its own markdown — the "- " of
+    // a list item, a heading's "#", the "**" around bold — in
+    // leaf-source-marker spans. Server HTML never contains those, and which
+    // block is showing them depends on where each person's caret is. So the
+    // markers are in the DOM we compare against but not in the DOM we compare
+    // to, and a straight textContent diff reports them as a deletion nobody
+    // made, dragging the caret backwards through untouched text.
+    //
+    // Excluding them also gives every session the same coordinates for the
+    // same document, which is what makes a peer's caret position meaningful
+    // here rather than only in the editor it came from.
+    _visibleText: function (root) {
+      if (!root) return "";
+
+      var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+      var out = "";
+      var node;
+
+      while ((node = walker.nextNode())) {
+        if (!this._inSourceMarker(node, root)) out += node.nodeValue;
+      }
+
+      return out;
+    },
+
+    _inSourceMarker: function (node, root) {
+      var el = node.parentNode;
+      var stop = root || this._visualEl;
+
+      while (el && el !== stop) {
+        if (el.classList && el.classList.contains("leaf-source-marker")) return true;
+        el = el.parentNode;
+      }
+
+      return false;
+    },
+
+    // A DOM position as an offset into _visibleText. Built from the raw offset
+    // rather than by walking, so it inherits _historyTextOffset's handling of
+    // carets parked on an element rather than in a text node.
+    _visibleOffset: function (container, offset) {
+      if (!container || !this._visualEl) return 0;
+
+      var raw = this._historyTextOffset(container, offset);
+      var markers = this._visualEl.querySelectorAll(".leaf-source-marker");
+      var skipped = 0;
+
+      for (var i = 0; i < markers.length; i++) {
+        var marker = markers[i];
+        var length = (marker.textContent || "").length;
+        if (!length) continue;
+
+        var end = this._historyTextOffset(marker, marker.childNodes.length);
+        var start = end - length;
+
+        if (end <= raw) {
+          skipped += length;
+        } else if (start < raw) {
+          // The caret is sitting inside the marker itself. Everything from the
+          // marker's start onwards is invisible, so it collapses to the start.
+          skipped += raw - start;
+        }
+      }
+
+      return raw - skipped;
+    },
+
     _applyRemoteToVisual: function (payload) {
       var el = this._visualEl;
       if (!el) return;
@@ -7236,11 +7576,11 @@
 
       if (hadCaret) {
         var range = sel.getRangeAt(0);
-        caretStart = this._historyTextOffset(range.startContainer, range.startOffset);
-        caretEnd = this._historyTextOffset(range.endContainer, range.endOffset);
+        caretStart = this._visibleOffset(range.startContainer, range.startOffset);
+        caretEnd = this._visibleOffset(range.endContainer, range.endOffset);
       }
 
-      var before = el.textContent || "";
+      var before = this._visibleText(el);
 
       el.innerHTML = payload.html || "<p><br></p>";
       // Same cleanup leaf-set-html does — server HTML arrives pretty-printed,
@@ -7252,19 +7592,21 @@
       this._sourceBlock = null;
       this._dragHandleBlock = null;
 
-      if (!hadCaret) return;
-
       // The operation is in markdown offsets, but the caret lives in rendered
       // text, and the two differ by every marker markdown does not render —
       // `#`, `- `, the brackets around a link. Rather than map between the two
       // coordinate systems, derive the shift from what actually changed on
       // screen.
-      var visual = this._spliceBetween(before, el.textContent || "");
+      var visual = this._spliceBetween(before, this._visibleText(el));
 
-      this._restoreVisualCaret(
-        this._shiftOffset(caretStart, visual),
-        this._shiftOffset(caretEnd, visual)
-      );
+      if (hadCaret) {
+        this._restoreVisualCaret(
+          this._shiftOffset(caretStart, visual),
+          this._shiftOffset(caretEnd, visual)
+        );
+      }
+
+      return visual;
     },
 
     // Where a position lands after a splice is applied in front of it.

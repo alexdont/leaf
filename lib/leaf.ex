@@ -468,8 +468,10 @@ defmodule Leaf do
 
   # Multi-user editing. `%{operations: true}` makes the editor emit what
   # CHANGED alongside the snapshot it already sends, which is what a host needs
-  # to merge two people's edits. Off by default; a host that only wants the
-  # markdown sees exactly the traffic it always did.
+  # to merge two people's edits. `%{awareness: true}` additionally reports
+  # where this editor's caret is, and renders the carets the host sends back.
+  # Both off by default; a host that only wants the markdown sees exactly the
+  # traffic it always did.
   attr(:collaboration, :any, default: nil)
   attr(:gettext_backend, :any, default: nil)
   attr(:upload_handler, :any, default: nil)
@@ -594,6 +596,21 @@ defmodule Leaf do
        content: sanitized_markdown,
        html: html,
        mark_saved: Map.get(assigns, :mark_saved, true) != false
+     })}
+  end
+
+  # Show other people's carets in this editor. `cursors` is a list of
+  # `%{id:, label:, color:, offset:}`, and an empty list clears them.
+  #
+  # The offset is a character position in the document's rendered text with
+  # hybrid mode's markdown markers excluded — the coordinate system `awareness`
+  # reports in, chosen because it is the same in every session viewing the
+  # document, which a raw DOM offset is not: hybrid shows the markdown of
+  # whichever block that session's own caret is in.
+  def update(%{action: :peer_cursors, cursors: cursors}, socket) do
+    {:ok,
+     push_event(socket, "leaf-peer-cursors:#{socket.assigns.id}", %{
+       cursors: Enum.map(cursors, &normalize_cursor/1)
      })}
   end
 
@@ -782,6 +799,7 @@ defmodule Leaf do
       data-leaf-js-version={js_version()}
       data-hashtags={to_string(hashtag_trigger?(@suggest_configs))}
       data-collab-operations={to_string(collab_operations?(@collaboration))}
+      data-collab-awareness={to_string(collab_awareness?(@collaboration))}
       data-wikilinks={to_string(wiki_links_enabled?(@wiki_links))}
       data-wikilinks-resolve={to_string(wiki_links_resolve?(@wiki_links))}
       data-wikilinks-follow={wiki_links_follow(@wiki_links)}
@@ -2545,6 +2563,20 @@ defmodule Leaf do
   # is the length of the text the splice applies to, so a host holding a
   # document of a different length can tell it has diverged instead of applying
   # an offset that no longer means what it meant.
+  def handle_event("awareness", params, socket) do
+    send(
+      self(),
+      {:leaf_awareness,
+       %{
+         editor_id: socket.assigns.id,
+         offset: Map.get(params, "offset"),
+         focused: Map.get(params, "focused", true) == true
+       }}
+    )
+
+    {:noreply, socket}
+  end
+
   def handle_event("operation", %{"at" => at, "remove" => remove} = params, socket)
       when is_integer(at) and is_integer(remove) do
     send(
@@ -3557,6 +3589,18 @@ defmodule Leaf do
   defp collab_operations?(%{} = config), do: Map.get(config, :operations, false) == true
   defp collab_operations?(true), do: true
   defp collab_operations?(_), do: false
+
+  defp collab_awareness?(%{} = config), do: Map.get(config, :awareness, false) == true
+  defp collab_awareness?(_), do: false
+
+  defp normalize_cursor(cursor) do
+    %{
+      id: to_string(Map.get(cursor, :id, "")),
+      label: to_string(Map.get(cursor, :label, "")),
+      color: to_string(Map.get(cursor, :color, "#888")),
+      offset: Map.get(cursor, :offset) || 0
+    }
+  end
 
   defp wiki_links_resolve?(%{} = config), do: Map.get(config, :resolve, true) != false
   defp wiki_links_resolve?(other), do: wiki_links_enabled?(other)
