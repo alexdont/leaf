@@ -408,3 +408,40 @@ test("typing inside a hybrid source block does not take the shortcut", { skip: d
 
   e.cleanup();
 });
+
+// ---------------------------------------------------------------------------
+// Re-baselining after the document is replaced
+// ---------------------------------------------------------------------------
+
+test("set_content re-baselines, so the next edit is not one huge splice", { skip: dom.skip }, () => {
+  const e = dom.editor("<p>hello</p>");
+  e._collabOperations = true;
+  e._lastSentMarkdown = "something else entirely";
+  e._lastVisibleText = "something else entirely";
+  e._historyReset = () => {};
+  e._getMarkdownTextarea = () => null;
+  e._getHtmlTextarea = () => null;
+  e._currentMarkdown = () => "the room's document";
+
+  const sent = [];
+  e.pushEventTo = (_el, name, payload) => sent.push([name, payload]);
+
+  e._handleCommand({
+    action: "set_content",
+    content: "the room's document",
+    html: "<p>the room's document</p>",
+  });
+
+  assert.equal(
+    e._lastSentMarkdown,
+    "the room's document",
+    "the baseline must follow the document it was replaced with"
+  );
+
+  // With a stale baseline this would emit a splice rewriting the whole
+  // document — which the room refuses, resyncing again, forever.
+  e._emitOperation(e._currentMarkdown());
+  assert.deepEqual(sent, [], "nothing to report: the document is what we just adopted");
+
+  e.cleanup();
+});

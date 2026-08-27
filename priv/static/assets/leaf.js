@@ -14809,6 +14809,21 @@
 
           this._sourceBlock = null;
           this._dragHandleBlock = null;
+
+          // Re-baseline the collaboration state. The document was replaced
+          // wholesale — by a host resync, a version switch, a reload — and the
+          // next edit must be measured from what is here now. Diffing against
+          // the old baseline would emit one enormous splice describing a
+          // change nobody made, which the room would refuse, resyncing us
+          // again: a loop that never settles.
+          if (this._collabOperations) {
+            this._lastSentMarkdown = this._currentMarkdown();
+            this._lastVisibleText =
+              this._mode === "markdown" || this._mode === "html"
+                ? this._lastSentMarkdown
+                : this._visibleText(this._visualEl);
+          }
+
           this._syncFormInput(content);
           this._updateCounts();
           // Re-baseline the dirty snapshot: replacing the content
