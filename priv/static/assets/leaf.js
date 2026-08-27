@@ -1707,6 +1707,12 @@
         this._handleCommand.bind(this)
       );
 
+      // Someone else's edit, to be applied without moving this user's caret.
+      this.handleEvent(
+        "leaf-remote-operation:" + this._editorId,
+        this._applyRemoteOperation.bind(this)
+      );
+
       // The host's answer to a `resolve_links` request.
       this.handleEvent(
         "leaf-link-targets:" + this._editorId,
@@ -7150,8 +7156,154 @@
     // Diff against the last state SENT, not the last state seen. That is what
     // makes the debounce harmless: however many keystrokes it swallowed, the
     // splice still describes the whole distance from what the host last heard.
+    // ===================================================================
+    // Applying someone else's operation
+    // ===================================================================
+    //
+    // The hard part is not the text — it is the caret. Replacing the content
+    // puts the caret back at the top of the document, which in a shared editor
+    // means every keystroke by anyone else yanks you out of your sentence.
+    //
+    // So the caret is measured before the swap, and put back afterwards at the
+    // position the peer's edit moved it to.
+
+    _applyRemoteOperation: function (payload) {
+      if (!payload) return;
+
+      var self = this;
+      // Swapping content fires input events. Emitting an operation for a change
+      // we did not make would send the peer's edit back to them as ours, and
+      // recording it in the undo stack would let this user undo someone else's
+      // typing.
+      this._applyingRemote = true;
+      this._historyRestoring = true;
+
+      try {
+        if (this._mode === "markdown") {
+          this._applyRemoteToTextarea(this._getMarkdownTextarea(), payload);
+        } else if (this._mode !== "html") {
+          this._applyRemoteToVisual(payload);
+        }
+
+        // Measure the next local splice from what we now actually hold. Not
+        // from payload.content: the HTML round-trip can differ from it in
+        // whitespace, and that difference would otherwise be re-sent as this
+        // user's edit.
+        this._lastSentMarkdown = this._currentMarkdown();
+        this._syncFormInput(this._lastSentMarkdown);
+        this._updateCounts();
+      } finally {
+        // Cleared on a later tick, for the same reason _historyApply does it:
+        // input events from replacing content arrive asynchronously.
+        setTimeout(function () {
+          self._applyingRemote = false;
+          self._historyRestoring = false;
+        }, 0);
+      }
+    },
+
+    // Markdown mode is the easy case: the textarea's offsets are the same
+    // markdown character offsets the operation is written in.
+    _applyRemoteToTextarea: function (ta, payload) {
+      if (!ta) return;
+
+      var start = ta.selectionStart;
+      var end = ta.selectionEnd;
+      var focused = document.activeElement === ta;
+
+      ta.value = payload.content || "";
+
+      if (!focused) return;
+      try {
+        ta.setSelectionRange(
+          this._shiftOffset(start, payload),
+          this._shiftOffset(end, payload)
+        );
+      } catch (e) {
+        /* detached or hidden — nothing to place */
+      }
+    },
+
+    _applyRemoteToVisual: function (payload) {
+      var el = this._visualEl;
+      if (!el) return;
+
+      var sel = window.getSelection();
+      var hadCaret =
+        sel && sel.rangeCount > 0 && el.contains(sel.getRangeAt(0).startContainer);
+      var caretStart = 0;
+      var caretEnd = 0;
+
+      if (hadCaret) {
+        var range = sel.getRangeAt(0);
+        caretStart = this._historyTextOffset(range.startContainer, range.startOffset);
+        caretEnd = this._historyTextOffset(range.endContainer, range.endOffset);
+      }
+
+      var before = el.textContent || "";
+
+      el.innerHTML = payload.html || "<p><br></p>";
+      // Same cleanup leaf-set-html does — server HTML arrives pretty-printed,
+      // and the stray whitespace nodes break caret placement in lists.
+      this._stripInterBlockWhitespace(el);
+      this._unwrapLooseListItems(el);
+      this._ensureListItemPlaceholders(el);
+      this._resolveWikiLinks();
+      this._sourceBlock = null;
+      this._dragHandleBlock = null;
+
+      if (!hadCaret) return;
+
+      // The operation is in markdown offsets, but the caret lives in rendered
+      // text, and the two differ by every marker markdown does not render —
+      // `#`, `- `, the brackets around a link. Rather than map between the two
+      // coordinate systems, derive the shift from what actually changed on
+      // screen.
+      var visual = this._spliceBetween(before, el.textContent || "");
+
+      this._restoreVisualCaret(
+        this._shiftOffset(caretStart, visual),
+        this._shiftOffset(caretEnd, visual)
+      );
+    },
+
+    // Where a position lands after a splice is applied in front of it.
+    _shiftOffset: function (offset, splice) {
+      if (!splice) return offset;
+
+      var at = splice.at || 0;
+      var remove = splice.remove || 0;
+      var insert = (splice.insert || "").length;
+
+      // Edited after us: we do not move.
+      if (offset <= at) return offset;
+      // Edited entirely before us: we slide by the net change.
+      if (offset >= at + remove) return offset + insert - remove;
+      // We were sitting inside text the peer replaced. The end of what they
+      // wrote is the only position that still means anything.
+      return at + insert;
+    },
+
+    _restoreVisualCaret: function (start, end) {
+      var startPoint = this._historyNodeAt(start);
+      var endPoint = end === start ? startPoint : this._historyNodeAt(end);
+      if (!startPoint) return;
+
+      try {
+        var range = document.createRange();
+        range.setStart(startPoint.node, startPoint.offset);
+        range.setEnd((endPoint || startPoint).node, (endPoint || startPoint).offset);
+
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      } catch (e) {
+        /* content shifted under us — leave the caret where the browser put it */
+      }
+    },
+
     _emitOperation: function (markdown) {
-      if (!this._collabOperations) return;
+      if (!this._collabOperations || this._applyingRemote) return;
 
       var previous = this._lastSentMarkdown;
 

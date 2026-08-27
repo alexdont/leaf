@@ -108,6 +108,51 @@ defmodule LeafTest do
     assert new_socket.assigns.content =~ "![x](/x.png)"
   end
 
+  describe "apply_operation" do
+    test "pushes the new document, its html, and the splice that produced it" do
+      socket = base_socket(content: "hello")
+
+      assert {:ok, new_socket} =
+               Leaf.update(
+                 %{
+                   action: :apply_operation,
+                   content: "hello there",
+                   op: %{at: 5, remove: 0, insert: " there"}
+                 },
+                 socket
+               )
+
+      assert [["leaf-remote-operation:editor-1", payload]] =
+               new_socket.private.live_temp.push_events
+
+      # The client needs all three: the html because markdown->html only
+      # happens here, and the splice because that is what tells it where the
+      # caret should end up.
+      assert payload.content == "hello there"
+      assert payload.html =~ "hello there"
+      assert %{at: 5, remove: 0, insert: " there"} = payload
+
+      assert new_socket.assigns.content == "hello there"
+    end
+
+    test "sanitizes the incoming document the same way set_content does" do
+      socket = base_socket(deny: [:links, :images])
+
+      assert {:ok, new_socket} =
+               Leaf.update(
+                 %{
+                   action: :apply_operation,
+                   content: "See [docs](https://example.com) ![x](/x.png)",
+                   op: %{at: 0, remove: 0, insert: "See "}
+                 },
+                 socket
+               )
+
+      refute new_socket.assigns.content =~ "[docs](https://example.com)"
+      refute new_socket.assigns.visual_html =~ ~r/<a\b/i
+    end
+  end
+
   test "deny flags are exposed for toolbar actions" do
     rendered =
       render_component(&Leaf.leaf_editor/1,

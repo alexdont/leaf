@@ -597,6 +597,42 @@ defmodule Leaf do
      })}
   end
 
+  @doc """
+  Apply someone else's edit to this editor without disturbing the local caret.
+
+  `content` is the full document after the edit and `op` is the splice that
+  produced it (`%{at:, remove:, insert:}`), in markdown character offsets.
+  Both are needed: the HTML is rendered from `content` because markdown→HTML
+  only happens here on the server, while `op` is what lets the client work out
+  where the caret should end up.
+
+  Nothing about this is collaboration-specific — a host replaying an edit log
+  or streaming a generated document can use it the same way. It is a sibling of
+  `:set_content`, differing only in that it preserves the selection instead of
+  resetting it, and does not reset the undo stack.
+  """
+  def update(%{action: :apply_operation, content: content, op: op}, socket) do
+    deny = Map.get(socket.assigns, :deny, [])
+    sanitized_markdown = sanitize_markdown(content, deny)
+
+    html =
+      sanitized_markdown
+      |> markdown_to_html(render_opts(socket))
+      |> sanitize_html(deny)
+
+    {:ok,
+     socket
+     |> assign(:content, sanitized_markdown)
+     |> assign(:visual_html, html)
+     |> push_event("leaf-remote-operation:#{socket.assigns.id}", %{
+       content: sanitized_markdown,
+       html: html,
+       at: Map.get(op, :at, 0),
+       remove: Map.get(op, :remove, 0),
+       insert: Map.get(op, :insert, "")
+     })}
+  end
+
   # A denied mode is ignored outright rather than redirected: the deny list
   # is one rule, not a default the host can talk its way past. (The client
   # resolves `[data-mode-tab="…"]` to perform the switch, and that button
