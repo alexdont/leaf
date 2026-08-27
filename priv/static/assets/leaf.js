@@ -1538,6 +1538,11 @@
       this._wikiLinks = this.el.dataset.wikilinks === "true";
       this._collabOperations = this.el.dataset.collabOperations === "true";
       this._collabAwareness = this.el.dataset.collabAwareness === "true";
+      // Operations are not snapshots and must not wait like them. The snapshot
+      // is the whole document and is what the host saves, so it can afford to
+      // wait for a pause in typing; an operation is a few bytes and is what
+      // another person is sitting there waiting to see.
+      this._collabIntervalMs = parseInt(this.el.dataset.collabInterval || "40", 10);
       this._wikiLinksResolve = this.el.dataset.wikilinksResolve !== "false";
       this._wikiLinksFollow = this.el.dataset.wikilinksFollow || "modifier";
       this._warnStaleBundle();
@@ -1839,6 +1844,11 @@
       this._wikiLinks = this.el.dataset.wikilinks === "true";
       this._collabOperations = this.el.dataset.collabOperations === "true";
       this._collabAwareness = this.el.dataset.collabAwareness === "true";
+      // Operations are not snapshots and must not wait like them. The snapshot
+      // is the whole document and is what the host saves, so it can afford to
+      // wait for a pause in typing; an operation is a few bytes and is what
+      // another person is sitting there waiting to see.
+      this._collabIntervalMs = parseInt(this.el.dataset.collabInterval || "40", 10);
       this._wikiLinksResolve = this.el.dataset.wikilinksResolve !== "false";
       this._wikiLinksFollow = this.el.dataset.wikilinksFollow || "modifier";
 
@@ -1913,6 +1923,10 @@
       if (this._awarenessTimer) {
         clearTimeout(this._awarenessTimer);
         this._awarenessTimer = null;
+      }
+      if (this._operationTimer) {
+        clearTimeout(this._operationTimer);
+        this._operationTimer = null;
       }
       if (this._onAwarenessSelectionChange) {
         document.removeEventListener(
@@ -2079,6 +2093,7 @@
       this._syncFormInput(content);
       if (this._markdownDebounceTimer)
         clearTimeout(this._markdownDebounceTimer);
+      this._scheduleOperation();
       var self = this;
       this._markdownDebounceTimer = setTimeout(function () {
         self.pushEventTo(self.el, "markdown_content_changed", {
@@ -2086,7 +2101,6 @@
           content: content,
           dirty: self._computeDirty(content),
         });
-        self._emitOperation(content);
       }, this._debounceMs);
     },
 
@@ -3155,6 +3169,7 @@
       if (this._visualEl) {
         this._syncFormInput(htmlToMarkdown(this._visualEl.innerHTML));
       }
+      this._scheduleOperation();
       this._debounceTimer = setTimeout(
         function () {
           if (!this._visualEl) return;
@@ -3167,7 +3182,6 @@
             markdown: markdown,
             dirty: this._computeDirty(markdown),
           });
-          this._emitOperation(markdown);
         }.bind(this),
         this._debounceMs
       );
@@ -3262,7 +3276,7 @@
           self._awarenessTimer = setTimeout(function () {
             self._awarenessTimer = null;
             self._emitAwareness();
-          }, 120);
+          }, 50);
         };
 
         document.addEventListener("selectionchange", this._onAwarenessSelectionChange);
@@ -7433,7 +7447,13 @@
         if (this._mode === "markdown") {
           this._applyRemoteToTextarea(this._getMarkdownTextarea(), payload);
         } else if (this._mode !== "html") {
-          visual = this._applyRemoteToVisual(payload);
+          if (this._applyRemoteFastPath(payload)) {
+            // The caret moved itself: replaceData adjusts live ranges, so this
+            // user's selection is already where it should be.
+            visual = payload.rendered;
+          } else {
+            visual = this._applyRemoteToVisual(payload);
+          }
         }
 
         // The peers' carets are offsets into the text that just changed. The
@@ -7456,6 +7476,10 @@
         // whitespace, and that difference would otherwise be re-sent as this
         // user's edit.
         this._lastSentMarkdown = this._currentMarkdown();
+        this._lastVisibleText =
+          this._mode === "markdown" || this._mode === "html"
+            ? this._lastSentMarkdown
+            : this._visibleText(this._visualEl);
         this._syncFormInput(this._lastSentMarkdown);
         this._updateCounts();
 
@@ -7564,6 +7588,45 @@
       return raw - skipped;
     },
 
+    // Plain typing, applied straight into the text node it belongs to.
+    //
+    // The slow path replaces the whole document with server-rendered HTML,
+    // which for a single character is a great deal of work to watch: the
+    // source block closes, wiki links re-resolve, drag handles go stale, and
+    // every caret on screen has to be recomputed. Editing the text node
+    // instead leaves all of that alone, and the browser moves live ranges —
+    // including this user's caret — as part of the mutation.
+    //
+    // Deliberately narrow. Anything that could be structure (a newline, an
+    // edit spanning more than the one text node) falls through to the slow
+    // path, where the server's HTML is the authority.
+    _applyRemoteFastPath: function (payload) {
+      var rendered = payload && payload.rendered;
+      if (!rendered || !this._visualEl) return false;
+      if (this._mode === "markdown" || this._mode === "html") return false;
+
+      var insert = rendered.insert || "";
+      var remove = rendered.remove || 0;
+      if (!insert && !remove) return false;
+      if (insert.indexOf("\n") !== -1) return false;
+
+      var point = this._visibleNodeAt(rendered.at || 0);
+      if (!point || !point.node || point.node.nodeType !== 3) return false;
+      if (this._inSourceMarker(point.node)) return false;
+
+      // The whole edit has to sit inside this one text node. Past its end we
+      // would be guessing about structure a character offset cannot describe.
+      if (point.offset + remove > point.node.nodeValue.length) return false;
+
+      try {
+        point.node.replaceData(point.offset, remove, insert);
+      } catch (e) {
+        return false;
+      }
+
+      return true;
+    },
+
     _applyRemoteToVisual: function (payload) {
       var el = this._visualEl;
       if (!el) return;
@@ -7644,6 +7707,38 @@
       }
     },
 
+    // Coalesces a burst of keystrokes without ever holding one back: the timer
+    // is left alone once set rather than pushed forward on each change, so a
+    // continuous typist emits steadily instead of emitting nothing until they
+    // stop.
+    _scheduleOperation: function () {
+      if (!this._collabOperations || this._applyingRemote) return;
+      if (this._operationTimer) return;
+
+      var self = this;
+      this._operationTimer = setTimeout(function () {
+        self._operationTimer = null;
+        self._emitOperation(self._currentMarkdown());
+      }, this._collabIntervalMs);
+    },
+
+    // The current edit in marker-free rendered coordinates, or null when that
+    // cannot be established. Tracked separately from the markdown baseline
+    // because the two do not move in step: "**" appearing in the markdown is
+    // no change on screen at all.
+    _renderedSplice: function (markdown) {
+      var current =
+        this._mode === "markdown" || this._mode === "html"
+          ? markdown
+          : this._visibleText(this._visualEl);
+
+      var previous = this._lastVisibleText;
+      this._lastVisibleText = current;
+
+      if (typeof previous !== "string") return null;
+      return this._spliceBetween(previous, current);
+    },
+
     _emitOperation: function (markdown) {
       if (!this._collabOperations || this._applyingRemote) return;
 
@@ -7662,11 +7757,17 @@
       this._lastSentMarkdown = markdown;
       this._operationSeq = (this._operationSeq || 0) + 1;
 
+      // The same edit expressed in the rendered text every session shares.
+      // Markdown offsets are the document of record, but they cannot be
+      // applied to a peer's DOM without re-rendering it; these can.
+      var rendered = this._renderedSplice(markdown);
+
       this.pushEventTo(this.el, "operation", {
         editor_id: this._editorId,
         at: splice.at,
         remove: splice.remove,
         insert: splice.insert,
+        rendered: rendered,
         seq: this._operationSeq,
         // Length of the text this splice applies to. A host holding a document
         // of a different length knows it has diverged, rather than applying an

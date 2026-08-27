@@ -135,6 +135,49 @@ defmodule LeafTest do
       assert new_socket.assigns.content == "hello there"
     end
 
+    test "carries the rendered splice through to the client" do
+      socket = base_socket(content: "hello")
+
+      assert {:ok, new_socket} =
+               Leaf.update(
+                 %{
+                   action: :apply_operation,
+                   content: "hello!",
+                   op: %{
+                     at: 5,
+                     remove: 0,
+                     insert: "!",
+                     rendered: %{at: 5, remove: 0, insert: "!"}
+                   }
+                 },
+                 socket
+               )
+
+      assert [["leaf-remote-operation:editor-1", payload]] =
+               new_socket.private.live_temp.push_events
+
+      assert payload.rendered == %{at: 5, remove: 0, insert: "!"}
+    end
+
+    test "an operation without a rendered splice is still applied" do
+      socket = base_socket(content: "hello")
+
+      assert {:ok, new_socket} =
+               Leaf.update(
+                 %{
+                   action: :apply_operation,
+                   content: "hello!",
+                   op: %{at: 5, remove: 0, insert: "!"}
+                 },
+                 socket
+               )
+
+      assert [["leaf-remote-operation:editor-1", payload]] =
+               new_socket.private.live_temp.push_events
+
+      assert payload.rendered == nil
+    end
+
     test "sanitizes the incoming document the same way set_content does" do
       socket = base_socket(deny: [:links, :images])
 
@@ -197,6 +240,33 @@ defmodule LeafTest do
 
     assert_received {:leaf_mode_changed, %{mode: :hybrid}}
     assert new_socket.assigns.mode == :hybrid
+  end
+
+  test "the operation event forwards the rendered splice to the host" do
+    socket = base_socket([])
+
+    assert {:noreply, _} =
+             Leaf.handle_event(
+               "operation",
+               %{
+                 "at" => 3,
+                 "remove" => 1,
+                 "insert" => "z",
+                 "rendered" => %{"at" => 3, "remove" => 1, "insert" => "z"}
+               },
+               socket
+             )
+
+    assert_received {:leaf_operation, %{rendered: %{at: 3, remove: 1, insert: "z"}}}
+  end
+
+  test "an operation without a rendered splice reaches the host as nil" do
+    socket = base_socket([])
+
+    assert {:noreply, _} =
+             Leaf.handle_event("operation", %{"at" => 3, "remove" => 1, "insert" => "z"}, socket)
+
+    assert_received {:leaf_operation, %{rendered: nil}}
   end
 
   describe "inline suggestions" do

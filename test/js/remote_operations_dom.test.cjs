@@ -235,3 +235,176 @@ test("_visibleText excludes source markers, _visibleOffset agrees with it", { sk
 
   e.cleanup();
 });
+
+// ---------------------------------------------------------------------------
+// The fast path
+// ---------------------------------------------------------------------------
+//
+// Replacing the whole document for a single typed character is a lot of work to
+// watch, so plain typing is written straight into the text node instead. These
+// check that it is taken when it is safe, declined when it is not, and that
+// taking it lands in the same place the slow path would.
+
+function fast(e, payload) {
+  e._applyRemoteOperation(payload);
+}
+
+test("a typed character edits the text node instead of the document", { skip: dom.skip }, () => {
+  const e = dom.editor("<p>hello world</p>");
+  e._currentMarkdown = () => "hello big world";
+
+  const node = e._visualEl.querySelector("p").firstChild;
+
+  fast(e, {
+    content: "hello big world",
+    html: "<p>REPLACED</p>",
+    at: 6,
+    remove: 0,
+    insert: "big ",
+    rendered: { at: 6, remove: 0, insert: "big " },
+  });
+
+  assert.equal(e._visualEl.textContent, "hello big world");
+  assert.equal(
+    e._visualEl.querySelector("p").firstChild,
+    node,
+    "the original text node must survive — the document was not rebuilt"
+  );
+
+  e.cleanup();
+});
+
+test("the caret rides the edit without being repositioned by hand", { skip: dom.skip }, () => {
+  const e = dom.editor("<p>hello world</p>");
+  e._currentMarkdown = () => "hello big world";
+
+  const node = e._visualEl.querySelector("p").firstChild;
+  const range = document.createRange();
+  range.setStart(node, 11); // end of "world"
+  range.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+
+  fast(e, {
+    content: "hello big world",
+    html: "<p>REPLACED</p>",
+    at: 6,
+    remove: 0,
+    insert: "big ",
+    rendered: { at: 6, remove: 0, insert: "big " },
+  });
+
+  assert.equal(
+    e._historyTextOffset(
+      window.getSelection().getRangeAt(0).startContainer,
+      window.getSelection().getRangeAt(0).startOffset
+    ),
+    15,
+    "the browser should have carried the caret along with the insertion"
+  );
+
+  e.cleanup();
+});
+
+test("a structural edit falls back to the server's html", { skip: dom.skip }, () => {
+  const e = dom.editor("<p>hello</p>");
+  e._currentMarkdown = () => "hello\n\nsecond";
+
+  fast(e, {
+    content: "hello\n\nsecond",
+    html: "<p>hello</p><p>second</p>",
+    at: 5,
+    remove: 0,
+    insert: "\n\nsecond",
+    rendered: { at: 5, remove: 0, insert: "\nsecond" },
+  });
+
+  assert.equal(
+    e._visualEl.querySelectorAll("p").length,
+    2,
+    "a new paragraph cannot be made by editing a text node, so the html must win"
+  );
+
+  e.cleanup();
+});
+
+test("an edit reaching past its text node falls back", { skip: dom.skip }, () => {
+  const e = dom.editor("<p>one</p><p>two</p>");
+  e._currentMarkdown = () => "onetwo";
+
+  // remove 5 from offset 1 spans both paragraphs.
+  fast(e, {
+    content: "oX",
+    html: "<p>oX</p>",
+    at: 1,
+    remove: 5,
+    insert: "X",
+    rendered: { at: 1, remove: 5, insert: "X" },
+  });
+
+  assert.equal(e._visualEl.querySelectorAll("p").length, 1, "should have used the html");
+  assert.equal(e._visualEl.textContent, "oX");
+
+  e.cleanup();
+});
+
+test("an operation with no rendered splice still applies", { skip: dom.skip }, () => {
+  const e = dom.editor("<p>hello</p>");
+  e._currentMarkdown = () => "hello!";
+
+  // Older senders, and the first operation of a session, carry no rendered
+  // splice. The slow path has to cover them.
+  fast(e, { content: "hello!", html: "<p>hello!</p>", at: 5, remove: 0, insert: "!" });
+
+  assert.equal(e._visualEl.textContent, "hello!");
+
+  e.cleanup();
+});
+
+test("fast and slow paths land on the same text", { skip: dom.skip }, () => {
+  const payload = {
+    content: "hello big world",
+    html: "<p>hello big world</p>",
+    at: 6,
+    remove: 0,
+    insert: "big ",
+    rendered: { at: 6, remove: 0, insert: "big " },
+  };
+
+  const quick = dom.editor("<p>hello world</p>");
+  quick._currentMarkdown = () => payload.content;
+  fast(quick, payload);
+
+  const slow = dom.editor("<p>hello world</p>");
+  slow._currentMarkdown = () => payload.content;
+  slow._applyRemoteFastPath = () => false; // force the rebuild
+  fast(slow, payload);
+
+  assert.equal(
+    quick._visualEl.textContent,
+    slow._visualEl.textContent,
+    "the shortcut must not produce a different document"
+  );
+
+  quick.cleanup();
+  slow.cleanup();
+});
+
+test("typing inside a hybrid source block does not take the shortcut", { skip: dom.skip }, () => {
+  const e = dom.editor(
+    '<ul><li data-leaf-source="li">' +
+      '<span class="leaf-source-marker leaf-list-marker">- </span>item</li></ul>',
+    "hybrid"
+  );
+  e._currentMarkdown = () => "- item";
+
+  // Offset 0 in marker-free text is the "i" of "item"; the marker itself is
+  // not addressable, so an edit there must not be written into it.
+  const marker = e._visualEl.querySelector(".leaf-source-marker").firstChild;
+  assert.equal(e._applyRemoteFastPath({ rendered: { at: 0, remove: 0, insert: "x" } }), true);
+  assert.equal(marker.nodeValue, "- ", "the marker text must be left alone");
+  assert.equal(e._visibleText(e._visualEl), "xitem");
+
+  e.cleanup();
+});

@@ -646,7 +646,8 @@ defmodule Leaf do
        html: html,
        at: Map.get(op, :at, 0),
        remove: Map.get(op, :remove, 0),
-       insert: Map.get(op, :insert, "")
+       insert: Map.get(op, :insert, ""),
+       rendered: normalize_rendered(Map.get(op, :rendered))
      })}
   end
 
@@ -2587,6 +2588,10 @@ defmodule Leaf do
          at: at,
          remove: remove,
          insert: to_string(Map.get(params, "insert", "")),
+         # The same edit in rendered coordinates, when the editor could work it
+         # out. Lets a peer apply plain typing straight into its text rather
+         # than rebuilding its document; nil simply means the slow path.
+         rendered: normalize_rendered(Map.get(params, "rendered")),
          seq: Map.get(params, "seq"),
          base_length: Map.get(params, "base_length")
        }}
@@ -3592,6 +3597,16 @@ defmodule Leaf do
 
   defp collab_awareness?(%{} = config), do: Map.get(config, :awareness, false) == true
   defp collab_awareness?(_), do: false
+
+  defp normalize_rendered(%{} = rendered) do
+    %{
+      at: Map.get(rendered, "at", Map.get(rendered, :at, 0)),
+      remove: Map.get(rendered, "remove", Map.get(rendered, :remove, 0)),
+      insert: to_string(Map.get(rendered, "insert", Map.get(rendered, :insert, "")))
+    }
+  end
+
+  defp normalize_rendered(_), do: nil
 
   defp normalize_cursor(cursor) do
     %{
