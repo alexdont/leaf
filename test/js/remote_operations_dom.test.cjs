@@ -124,9 +124,13 @@ test("markdown markers do not skew the restored caret", { skip: dom.skip }, () =
 
 test("applying a remote operation does not emit one back", { skip: dom.skip }, () => {
   const e = dom.editor("<p>hello</p>");
-  e._currentMarkdown = () => "hello there";
   e._collabOperations = true;
+  e._pending = [];
+  // Derived from the DOM, so it changes only when the document does — the
+  // local text is settled before the peer's edit arrives.
+  e._currentMarkdown = () => e._visibleText(e._visualEl);
   e._lastSentMarkdown = "hello";
+  e._lastVisibleText = "hello";
 
   const sent = [];
   e.pushEventTo = (_el, name, payload) => sent.push([name, payload]);
@@ -134,7 +138,7 @@ test("applying a remote operation does not emit one back", { skip: dom.skip }, (
   // Replacing content fires input events, which reach _emitOperation while the
   // baseline still says "hello" — so it would happily diff the peer's edit and
   // send it back to them as ours. Stand in for that here, mid-swap.
-  e._resolveWikiLinks = () => e._emitOperation("hello there");
+  e._resolveWikiLinks = () => e._emitOperation(e._currentMarkdown());
 
   remote(e, "<p>hello there</p>", { at: 5, remove: 0, insert: " there", content: "hello there" });
 
@@ -444,6 +448,170 @@ test("set_content re-baselines, so the next edit is not one huge splice", { skip
   // document — which the room refuses, resyncing again, forever.
   e._emitOperation(e._currentMarkdown());
   assert.deepEqual(sent, [], "nothing to report: the document is what we just adopted");
+
+  e.cleanup();
+});
+
+// ---------------------------------------------------------------------------
+// Edits of our own that the sender had not seen
+// ---------------------------------------------------------------------------
+//
+// Someone else's operation is written against the document as they had it,
+// which does not contain what this session has typed in the last moment. Every
+// unacknowledged character shifts everything after it, so an incoming edit
+// lands one place too early for each of them — the off-by-a-few text and the
+// carets in the wrong place.
+
+function collabEditor(html) {
+  const e = dom.editor(html);
+  e._collabOperations = true;
+  e._pending = [];
+  e._currentMarkdown = () => e._visibleText(e._visualEl);
+  e._lastSentMarkdown = e._currentMarkdown();
+  e._lastVisibleText = e._currentMarkdown();
+  e.sent = [];
+  e.pushEventTo = (_el, name, payload) => e.sent.push([name, payload]);
+  return e;
+}
+
+// Type locally without letting the debounce fire, the way a burst of keys
+// arrives between one operation and the next.
+function typeLocally(e, at, insert) {
+  e._visualEl.querySelector("p").firstChild.replaceData(at, 0, insert);
+}
+
+test("an incoming edit is rebased over our unacknowledged typing", { skip: dom.skip }, () => {
+  const e = collabEditor("<p>" + "abcdefghij".repeat(6) + "</p>");
+
+  typeLocally(e, 10, "X");
+  e._emitOperation(e._currentMarkdown());
+  assert.equal(e._pending.length, 1, "our own edit should be waiting for an acknowledgement");
+
+  // Written against the document before our X existed.
+  e._applyRemoteOperation({
+    content: "ignored",
+    html: "<p>REPLACED</p>",
+    at: 50,
+    remove: 0,
+    insert: "Y",
+    rendered: { at: 50, remove: 0, insert: "Y" },
+  });
+
+  const text = e._visibleText(e._visualEl);
+  assert.equal(text.indexOf("Y"), 51, "the peer's character must move past ours, not sit on it");
+  assert.equal(text.indexOf("X"), 10, "and ours must not have moved");
+
+  e.cleanup();
+});
+
+test("unsent keystrokes are flushed before a remote edit is placed", { skip: dom.skip }, () => {
+  const e = collabEditor("<p>" + "abcdefghij".repeat(6) + "</p>");
+
+  // Typed, but the debounce has not fired: nothing sent, nothing pending.
+  typeLocally(e, 10, "X");
+  assert.equal(e._pending.length, 0);
+
+  e._applyRemoteOperation({
+    content: "ignored",
+    html: "<p>REPLACED</p>",
+    at: 50,
+    remove: 0,
+    insert: "Y",
+    rendered: { at: 50, remove: 0, insert: "Y" },
+  });
+
+  assert.equal(e._pending.length, 1, "the keystroke should have been sent, not silently dropped");
+  assert.equal(
+    e._visibleText(e._visualEl).indexOf("Y"),
+    51,
+    "and counted when placing the incoming edit"
+  );
+
+  e.cleanup();
+});
+
+test("an acknowledgement clears what it settles and no more", { skip: dom.skip }, () => {
+  const e = collabEditor("<p>abcdefghij</p>");
+
+  e._pending = [
+    { seq: 1, rendered: { at: 0, remove: 0, insert: "a" } },
+    { seq: 2, rendered: { at: 1, remove: 0, insert: "b" } },
+    { seq: 3, rendered: { at: 2, remove: 0, insert: "c" } },
+  ];
+
+  e._forgetPendingThrough(2);
+
+  assert.deepEqual(
+    e._pending.map((p) => p.seq),
+    [3],
+    "only the edits the host has confirmed may be forgotten"
+  );
+
+  e.cleanup();
+});
+
+// Falling back to the host's copy while our own edits are in the air would
+// throw them away: the host does not have them yet either.
+test("our unsent work is never replaced by the host's older copy", { skip: dom.skip }, () => {
+  const e = collabEditor("<p>abcdefghij</p>");
+
+  typeLocally(e, 0, "MINE");
+  e._emitOperation(e._currentMarkdown());
+
+  // No rendered form, so the incoming edit cannot be placed against ours.
+  e._applyRemoteOperation({
+    content: "the host's copy, without MINE",
+    html: "<p>the host's copy, without MINE</p>",
+    at: 0,
+    remove: 0,
+    insert: "Z",
+  });
+
+  assert.match(e._visibleText(e._visualEl), /MINE/, "our typing must still be here");
+  assert.equal(e._needsResync, true, "and a settle-up should be queued instead");
+
+  e.cleanup();
+});
+
+test("the settle-up is asked for once our edits are acknowledged", { skip: dom.skip }, () => {
+  const e = collabEditor("<p>abcdefghij</p>");
+
+  typeLocally(e, 0, "MINE");
+  e._emitOperation(e._currentMarkdown());
+  const seq = e._pending[0].seq;
+
+  e._applyRemoteOperation({ content: "x", html: "<p>x</p>", at: 0, remove: 0, insert: "Z" });
+  assert.equal(e._needsResync, true);
+
+  e.sent = [];
+  e._forgetPendingThrough(seq);
+
+  assert.deepEqual(
+    e.sent.map(([name]) => name),
+    ["resync"],
+    "with nothing left in the air, ask the host for its copy"
+  );
+  assert.equal(e._needsResync, false);
+
+  e.cleanup();
+});
+
+test("a resync adopts the host's copy and clears what was in the air", { skip: dom.skip }, () => {
+  const e = collabEditor("<p>abcdefghij</p>");
+
+  e._pending = [{ seq: 1, rendered: { at: 0, remove: 0, insert: "a" } }];
+  e._currentMarkdown = () => "settled text";
+
+  e._applyRemoteOperation({
+    resync: true,
+    content: "settled text",
+    html: "<p>settled text</p>",
+    revision: 9,
+  });
+
+  assert.equal(e._visibleText(e._visualEl), "settled text");
+  assert.deepEqual(e._pending, [], "nothing is still in the air after settling up");
+  assert.equal(e._collabRevision, 9);
 
   e.cleanup();
 });

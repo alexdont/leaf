@@ -602,11 +602,16 @@ defmodule Leaf do
   # Tell the editor which version of the document it is now working from, so
   # the next edit it sends says what it was written against. Sent to the author
   # of an edit once the host has placed it; peers learn it from the operation.
-  def update(%{action: :revision, revision: revision}, socket) do
+  def update(%{action: :revision, revision: revision} = assigns, socket) do
     {:ok,
      socket
      |> assign(:collab_revision, revision)
-     |> push_event("leaf-revision:#{socket.assigns.id}", %{revision: revision})}
+     |> push_event("leaf-revision:#{socket.assigns.id}", %{
+       revision: revision,
+       # Which of this editor's own edits this settles. Until an edit is
+       # settled it has to be counted when placing everybody else's.
+       seq: Map.get(assigns, :seq)
+     })}
   end
 
   # Show other people's carets in this editor. `cursors` is a list of
@@ -659,7 +664,10 @@ defmodule Leaf do
        remove: Map.get(op, :remove, 0),
        insert: Map.get(op, :insert, ""),
        rendered: normalize_rendered(Map.get(op, :rendered)),
-       revision: Map.get(op, :revision)
+       revision: Map.get(op, :revision),
+       # A wholesale settle-up rather than one edit: the editor drops whatever
+       # it still had in the air instead of trying to place this against it.
+       resync: Map.get(op, :resync, false) == true
      })}
   end
 
@@ -2576,6 +2584,11 @@ defmodule Leaf do
   # is the length of the text the splice applies to, so a host holding a
   # document of a different length can tell it has diverged instead of applying
   # an offset that no longer means what it meant.
+  def handle_event("resync", _params, socket) do
+    send(self(), {:leaf_resync, %{editor_id: socket.assigns.id}})
+    {:noreply, socket}
+  end
+
   def handle_event("awareness", params, socket) do
     send(
       self(),

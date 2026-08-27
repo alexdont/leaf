@@ -1538,6 +1538,10 @@
       this._wikiLinks = this.el.dataset.wikilinks === "true";
       this._collabOperations = this.el.dataset.collabOperations === "true";
       this._collabAwareness = this.el.dataset.collabAwareness === "true";
+      // Edits sent but not yet acknowledged. Someone else's operation is
+      // written against a document that does not contain these, so it has to
+      // be rebased over them before it can be applied here.
+      this._pending = [];
       // Operations are not snapshots and must not wait like them. The snapshot
       // is the whole document and is what the host saves, so it can afford to
       // wait for a pause in typing; an operation is a few bytes and is what
@@ -1717,9 +1721,9 @@
       this.handleEvent(
         "leaf-revision:" + this._editorId,
         function (payload) {
-          if (payload && typeof payload.revision === "number") {
-            this._collabRevision = payload.revision;
-          }
+          if (!payload) return;
+          if (typeof payload.revision === "number") this._collabRevision = payload.revision;
+          this._forgetPendingThrough(payload.seq);
         }.bind(this)
       );
 
@@ -1854,6 +1858,10 @@
       this._wikiLinks = this.el.dataset.wikilinks === "true";
       this._collabOperations = this.el.dataset.collabOperations === "true";
       this._collabAwareness = this.el.dataset.collabAwareness === "true";
+      // Edits sent but not yet acknowledged. Someone else's operation is
+      // written against a document that does not contain these, so it has to
+      // be rebased over them before it can be applied here.
+      this._pending = [];
       // Operations are not snapshots and must not wait like them. The snapshot
       // is the whole document and is what the host saves, so it can afford to
       // wait for a pause in typing; an operation is a few bytes and is what
@@ -7465,6 +7473,32 @@
       if (!payload) return;
 
       var self = this;
+
+      // Anything typed here in the last few milliseconds has not been sent yet
+      // and so is not in the host's copy either. Send it first, so it is
+      // counted among the edits this incoming one has to be rebased over —
+      // otherwise it is invisible to that calculation and the incoming edit
+      // lands one place off for every character of it.
+      if (this._collabOperations && !this._applyingRemote && !payload.resync) {
+        if (this._operationTimer) {
+          clearTimeout(this._operationTimer);
+          this._operationTimer = null;
+        }
+        this._emitOperation(this._currentMarkdown());
+      }
+
+      var rendered = payload.resync ? null : this._rebaseOverPending(payload.rendered);
+
+      // Our own edits are still in the air, and this one cannot be placed
+      // against them. The host's copy does not contain them either, so taking
+      // it would throw them away — wait until ours are acknowledged and settle
+      // it from the host then.
+      if (!payload.resync && !rendered && this._pending && this._pending.length) {
+        this._needsResync = true;
+        if (typeof payload.revision === "number") this._collabRevision = payload.revision;
+        return;
+      }
+
       // Swapping content fires input events. Emitting an operation for a change
       // we did not make would send the peer's edit back to them as ours, and
       // recording it in the undo stack would let this user undo someone else's
@@ -7472,18 +7506,20 @@
       this._applyingRemote = true;
       this._historyRestoring = true;
 
+      if (payload.resync) this._pending = [];
       if (typeof payload.revision === "number") this._collabRevision = payload.revision;
 
       try {
         var visual = null;
+        var local = { content: payload.content, html: payload.html, rendered: rendered };
 
         if (this._mode === "markdown") {
           this._applyRemoteToTextarea(this._getMarkdownTextarea(), payload);
         } else if (this._mode !== "html") {
-          if (this._applyRemoteFastPath(payload)) {
+          if (this._applyRemoteFastPath(local)) {
             // The caret moved itself: replaceData adjusts live ranges, so this
             // user's selection is already where it should be.
-            visual = payload.rendered;
+            visual = rendered;
           } else {
             visual = this._applyRemoteToVisual(payload);
           }
@@ -7871,6 +7907,65 @@
       return this._spliceBetween(previous, current);
     },
 
+    // What `op` means once `applied` has happened. The same rule the host uses
+    // — the two have to agree or an edit ends up in a different place in each
+    // session.
+    _rebaseSplice: function (op, applied) {
+      var appliedEnd = applied.at + applied.remove;
+      var shift = (applied.insert || "").length - applied.remove;
+      var opEnd = op.at + op.remove;
+
+      if (appliedEnd <= op.at) {
+        return { at: op.at + shift, remove: op.remove, insert: op.insert };
+      }
+
+      if (opEnd <= applied.at) return op;
+
+      var before = Math.max(applied.at - op.at, 0);
+      var rest = Math.max(opEnd - appliedEnd, 0);
+
+      return {
+        at: Math.min(op.at, applied.at),
+        remove: before + rest,
+        insert: op.insert
+      };
+    },
+
+    // An incoming edit, expressed against this session's document rather than
+    // the one the sender was looking at.
+    _rebaseOverPending: function (rendered) {
+      if (!rendered || !this._pending || !this._pending.length) return rendered;
+
+      var carried = rendered;
+
+      for (var i = 0; i < this._pending.length; i++) {
+        var mine = this._pending[i].rendered;
+        // One of our own edits has no rendered form, so there is nothing to
+        // rebase over and no honest answer. The caller falls back.
+        if (!mine) return null;
+        carried = this._rebaseSplice(carried, mine);
+      }
+
+      return carried;
+    },
+
+    _forgetPendingThrough: function (seq) {
+      if (!this._pending || typeof seq !== "number") return;
+
+      var kept = [];
+      for (var i = 0; i < this._pending.length; i++) {
+        if (this._pending[i].seq > seq) kept.push(this._pending[i]);
+      }
+      this._pending = kept;
+
+      // Whatever we could not apply while our own edits were in the air can be
+      // settled now, from the host's copy.
+      if (!this._pending.length && this._needsResync) {
+        this._needsResync = false;
+        this.pushEventTo(this.el, "resync", { editor_id: this._editorId });
+      }
+    },
+
     _emitOperation: function (markdown) {
       if (!this._collabOperations || this._applyingRemote) return;
 
@@ -7911,6 +8006,9 @@
         // operation at an offset that means something else now.
         base_length: previous.length
       });
+
+      if (!this._pending) this._pending = [];
+      this._pending.push({ seq: this._operationSeq, rendered: rendered });
     },
 
     // The next real item after `li`, or null at the end of the list.
