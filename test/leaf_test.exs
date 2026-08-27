@@ -178,6 +178,29 @@ defmodule LeafTest do
       assert payload.rendered == nil
     end
 
+    test "tells the editor which version the document is now at" do
+      socket = base_socket(content: "hello")
+
+      assert {:ok, new_socket} =
+               Leaf.update(
+                 %{
+                   action: :apply_operation,
+                   content: "hello!",
+                   op: %{at: 5, remove: 0, insert: "!", revision: 7}
+                 },
+                 socket
+               )
+
+      assert [["leaf-remote-operation:editor-1", payload]] =
+               new_socket.private.live_temp.push_events
+
+      # Without this a peer's next edit says it was written against a version
+      # it has already moved past, and the host rebases it over changes it has
+      # in fact already accounted for.
+      assert payload.revision == 7
+      assert new_socket.assigns.collab_revision == 7
+    end
+
     test "sanitizes the incoming document the same way set_content does" do
       socket = base_socket(deny: [:links, :images])
 

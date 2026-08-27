@@ -599,6 +599,16 @@ defmodule Leaf do
      })}
   end
 
+  # Tell the editor which version of the document it is now working from, so
+  # the next edit it sends says what it was written against. Sent to the author
+  # of an edit once the host has placed it; peers learn it from the operation.
+  def update(%{action: :revision, revision: revision}, socket) do
+    {:ok,
+     socket
+     |> assign(:collab_revision, revision)
+     |> push_event("leaf-revision:#{socket.assigns.id}", %{revision: revision})}
+  end
+
   # Show other people's carets in this editor. `cursors` is a list of
   # `%{id:, label:, color:, offset:}`, and an empty list clears them.
   #
@@ -641,13 +651,15 @@ defmodule Leaf do
      socket
      |> assign(:content, sanitized_markdown)
      |> assign(:visual_html, html)
+     |> assign(:collab_revision, Map.get(op, :revision))
      |> push_event("leaf-remote-operation:#{socket.assigns.id}", %{
        content: sanitized_markdown,
        html: html,
        at: Map.get(op, :at, 0),
        remove: Map.get(op, :remove, 0),
        insert: Map.get(op, :insert, ""),
-       rendered: normalize_rendered(Map.get(op, :rendered))
+       rendered: normalize_rendered(Map.get(op, :rendered)),
+       revision: Map.get(op, :revision)
      })}
   end
 
@@ -2592,6 +2604,9 @@ defmodule Leaf do
          # out. Lets a peer apply plain typing straight into its text rather
          # than rebuilding its document; nil simply means the slow path.
          rendered: normalize_rendered(Map.get(params, "rendered")),
+         # Which version of the document this edit was written against, so a
+         # host can rebase it over anything that landed in the meantime.
+         revision: Map.get(params, "revision"),
          seq: Map.get(params, "seq"),
          base_length: Map.get(params, "base_length")
        }}

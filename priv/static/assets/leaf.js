@@ -1713,6 +1713,16 @@
         this._handleCommand.bind(this)
       );
 
+      // The version this editor is now working from.
+      this.handleEvent(
+        "leaf-revision:" + this._editorId,
+        function (payload) {
+          if (payload && typeof payload.revision === "number") {
+            this._collabRevision = payload.revision;
+          }
+        }.bind(this)
+      );
+
       // Where everyone else's caret is.
       this.handleEvent(
         "leaf-peer-cursors:" + this._editorId,
@@ -7462,6 +7472,8 @@
       this._applyingRemote = true;
       this._historyRestoring = true;
 
+      if (typeof payload.revision === "number") this._collabRevision = payload.revision;
+
       try {
         var visual = null;
 
@@ -7888,6 +7900,11 @@
         remove: splice.remove,
         insert: splice.insert,
         rendered: rendered,
+        // The version this was written against. Two people typing at once each
+        // describe their edit against the text they can see, and the host needs
+        // to know which text that was to put both of them where they were meant
+        // to go.
+        revision: this._collabRevision || 0,
         seq: this._operationSeq,
         // Length of the text this splice applies to. A host holding a document
         // of a different length knows it has diverged, rather than applying an
