@@ -3479,8 +3479,24 @@
       while ((node = walker.nextNode())) {
         if (this._inSourceMarker(node)) continue;
 
-        var length = node.nodeValue.length;
-        if (count + length >= offset) return { node: node, offset: offset - count };
+        var value = node.nodeValue || "";
+        var length = this._visibleChars(value).length;
+
+        if (count + length >= offset) {
+          // Back from a visible offset to a real one, stepping over any
+          // placeholders sitting in this node.
+          var wanted = offset - count;
+          var raw = 0;
+          var seen = 0;
+
+          while (raw < value.length && seen < wanted) {
+            if (this._visibleChars(value.charAt(raw))) seen++;
+            raw++;
+          }
+
+          return { node: node, offset: raw };
+        }
+
         count += length;
         last = node;
       }
@@ -7540,10 +7556,21 @@
       var node;
 
       while ((node = walker.nextNode())) {
-        if (!this._inSourceMarker(node, root)) out += node.nodeValue;
+        if (!this._inSourceMarker(node, root)) out += this._visibleChars(node.nodeValue);
       }
 
       return out;
+    },
+
+    // Zero-width placeholders are scaffolding, not text. An empty list item
+    // gets one so the caret has somewhere to sit, and whether a given item has
+    // one depends on what that session has been doing — so counting them makes
+    // two people looking at the same document disagree about where a character
+    // is. That misplaces their carets and, worse, makes an edit apply at the
+    // wrong offset on the other side.
+    _visibleChars: function (text) {
+      if (!text) return "";
+      return text.replace(/[\u200B\uFEFF]/g, "");
     },
 
     _inSourceMarker: function (node, root) {
@@ -7564,28 +7591,39 @@
     _visibleOffset: function (container, offset) {
       if (!container || !this._visualEl) return 0;
 
-      var raw = this._historyTextOffset(container, offset);
-      var markers = this._visualEl.querySelectorAll(".leaf-source-marker");
-      var skipped = 0;
-
-      for (var i = 0; i < markers.length; i++) {
-        var marker = markers[i];
-        var length = (marker.textContent || "").length;
-        if (!length) continue;
-
-        var end = this._historyTextOffset(marker, marker.childNodes.length);
-        var start = end - length;
-
-        if (end <= raw) {
-          skipped += length;
-        } else if (start < raw) {
-          // The caret is sitting inside the marker itself. Everything from the
-          // marker's start onwards is invisible, so it collapses to the start.
-          skipped += raw - start;
-        }
+      var boundary;
+      try {
+        boundary = document.createRange();
+        boundary.setStart(this._visualEl, 0);
+        boundary.setEnd(container, offset);
+      } catch (e) {
+        return 0;
       }
 
-      return raw - skipped;
+      var walker = document.createTreeWalker(this._visualEl, NodeFilter.SHOW_TEXT, null, false);
+      var count = 0;
+      var node;
+
+      while ((node = walker.nextNode())) {
+        if (this._inSourceMarker(node)) continue;
+
+        var value = node.nodeValue || "";
+        var take;
+
+        if (node === container) {
+          take = offset;
+        } else if (boundary.comparePoint(node, value.length) <= 0) {
+          take = value.length;
+        } else if (boundary.comparePoint(node, 0) > 0) {
+          break;
+        } else {
+          take = value.length;
+        }
+
+        count += this._visibleChars(value.slice(0, take)).length;
+      }
+
+      return count;
     },
 
     // Plain typing, applied straight into the text node it belongs to.
@@ -7617,6 +7655,11 @@
       // The whole edit has to sit inside this one text node. Past its end we
       // would be guessing about structure a character offset cannot describe.
       if (point.offset + remove > point.node.nodeValue.length) return false;
+
+      // `remove` counts visible characters and replaceData counts real ones.
+      // They differ wherever a placeholder is sitting in this node, so leave
+      // those to the slow path rather than deleting the wrong span.
+      if (this._visibleChars(point.node.nodeValue) !== point.node.nodeValue) return false;
 
       try {
         point.node.replaceData(point.offset, remove, insert);

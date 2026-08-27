@@ -225,3 +225,67 @@ test("awareness stays off unless the host asks for it", { skip: dom.skip }, () =
 
   e.cleanup();
 });
+
+// ---------------------------------------------------------------------------
+// Placeholders must not move the shared coordinates
+// ---------------------------------------------------------------------------
+//
+// An empty list item gets a zero-width placeholder so the caret has somewhere
+// to sit, and whether a given item has one depends on what that session has
+// been doing. Counting them made two people looking at the same document
+// disagree about where a character is: their carets landed in different
+// places, and an edit sent from one applied at the wrong offset in the other.
+
+const ZWSP = "​";
+
+test("a placeholder does not shift the shared coordinates", { skip: dom.skip }, () => {
+  const bare = awarenessEditor("<ul><li>alpha</li><li></li></ul>", "hybrid");
+  const held = awarenessEditor("<ul><li>alpha</li><li>" + ZWSP + "</li></ul>", "hybrid");
+
+  assert.equal(
+    bare._visibleText(bare._visualEl),
+    held._visibleText(held._visualEl),
+    "two sessions on the same document must read the same text"
+  );
+
+  bare.cleanup();
+  held.cleanup();
+});
+
+test("the same character has the same offset either way", { skip: dom.skip }, () => {
+  const held = awarenessEditor(
+    "<ul><li>" + ZWSP + "</li><li>alpha</li></ul>",
+    "hybrid"
+  );
+  const bare = awarenessEditor("<ul><li></li><li>alpha</li></ul>", "hybrid");
+
+  // The "l" of "alpha" is at the same place in both, placeholder or not.
+  const heldPoint = held._visibleNodeAt(1);
+  const barePoint = bare._visibleNodeAt(1);
+
+  assert.equal(heldPoint.node.nodeValue.charAt(heldPoint.offset), "l");
+  assert.equal(barePoint.node.nodeValue.charAt(barePoint.offset), "l");
+
+  // And reporting a caret there gives the same offset in both.
+  assert.equal(
+    held._visibleOffset(heldPoint.node, heldPoint.offset),
+    bare._visibleOffset(barePoint.node, barePoint.offset)
+  );
+
+  held.cleanup();
+  bare.cleanup();
+});
+
+test("an edit is not written across a placeholder", { skip: dom.skip }, () => {
+  const e = awarenessEditor("<ul><li>a" + ZWSP + "b</li></ul>", "hybrid");
+
+  // Visible offsets say "remove 1 at 1" means the "b". Real offsets do not,
+  // because the placeholder sits between them — so the shortcut must decline.
+  assert.equal(
+    e._applyRemoteFastPath({ rendered: { at: 1, remove: 1, insert: "" } }),
+    false,
+    "a node holding a placeholder must be left to the slow path"
+  );
+
+  e.cleanup();
+});
