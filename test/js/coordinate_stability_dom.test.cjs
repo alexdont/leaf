@@ -144,3 +144,45 @@ test("normalizing twice changes nothing", { skip: dom.skip }, () => {
 
   e.cleanup();
 });
+
+// Every path that puts the host's html into the editor has to normalize it,
+// and there turned out to be four of them: the page loading, html pushed
+// mid-session, a whole document replaced, and a mode switch back to the visual
+// surface. Three did and one did not, so a session that had been handed a
+// replacement document counted a character the others did not, and every caret
+// past that point was one place out.
+//
+// The check is on the result rather than on the call: whichever way this html
+// arrives, the editor must end up counting the same characters.
+const HOST_HTML = "<h1>Collaboration testbed</h1>\n<p>Type here.</p>\n";
+const EXPECTED = "Collaboration testbed\nType here.";
+
+test("html arriving un-normalized counts a line that is not there", { skip: dom.skip }, () => {
+  const e = dom.editor(HOST_HTML, "hybrid");
+
+  // Without normalizing, the newline between the two blocks is counted twice:
+  // once as the break between them and once as the text node itself.
+  assert.equal(e._visibleText(e._visualEl), "Collaboration testbed\n\nType here.\n");
+
+  e.cleanup();
+});
+
+test("a document replaced by the host counts the same as one loaded", { skip: dom.skip }, () => {
+  const loaded = receive(HOST_HTML);
+
+  // What set_content does: replace the content, then normalize.
+  const replaced = dom.editor("<p>something else</p>", "hybrid");
+  replaced._visualEl.innerHTML = HOST_HTML;
+  replaced._normalizeRenderedHtml(replaced._visualEl);
+  replaced._ensureListItemPlaceholders(replaced._visualEl);
+
+  assert.equal(loaded._visibleText(loaded._visualEl), EXPECTED);
+  assert.equal(
+    replaced._visibleText(replaced._visualEl),
+    loaded._visibleText(loaded._visualEl),
+    "a session handed a replacement must count what a session that loaded it counts"
+  );
+
+  loaded.cleanup();
+  replaced.cleanup();
+});

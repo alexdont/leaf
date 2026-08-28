@@ -5505,6 +5505,7 @@
           // Set innerHTML directly; hybrid uses the same contenteditable.
           if (this._visualEl) {
             this._visualEl.innerHTML = rawHtml || "<p><br></p>";
+            this._normalizeRenderedHtml(this._visualEl);
             this._ensureListItemPlaceholders(this._visualEl);
           }
         } else if (to === "markdown") {
@@ -15285,6 +15286,7 @@
 
           if (this._visualEl) {
             this._visualEl.innerHTML = html;
+            this._normalizeRenderedHtml(this._visualEl);
             this._ensureListItemPlaceholders(this._visualEl);
           }
 
