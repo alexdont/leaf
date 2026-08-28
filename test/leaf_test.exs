@@ -265,6 +265,32 @@ defmodule LeafTest do
     assert new_socket.assigns.mode == :hybrid
   end
 
+  # A freshly loaded editor has no idea which version it is looking at. Sending
+  # zero claims to have been written against the beginning of time, and a host
+  # that keeps versions rebases such an edit over everything that ever
+  # happened — far enough to point outside the document.
+  test "the editor is told which version it is starting from" do
+    rendered =
+      render_component(&Leaf.leaf_editor/1,
+        id: "editor-1",
+        content: "",
+        collaboration: %{operations: true, revision: 92}
+      )
+
+    assert rendered =~ ~s(data-collab-revision="92")
+  end
+
+  test "no revision is rendered when the host does not keep them" do
+    rendered =
+      render_component(&Leaf.leaf_editor/1,
+        id: "editor-1",
+        content: "",
+        collaboration: %{operations: true}
+      )
+
+    refute rendered =~ "data-collab-revision="
+  end
+
   test "the operation event forwards the rendered splice to the host" do
     socket = base_socket([])
 

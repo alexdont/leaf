@@ -830,6 +830,7 @@ defmodule Leaf do
       data-collab-operations={to_string(collab_operations?(@collaboration))}
       data-collab-awareness={to_string(collab_awareness?(@collaboration))}
       data-collab-debug={to_string(collab_debug?(@collaboration))}
+      data-collab-revision={collab_revision(@collaboration)}
       data-wikilinks={to_string(wiki_links_enabled?(@wiki_links))}
       data-wikilinks-resolve={to_string(wiki_links_resolve?(@wiki_links))}
       data-wikilinks-follow={wiki_links_follow(@wiki_links)}
@@ -3647,6 +3648,19 @@ defmodule Leaf do
   # a host turns it on — it is for finding a disagreement, not for running with.
   defp collab_debug?(%{} = config), do: Map.get(config, :debug, false) == true
   defp collab_debug?(_), do: false
+
+  # The version of the document the editor is being handed. A freshly loaded
+  # editor otherwise has no idea, and an edit that claims to be written against
+  # the beginning of time gets rebased over the entire history — far enough to
+  # point outside the document, so the first thing the writer types is refused.
+  defp collab_revision(%{} = config) do
+    case Map.get(config, :revision) do
+      revision when is_integer(revision) -> to_string(revision)
+      _ -> nil
+    end
+  end
+
+  defp collab_revision(_), do: nil
 
   # Diagnostics arrive with string keys like any other client payload; the host
   # reads them as a map, so they are converted once here rather than at every

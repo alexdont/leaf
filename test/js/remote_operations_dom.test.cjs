@@ -615,3 +615,34 @@ test("a resync adopts the host's copy and clears what was in the air", { skip: d
 
   e.cleanup();
 });
+
+// A host that does not keep versions gets null, not zero. Zero is a claim to
+// have been written against the beginning of time, which a host that DOES keep
+// versions would answer by rebasing the edit over its entire history — far
+// enough that it points outside the document and cannot be placed. That is
+// what a freshly refreshed tab did to its own first keystroke.
+test("an unknown version is sent as null, never as zero", { skip: dom.skip }, () => {
+  const e = collabEditor("<p>hello</p>");
+  e._collabRevision = null;
+
+  typeLocally(e, 5, "!");
+  e._emitOperation(e._currentMarkdown());
+
+  const [name, payload] = e.sent[e.sent.length - 1];
+  assert.equal(name, "operation");
+  assert.equal(payload.revision, null, "not knowing the version must not be reported as zero");
+
+  e.cleanup();
+});
+
+test("a known version is sent as given, including zero", { skip: dom.skip }, () => {
+  const e = collabEditor("<p>hello</p>");
+  e._collabRevision = 0;
+
+  typeLocally(e, 5, "!");
+  e._emitOperation(e._currentMarkdown());
+
+  assert.equal(e.sent[e.sent.length - 1][1].revision, 0, "a real zero is still a version");
+
+  e.cleanup();
+});

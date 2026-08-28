@@ -1539,6 +1539,13 @@
       this._collabOperations = this.el.dataset.collabOperations === "true";
       this._collabAwareness = this.el.dataset.collabAwareness === "true";
       this._collabDebug = this.el.dataset.collabDebug === "true";
+      // Which version of the document we are starting from. Null, not zero,
+      // when the host does not say: zero is a claim to have been written
+      // against the beginning of time, and a host that keeps versions would
+      // rebase the first edit over everything that ever happened.
+      this._collabRevision = this.el.dataset.collabRevision
+        ? parseInt(this.el.dataset.collabRevision, 10)
+        : null;
       // Edits sent but not yet acknowledged. Someone else's operation is
       // written against a document that does not contain these, so it has to
       // be rebased over them before it can be applied here.
@@ -1872,6 +1879,13 @@
       this._collabOperations = this.el.dataset.collabOperations === "true";
       this._collabAwareness = this.el.dataset.collabAwareness === "true";
       this._collabDebug = this.el.dataset.collabDebug === "true";
+      // Which version of the document we are starting from. Null, not zero,
+      // when the host does not say: zero is a claim to have been written
+      // against the beginning of time, and a host that keeps versions would
+      // rebase the first edit over everything that ever happened.
+      this._collabRevision = this.el.dataset.collabRevision
+        ? parseInt(this.el.dataset.collabRevision, 10)
+        : null;
       // Edits sent but not yet acknowledged. Someone else's operation is
       // written against a document that does not contain these, so it has to
       // be rebased over them before it can be applied here.
@@ -7965,7 +7979,7 @@
         visible_length: visible.length,
         caret: caret,
         pending: this._pending ? this._pending.length : 0,
-        revision: this._collabRevision || 0
+        revision: typeof this._collabRevision === "number" ? this._collabRevision : null
       };
     },
 
@@ -8058,7 +8072,7 @@
         // describe their edit against the text they can see, and the host needs
         // to know which text that was to put both of them where they were meant
         // to go.
-        revision: this._collabRevision || 0,
+        revision: typeof this._collabRevision === "number" ? this._collabRevision : null,
         seq: this._operationSeq,
         // Length of the text this splice applies to. A host holding a document
         // of a different length knows it has diverged, rather than applying an
