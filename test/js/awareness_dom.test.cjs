@@ -163,7 +163,14 @@ test("a caret is reported once per position, not once per selectionchange", { sk
   e._emitAwareness();
 
   assert.equal(sent.length, 1, "an unmoved caret must not be re-sent");
-  assert.deepEqual(sent[0][1], { editor_id: "test-editor", offset: 4, focused: true });
+  // debug is null unless a host turns diagnostics on — nothing extra rides
+  // along by default.
+  assert.deepEqual(sent[0][1], {
+    editor_id: "test-editor",
+    offset: 4,
+    focused: true,
+    debug: null,
+  });
 
   e.cleanup();
 });
@@ -186,7 +193,12 @@ test("leaving the editor reports no caret at all", { skip: dom.skip }, () => {
   e._emitAwareness(true);
 
   assert.equal(sent.length, 2);
-  assert.deepEqual(sent[1], { editor_id: "test-editor", offset: null, focused: false });
+  assert.deepEqual(sent[1], {
+    editor_id: "test-editor",
+    offset: null,
+    focused: false,
+    debug: null,
+  });
 
   e.cleanup();
 });

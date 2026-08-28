@@ -599,6 +599,13 @@ defmodule Leaf do
      })}
   end
 
+  # Ask the editor for the text it is holding. Sent when its fingerprint does
+  # not match the host's, so the host can report which character parted company
+  # rather than only that something did.
+  def update(%{action: :debug_snapshot}, socket) do
+    {:ok, push_event(socket, "leaf-debug-snapshot:#{socket.assigns.id}", %{})}
+  end
+
   # Tell the editor which version of the document it is now working from, so
   # the next edit it sends says what it was written against. Sent to the author
   # of an edit once the host has placed it; peers learn it from the operation.
@@ -821,6 +828,7 @@ defmodule Leaf do
       data-hashtags={to_string(hashtag_trigger?(@suggest_configs))}
       data-collab-operations={to_string(collab_operations?(@collaboration))}
       data-collab-awareness={to_string(collab_awareness?(@collaboration))}
+      data-collab-debug={to_string(collab_debug?(@collaboration))}
       data-wikilinks={to_string(wiki_links_enabled?(@wiki_links))}
       data-wikilinks-resolve={to_string(wiki_links_resolve?(@wiki_links))}
       data-wikilinks-follow={wiki_links_follow(@wiki_links)}
@@ -2584,6 +2592,11 @@ defmodule Leaf do
   # is the length of the text the splice applies to, so a host holding a
   # document of a different length can tell it has diverged instead of applying
   # an offset that no longer means what it meant.
+  def handle_event("debug_state", params, socket) do
+    send(self(), {:leaf_debug_state, atomize_debug(params)})
+    {:noreply, socket}
+  end
+
   def handle_event("resync", _params, socket) do
     send(self(), {:leaf_resync, %{editor_id: socket.assigns.id}})
     {:noreply, socket}
@@ -2596,7 +2609,8 @@ defmodule Leaf do
        %{
          editor_id: socket.assigns.id,
          offset: Map.get(params, "offset"),
-         focused: Map.get(params, "focused", true) == true
+         focused: Map.get(params, "focused", true) == true,
+         debug: atomize_debug(Map.get(params, "debug"))
        }}
     )
 
@@ -2617,6 +2631,7 @@ defmodule Leaf do
          # out. Lets a peer apply plain typing straight into its text rather
          # than rebuilding its document; nil simply means the slow path.
          rendered: normalize_rendered(Map.get(params, "rendered")),
+         debug: atomize_debug(Map.get(params, "debug")),
          # Which version of the document this edit was written against, so a
          # host can rebase it over anything that landed in the meantime.
          revision: Map.get(params, "revision"),
@@ -3625,6 +3640,23 @@ defmodule Leaf do
 
   defp collab_awareness?(%{} = config), do: Map.get(config, :awareness, false) == true
   defp collab_awareness?(_), do: false
+
+  # Diagnostics: the editor reports a fingerprint of what it holds with every
+  # operation, and hands over the text itself when the host asks. Off unless
+  # a host turns it on — it is for finding a disagreement, not for running with.
+  defp collab_debug?(%{} = config), do: Map.get(config, :debug, false) == true
+  defp collab_debug?(_), do: false
+
+  # Diagnostics arrive with string keys like any other client payload; the host
+  # reads them as a map, so they are converted once here rather than at every
+  # use. Unknown keys are dropped — this is a debug channel, not an open door.
+  @debug_keys ~w(digest length visible_length caret pending revision markdown editor_id)
+
+  defp atomize_debug(%{} = debug) do
+    Map.new(@debug_keys, fn key -> {String.to_atom(key), Map.get(debug, key)} end)
+  end
+
+  defp atomize_debug(_), do: nil
 
   defp normalize_rendered(%{} = rendered) do
     %{

@@ -1538,6 +1538,7 @@
       this._wikiLinks = this.el.dataset.wikilinks === "true";
       this._collabOperations = this.el.dataset.collabOperations === "true";
       this._collabAwareness = this.el.dataset.collabAwareness === "true";
+      this._collabDebug = this.el.dataset.collabDebug === "true";
       // Edits sent but not yet acknowledged. Someone else's operation is
       // written against a document that does not contain these, so it has to
       // be rebased over them before it can be applied here.
@@ -1717,6 +1718,18 @@
         this._handleCommand.bind(this)
       );
 
+      // The host saw this editor's fingerprint differ from its own and wants
+      // the text itself, so it can say exactly which character parted company.
+      this.handleEvent(
+        "leaf-debug-snapshot:" + this._editorId,
+        function () {
+          var state = this._debugState();
+          state.editor_id = this._editorId;
+          state.markdown = this._currentMarkdown();
+          this.pushEventTo(this.el, "debug_state", state);
+        }.bind(this)
+      );
+
       // The version this editor is now working from.
       this.handleEvent(
         "leaf-revision:" + this._editorId,
@@ -1858,6 +1871,7 @@
       this._wikiLinks = this.el.dataset.wikilinks === "true";
       this._collabOperations = this.el.dataset.collabOperations === "true";
       this._collabAwareness = this.el.dataset.collabAwareness === "true";
+      this._collabDebug = this.el.dataset.collabDebug === "true";
       // Edits sent but not yet acknowledged. Someone else's operation is
       // written against a document that does not contain these, so it has to
       // be rebased over them before it can be applied here.
@@ -3350,7 +3364,8 @@
       this.pushEventTo(this.el, "awareness", {
         editor_id: this._editorId,
         offset: offset,
-        focused: focused
+        focused: focused,
+        debug: this._collabDebug ? this._debugState() : null
       });
     },
 
@@ -7910,6 +7925,50 @@
     // What `op` means once `applied` has happened. The same rule the host uses
     // — the two have to agree or an edit ends up in a different place in each
     // session.
+    // FNV-1a, 32-bit. Cheap, and the host computes it the same way, so two
+    // sessions holding the same text produce the same eight characters and a
+    // disagreement is visible without shipping the document anywhere.
+    _digest: function (text) {
+      var hash = 0x811c9dc5;
+
+      for (var i = 0; i < text.length; i++) {
+        hash = Math.imul(hash ^ text.charCodeAt(i), 0x01000193) >>> 0;
+      }
+
+      return ("0000000" + hash.toString(16)).slice(-8);
+    },
+
+    // What this session believes it is holding, for the host's log.
+    _debugState: function () {
+      var markdown = this._currentMarkdown();
+      var visible =
+        this._mode === "markdown" || this._mode === "html"
+          ? markdown
+          : this._visibleText(this._visualEl);
+
+      var caret = null;
+      var sel = window.getSelection();
+
+      if (
+        sel &&
+        sel.rangeCount &&
+        this._visualEl &&
+        this._visualEl.contains(sel.getRangeAt(0).startContainer)
+      ) {
+        var range = sel.getRangeAt(0);
+        caret = this._visibleOffset(range.startContainer, range.startOffset);
+      }
+
+      return {
+        digest: this._digest(markdown),
+        length: markdown.length,
+        visible_length: visible.length,
+        caret: caret,
+        pending: this._pending ? this._pending.length : 0,
+        revision: this._collabRevision || 0
+      };
+    },
+
     _rebaseSplice: function (op, applied) {
       var appliedEnd = applied.at + applied.remove;
       var shift = (applied.insert || "").length - applied.remove;
@@ -8004,7 +8063,10 @@
         // Length of the text this splice applies to. A host holding a document
         // of a different length knows it has diverged, rather than applying an
         // operation at an offset that means something else now.
-        base_length: previous.length
+        base_length: previous.length,
+        // What this editor holds now that it has applied its own edit. The
+        // host compares it with what the same edit produced there.
+        debug: this._collabDebug ? this._debugState() : null
       });
 
       if (!this._pending) this._pending = [];
