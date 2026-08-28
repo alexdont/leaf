@@ -16,9 +16,9 @@ const dom = require("./support/dom.cjs");
 // What Leaf does to html arriving from the host.
 function receive(html) {
   const e = dom.editor(html, "hybrid");
-  e._stripInterBlockWhitespace(e._visualEl);
-  e._stripBreakWhitespace(e._visualEl);
-  e._unwrapLooseListItems(e._visualEl);
+  // The one function every arrival point uses, so a test cannot pass against
+  // a call site that quietly does less than the others.
+  e._normalizeRenderedHtml(e._visualEl);
   e._ensureListItemPlaceholders(e._visualEl);
   return e;
 }

@@ -18,9 +18,9 @@ const dom = require("./support/dom.cjs");
 
 function receive(html) {
   const e = dom.editor(html, "hybrid");
-  e._stripInterBlockWhitespace(e._visualEl);
-  e._stripBreakWhitespace(e._visualEl);
-  e._unwrapLooseListItems(e._visualEl);
+  // The one function every arrival point uses, so a test cannot pass against
+  // a call site that quietly does less than the others.
+  e._normalizeRenderedHtml(e._visualEl);
   e._ensureListItemPlaceholders(e._visualEl);
   return e;
 }
@@ -101,6 +101,46 @@ test("a trailing empty line is counted, once", { skip: dom.skip }, () => {
     "one\n",
     "the empty item is a line, and exactly one"
   );
+
+  e.cleanup();
+});
+
+// The failure this file was written for, reduced.
+//
+// A session that had loaded the page counted the newline html pretty-printing
+// writes after a <br />, while a session that had received the same document
+// had it stripped. Same document, same fingerprint, one character apart in the
+// coordinates — so every caret and every edit past that point was one place
+// out. Three arrival points, and one of them did less than the other two.
+test("a loaded session counts what a receiving session counts", { skip: dom.skip }, () => {
+  // Exactly what the host sends for "…tab on\nthis page sees it arrive."
+  const html = "<p>every other tab on<br />\nthis page sees it arrive.</p>\n";
+
+  const loaded = receive(html);
+  const received = receive(html);
+
+  assert.equal(
+    loaded._visibleText(loaded._visualEl),
+    "every other tab on\nthis page sees it arrive.",
+    "one line break, not two"
+  );
+
+  assert.equal(
+    loaded._visibleText(loaded._visualEl),
+    received._visibleText(received._visualEl)
+  );
+
+  loaded.cleanup();
+  received.cleanup();
+});
+
+test("normalizing twice changes nothing", { skip: dom.skip }, () => {
+  const e = receive("<p>a<br />\nb</p>\n<p>c</p>\n");
+  const once = e._visibleText(e._visualEl);
+
+  e._normalizeRenderedHtml(e._visualEl);
+
+  assert.equal(e._visibleText(e._visualEl), once, "arriving twice must not add a line");
 
   e.cleanup();
 });

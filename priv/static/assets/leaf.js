@@ -1632,8 +1632,7 @@
         // hold whitespace-only text nodes between their block children —
         // a cursor trap in contenteditable (see `_stripInterBlockWhitespace`).
         // Loose lists (`<li><p>…</p></li>`) get the same normalization.
-        this._stripInterBlockWhitespace(this._visualEl);
-        this._unwrapLooseListItems(this._visualEl);
+        this._normalizeRenderedHtml(this._visualEl);
 
         document.execCommand("defaultParagraphSeparator", false, "p");
 
@@ -1818,9 +1817,7 @@
             // Also unwrap loose list items (`<li><p>…</p></li>`) — markdown
             // with blank lines between items round-trips through here, and
             // the inner `<p>` otherwise traps Enter inside the item.
-            this._stripInterBlockWhitespace(this._visualEl);
-            this._stripBreakWhitespace(this._visualEl);
-            this._unwrapLooseListItems(this._visualEl);
+            this._normalizeRenderedHtml(this._visualEl);
             this._ensureListItemPlaceholders(this._visualEl);
             this._resolveWikiLinks();
             // DOM was replaced — old block references are stale
@@ -7342,6 +7339,22 @@
     // bullet looks permanently stuck. These nodes carry no meaning inside
     // these containers (only element children are valid there), so
     // dropping them is safe and leaves the markdown unchanged.
+    // Everything that has to be done to html the host rendered, in one place.
+    //
+    // It used to be a list of calls repeated at each of the three points where
+    // rendered html arrives, and one of them was missing a step. That is not a
+    // small bug: a session that loaded the page counted the newline after a
+    // <br /> while a session that received the same document had it stripped,
+    // so the two disagreed about how many characters the text had and every
+    // caret and every edit after that point was one place out.
+    _normalizeRenderedHtml: function (el) {
+      if (!el) return;
+
+      this._stripInterBlockWhitespace(el);
+      this._stripBreakWhitespace(el);
+      this._unwrapLooseListItems(el);
+    },
+
     // MDEx pretty-prints a newline after every <br />. It is punctuation of
     // the markup, not of the text: left in place it reads as a second line
     // break here while the editor that sent it has only one, and the two stop
@@ -8008,9 +8021,7 @@
       el.innerHTML = payload.html || "<p><br></p>";
       // Same cleanup leaf-set-html does — server HTML arrives pretty-printed,
       // and the stray whitespace nodes break caret placement in lists.
-      this._stripInterBlockWhitespace(el);
-      this._stripBreakWhitespace(el);
-      this._unwrapLooseListItems(el);
+      this._normalizeRenderedHtml(el);
       this._ensureListItemPlaceholders(el);
       this._resolveWikiLinks();
       this._sourceBlock = null;
