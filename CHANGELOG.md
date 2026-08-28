@@ -103,6 +103,63 @@
 
 ### Added
 
+- **Live editing.** Several people in one document at once, opt in with
+  `collaboration={%{operations: true, awareness: true}}`. The editor sends what
+  changed rather than only what the document now is, applies somebody else's
+  edit without moving the local caret, and shows everyone else's caret and
+  selection in their own colour under the name the host gives them.
+
+  `Leaf.Collab.join/2` is the whole integration on the host side — it attaches
+  a `handle_info` hook, so a page writes no message handling of its own:
+
+  ```elixir
+  def mount(%{"id" => id}, _session, socket) do
+    {:ok,
+     Leaf.Collab.join(socket,
+       room: MyApp.Notes.room_name(id),
+       editor_id: "note-editor",
+       identity: %{name: socket.assigns.current_user.name}
+     )}
+  end
+  ```
+
+  Edits that cross on the wire are rebased against each other, so two people
+  typing in different places both land where they meant to and the order they
+  arrive in does not change what anybody ends up reading. An edit that cannot
+  be placed is refused rather than applied at an offset that means something
+  else, and that session is put back in step from its own next snapshot —
+  losing nothing it had typed.
+
+  A session whose socket drops keeps working and is reconciled when it comes
+  back: whichever side is behind adopts the other, decided by version rather
+  than guessed, and the editor is replaced without dropping the writer's caret.
+
+  Not a CRDT. Two people changing the same characters at the same instant
+  converge on the same text, but somebody's keystroke loses.
+
+- **Persistence, as a callback.** `Leaf.Collab.Store` says where a document
+  lives, with `save/2` on every change for a store cheap enough to write to
+  constantly and `flush/2` when the writing pauses, at a bounded interval while
+  it continues, and once more on the way down.
+
+  `Leaf.Collab.Store.File` ships for a vault of markdown files: with nobody
+  editing, the `.md` file is the document. It records the hash it read and
+  checks it before writing, so a note edited outside the session is answered
+  with a conflict rather than overwritten. `Leaf.Collab.Store.None` is the
+  default and keeps nothing.
+
+  A store that raises does not take the room with it. It is somebody else's
+  code talking to somebody else's disk, and the document is still in memory
+  with people editing it.
+
+- **`Leaf.Collab.Log`**, opt in with `debug: true`. A running account of what
+  every session believes it is holding. Two sessions can hold the same document
+  and still disagree about how many characters are in it — which is what
+  misplaces a caret, and is invisible from either side alone. It notices that,
+  asks both for the text they are counting, and names the character they stop
+  agreeing on. Off by default: it fingerprints the whole document on every
+  keystroke.
+
 - **Obsidian-style `[[wiki-links]]`.** Opt in with `wiki_links={%{resolve: true}}`
   and `[[Target]]`, `[[Target|Alias]]` and `[[Target#Heading]]` render as link
   tokens in the visual and hybrid surfaces while the markdown stays exactly as
@@ -137,6 +194,10 @@
   than replacing its text, so formatting inside it survives.
 
 ### Changed
+
+- **`phoenix_pubsub` is now a declared dependency.** Leaf calls it directly for
+  live editing. It arrived transitively through `phoenix_live_view` before,
+  which was luck rather than a contract.
 
 - **Toolbar actions no longer die on an empty row.** Measuring the caret
   recursed without end whenever it sat ON an element rather than in text —
