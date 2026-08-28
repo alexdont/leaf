@@ -24,6 +24,12 @@ defmodule Leaf.MixProject do
 
   defp aliases do
     [
+      # One gate for a release: everything that has to be clean before
+      # publishing, in the order that fails fastest. Mirrors phoenix_kit_posts.
+      # The test step goes through `cmd` so it runs in MIX_ENV=test the way a
+      # bare `mix test` would; inside an alias it would inherit :dev.
+      quality: ["format", "credo --strict", "dialyzer", "cmd mix test"],
+      "quality.ci": ["format --check-formatted", "credo --strict", "dialyzer", "cmd mix test"],
       # The undo/redo stack is real logic living in the JS bundle, so the
       # Elixir suite alone no longer covers this library. Runs after it, and
       # skips rather than fails where node is unavailable — the Elixir tests

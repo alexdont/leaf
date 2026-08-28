@@ -177,6 +177,22 @@ defmodule Leaf.Collab.StoreTest do
     end
   end
 
+  # A reset is a change like any other. One that never reached the store would
+  # be resurrected from it: the next hydrate would bring the pre-reset
+  # document straight back.
+  test "a reset reaches the store", %{root: root, id: id} do
+    room = start_room(id)
+    Room.apply_operation(room, "A", op(0, 1, "@"))
+    Room.flush_now(room)
+    assert File.read!(Path.join(root, "#{id}.md")) =~ "@"
+
+    Room.reset(room)
+    Room.flush_now(room)
+
+    assert File.read!(Path.join(root, "#{id}.md")) == @content,
+           "the reset document is what the store must now hold"
+  end
+
   # A store talks to somebody else's disk or database and can be unavailable at
   # exactly the moment it is needed. Taking the room down with it would lose
   # the document outright, which is the one outcome worth avoiding.

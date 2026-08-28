@@ -15448,6 +15448,12 @@
               this._mode === "markdown" || this._mode === "html"
                 ? this._lastSentMarkdown
                 : this._visibleText(this._visualEl);
+            // Anything still unacknowledged described the document that was
+            // just replaced. Rebasing incoming edits over splices from a
+            // document that no longer exists places them at offsets that mean
+            // nothing here.
+            this._pending = [];
+            this._needsResync = false;
           }
 
           this._syncFormInput(content);

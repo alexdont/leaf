@@ -284,9 +284,18 @@ defmodule Leaf.Collab.Room do
   def handle_call(:reset, _from, state) do
     # People stay: resetting the document is not the same as everyone leaving,
     # and dropping them would strand monitors we still hold.
+    #
+    # The revision moves FORWARD. It is how every session decides who is
+    # behind, and it only works while it never goes backwards: a reset to zero
+    # left live sessions holding a higher number than the room, so the next
+    # reconciliation decided the room was the stale one and adopted the
+    # pre-reset text right back. The caller broadcasts the reply to its
+    # sessions (the shape is what `{:leaf_collab_adopted, …}` expects), and
+    # the raised revision is what makes them follow it.
     fresh_state = %{
       fresh()
       | document: state.initial_content,
+        revision: state.revision + 1,
         people: state.people,
         store: state.store,
         document_id: state.document_id,
@@ -297,8 +306,13 @@ defmodule Leaf.Collab.Room do
         flush_at_most_every: state.flush_at_most_every
     }
 
-    {:reply, %{document: fresh_state.document, ops: fresh_state.ops, diverged: false},
-     fresh_state}
+    {:reply,
+     %{
+       document: fresh_state.document,
+       ops: fresh_state.ops,
+       diverged: false,
+       revision: fresh_state.revision
+     }, changed(fresh_state)}
   end
 
   def handle_call({:join, session_id, pid, identity}, _from, state) do

@@ -444,8 +444,20 @@ and hand the editor what `join/2` gave you:
 ```
 
 That is the whole integration. `join/2` attaches a `handle_info` hook, so you
-write no message handling of your own and your existing `handle_info` clauses
-are left alone.
+write no message handling of your own.
+
+Be precise about what that hook consumes, because it changes how you read
+content. It handles — and stops — `{:leaf_operation, …}`, `{:leaf_awareness, …}`,
+`{:leaf_ready, …}`, `{:leaf_resync, …}`, `{:leaf_debug_state, …}` and
+`{:leaf_changed, …}`. That last one matters: **a collaborating LiveView does
+not receive `{:leaf_changed, …}`**. Read the document from
+`@leaf_collab.content` instead — it is kept current on every edit, local or
+remote. Messages the hook does not recognise pass through to your own
+`handle_info` clauses untouched.
+
+One collaborative editor per LiveView: `join/2` owns the `@leaf_collab` assign
+and the hook name. Two documents on one page need two LiveViews (or a
+LiveComponent per document).
 
 ### What `join/2` puts in your assigns
 
@@ -456,6 +468,11 @@ are left alone.
 | `@leaf_collab.people` | everyone with a caret in the document — `%{id, label, color, offset, anchor}` |
 | `@leaf_collab.activity` | recent edits, newest first, if you want to show a feed |
 | `@leaf_collab.revision` | which version the document is on |
+| `@leaf_collab.diverged` | true while this session is being reconciled — a moment, not a state; useful for a subtle indicator |
+
+`Leaf.Collab.reset(socket)` puts the document back to its starting text for
+every session, not only this one — it handles telling the others, which is the
+part a bare `Room.reset/1` would leave undone.
 
 ### Who is editing
 
@@ -509,6 +526,17 @@ somebody's work.
 
 `Leaf.Collab.Store.None` is the default and keeps nothing — right for a scratch
 pad, and an honest answer for a host that has not said where documents live.
+
+For a vault, start rooms on demand rather than at boot — a `DynamicSupervisor`
+plus a `Registry` keyed by note id is the usual shape, with the room stopped
+(not killed — it flushes on the way down) when the last person leaves.
+
+One behaviour to know about: markdown is normalised by the editor. Opening a
+hand-written file whose formatting is not what the editor would itself produce
+(say `-   item` for `- item`) makes the first session adopt the normalised
+form, and the flush writes it back. Content is never changed — only its
+spelling. If byte-identical files matter to you, canonicalise them once before
+turning live editing on.
 
 ### What it costs when you are not using it
 

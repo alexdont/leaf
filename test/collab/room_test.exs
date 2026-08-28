@@ -61,6 +61,44 @@ defmodule Leaf.Collab.RoomTest do
   # Verified by hand with three tabs; pinned here so it stays true. Two sessions
   # exercise rebasing over one other edit, which is the easy case — the third
   # is what makes an edit rebase over a rebase.
+  describe "reset" do
+    # The revision is how every session decides who is behind, and that only
+    # works while it never goes backwards. A reset to zero left live sessions
+    # holding a higher number than the room, so the next reconciliation
+    # decided the room was stale and adopted the pre-reset text right back.
+    test "moves the revision forward, never back", %{room: room} do
+      Room.apply_operation(room, "A", op(0, 0, "x", 0))
+      Room.apply_operation(room, "A", op(1, 0, "y", 1))
+      before_reset = Room.snapshot(room).revision
+
+      result = Room.reset(room)
+
+      assert result.revision > before_reset,
+             "a session holding the old revision must read as behind, not ahead"
+
+      assert result.document == @content
+    end
+
+    test "replies with what a caller needs to broadcast", %{room: room} do
+      result = Room.reset(room)
+
+      # The shape {:leaf_collab_adopted, …} expects: without both of these the
+      # other sessions cannot be moved onto the reset document.
+      assert is_binary(result.document)
+      assert is_integer(result.revision)
+    end
+
+    test "a session on the old revision is behind after a reset", %{room: room} do
+      Room.apply_operation(room, "A", op(0, 0, "x", 0))
+      old_revision = Room.snapshot(room).revision
+
+      %{revision: new_revision} = Room.reset(room)
+
+      assert new_revision > old_revision,
+             "leaf_ready from a pre-reset session must resolve to the room winning"
+    end
+  end
+
   describe "three people typing at once" do
     test "every edit lands where its author meant it to", %{room: room} do
       # None of them has seen the others: all three were written against the

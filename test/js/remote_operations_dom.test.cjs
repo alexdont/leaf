@@ -692,3 +692,29 @@ test("with nothing of ours in the air, a structural edit applies at once", { ski
 
   e.cleanup();
 });
+
+// A wholesale replacement makes everything unacknowledged meaningless: those
+// splices described the document that was just thrown away. Rebasing an
+// incoming edit over them places it at an offset from a document that no
+// longer exists.
+test("set_content clears the unacknowledged edits with the document", { skip: dom.skip }, () => {
+  const e = dom.editor("<p>hello</p>");
+  e._collabOperations = true;
+  e._pending = [{ seq: 1, rendered: { at: 0, remove: 0, insert: "stale" } }];
+  e._needsResync = true;
+  e._historyReset = () => {};
+  e._getMarkdownTextarea = () => null;
+  e._getHtmlTextarea = () => null;
+  e._currentMarkdown = () => "the replacement";
+
+  e._handleCommand({
+    action: "set_content",
+    content: "the replacement",
+    html: "<p>the replacement</p>",
+  });
+
+  assert.deepEqual(e._pending, [], "splices from a dead document must not survive it");
+  assert.equal(e._needsResync, false, "nor a settle-up queued against it");
+
+  e.cleanup();
+});

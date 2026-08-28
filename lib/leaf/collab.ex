@@ -14,7 +14,7 @@ defmodule Leaf.Collab do
       def mount(%{"id" => id}, _session, socket) do
         {:ok,
          Leaf.Collab.join(socket,
-           room: MyApp.Notes.room(id),
+           room: MyApp.Notes.room_name(id),
            editor_id: "note-editor",
            identity: %{name: socket.assigns.current_user.name}
          )}
@@ -29,8 +29,19 @@ defmodule Leaf.Collab do
       />
 
   That is the whole integration. `join/2` attaches a `handle_info` hook, so the
-  host writes no message handling of its own and its own `handle_info` clauses
-  are left alone.
+  host writes no message handling of its own.
+
+  ## What the hook consumes
+
+  The hook handles — and stops — `{:leaf_operation, …}`, `{:leaf_awareness, …}`,
+  `{:leaf_ready, …}`, `{:leaf_resync, …}`, `{:leaf_debug_state, …}` and
+  `{:leaf_changed, …}`. A collaborating LiveView therefore does **not** receive
+  `{:leaf_changed, …}`: read the document from `@leaf_collab.content`, which is
+  kept current on every edit, local or remote. Anything the hook does not
+  recognise passes through to the host's own `handle_info` clauses untouched.
+
+  One collaborative editor per LiveView: `join/2` owns the `@leaf_collab`
+  assign and the hook name.
 
   ## What the host still owns
 
@@ -92,6 +103,10 @@ defmodule Leaf.Collab do
       # Kept short: it is a feed, not a history.
       activity: [],
       reconcile: false,
+      # Whether this session is currently being reconciled. False from the
+      # start: a host showing a banner off it must be able to read it before
+      # anything has ever gone wrong.
+      diverged: false,
       collaboration: %{
         operations: true,
         awareness: Keyword.get(opts, :awareness, true),
@@ -104,6 +119,22 @@ defmodule Leaf.Collab do
 
   @doc "Everyone in the document, for a host that wants to list them."
   def people(socket), do: socket.assigns.leaf_collab.people
+
+  @doc """
+  Put the document back to its starting text, for everyone.
+
+  Handles the part a host would forget: telling the other sessions. A reset
+  that only changed the room left every other tab holding the old text, and
+  the next reconciliation adopted it straight back — the reset undone by the
+  people it was for.
+  """
+  def reset(socket) do
+    state = socket.assigns.leaf_collab
+    result = Room.reset(state.room)
+
+    broadcast(state, {:leaf_collab_adopted, result})
+    adopt_locally(socket, result)
+  end
 
   # --------------------------------------------------------------------------
   # Messages
