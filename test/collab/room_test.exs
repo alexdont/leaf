@@ -58,6 +58,68 @@ defmodule Leaf.Collab.RoomTest do
     end
   end
 
+  # Verified by hand with three tabs; pinned here so it stays true. Two sessions
+  # exercise rebasing over one other edit, which is the easy case — the third
+  # is what makes an edit rebase over a rebase.
+  describe "three people typing at once" do
+    test "every edit lands where its author meant it to", %{room: room} do
+      # None of them has seen the others: all three were written against the
+      # document as it was.
+      Room.apply_operation(room, "A", op(0, 0, "A", 0))
+      Room.apply_operation(room, "B", op(10, 0, "B", 0))
+      Room.apply_operation(room, "C", op(20, 0, "C", 0))
+
+      document = Room.snapshot(room).document
+
+      assert String.at(document, 0) == "A"
+      assert String.at(document, 11) == "B", "moved past A's character, and only A's"
+      assert String.at(document, 22) == "C", "moved past both"
+
+      # And each still sits beside the character it was written next to, which
+      # is the thing that actually matters to whoever typed it.
+      assert String.at(document, 12) == String.at(@content, 10)
+      assert String.at(document, 23) == String.at(@content, 20)
+    end
+
+    test "the order they arrive in changes nothing", %{room: room} do
+      Room.apply_operation(room, "A", op(0, 0, "A", 0))
+      Room.apply_operation(room, "B", op(10, 0, "B", 0))
+      Room.apply_operation(room, "C", op(20, 0, "C", 0))
+      one = Room.snapshot(room).document
+
+      Room.reset(room)
+
+      Room.apply_operation(room, "C", op(20, 0, "C", 0))
+      Room.apply_operation(room, "A", op(0, 0, "A", 0))
+      Room.apply_operation(room, "B", op(10, 0, "B", 0))
+      two = Room.snapshot(room).document
+
+      assert one == two, "everyone must end up reading the same document"
+    end
+
+    test "nobody's edit is refused for being late", %{room: room} do
+      results =
+        for {session, at} <- [{"A", 5}, {"B", 15}, {"C", 25}, {"D", 35}] do
+          Room.apply_operation(room, session, op(at, 0, session, 0))
+        end
+
+      assert Enum.all?(results, & &1.applied),
+             "an edit written before seeing the others is crossed, not stale"
+    end
+
+    test "a deletion by one does not misplace the others", %{room: room} do
+      Room.apply_operation(room, "A", op(0, 5, "", 0))
+      Room.apply_operation(room, "B", op(20, 0, "B", 0))
+      Room.apply_operation(room, "C", op(30, 0, "C", 0))
+
+      document = Room.snapshot(room).document
+
+      # B and C were written against offsets five characters further along.
+      assert String.at(document, 15) == "B"
+      assert String.at(document, 26) == "C"
+    end
+  end
+
   describe "two people typing at once" do
     test "both edits land where their authors meant them to", %{room: room} do
       base = Room.snapshot(room)
