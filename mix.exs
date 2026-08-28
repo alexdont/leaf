@@ -69,6 +69,10 @@ defmodule Leaf.MixProject do
     [
       {:phoenix_live_view, "~> 1.0"},
       {:phoenix_html, "~> 4.0"},
+      # Live editing broadcasts between the sessions in a document. It arrives
+      # transitively through phoenix_live_view today, which is luck rather than
+      # a contract — Leaf calls it directly, so Leaf asks for it.
+      {:phoenix_pubsub, "~> 2.0"},
       {:mdex, "~> 0.13"},
       {:gettext, "~> 0.26 or ~> 1.0", optional: true},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
