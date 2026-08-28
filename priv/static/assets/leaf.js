@@ -1765,6 +1765,10 @@
           var state = this._debugState();
           state.editor_id = this._editorId;
           state.markdown = this._currentMarkdown();
+          state.visible =
+            this._mode === "markdown" || this._mode === "html"
+              ? state.markdown
+              : this._visibleText(this._visualEl);
           this.pushEventTo(this.el, "debug_state", state);
         }.bind(this)
       );
@@ -8136,6 +8140,11 @@
       return {
         digest: this._digest(markdown),
         length: markdown.length,
+        // The coordinates, fingerprinted separately. Two sessions can hold the
+        // same document and still disagree about how many characters are in
+        // it — which is the disagreement that misplaces a caret, and it is
+        // invisible to a comparison of the documents alone.
+        visible_digest: this._digest(visible),
         visible_length: visible.length,
         caret: caret,
         pending: this._pending ? this._pending.length : 0,

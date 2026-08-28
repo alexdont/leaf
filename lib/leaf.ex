@@ -3679,7 +3679,7 @@ defmodule Leaf do
   # Diagnostics arrive with string keys like any other client payload; the host
   # reads them as a map, so they are converted once here rather than at every
   # use. Unknown keys are dropped — this is a debug channel, not an open door.
-  @debug_keys ~w(digest length visible_length caret pending revision markdown editor_id)
+  @debug_keys ~w(digest length visible_digest visible_length caret pending revision markdown visible editor_id)
 
   defp atomize_debug(%{} = debug) do
     Map.new(@debug_keys, fn key -> {String.to_atom(key), Map.get(debug, key)} end)
