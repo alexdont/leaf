@@ -416,3 +416,82 @@ test("an empty line between two others is left to the slow path", { skip: dom.sk
 
   e.cleanup();
 });
+
+// ---------------------------------------------------------------------------
+// Whitespace the host never stores
+// ---------------------------------------------------------------------------
+//
+// Leaf substitutes a non-breaking space for a space at the end of a line so it
+// stays visible, and markdown trims it away. So the session that typed it held
+// one more character than the document, while a session that received that
+// document held none — and from there every edit was placed one position out.
+// A character was lifted out of one word and dropped into another.
+
+test("whitespace at the end of a line is not part of the shared text", { skip: dom.skip }, () => {
+  const typed = awarenessEditor("<p>word </p>");
+  const received = awarenessEditor("<p>word</p>");
+
+  assert.equal(typed._visibleText(typed._visualEl), "word");
+  assert.equal(
+    typed._visibleText(typed._visualEl),
+    received._visibleText(received._visualEl),
+    "the writer and the reader must count the same characters"
+  );
+
+  typed.cleanup();
+  received.cleanup();
+});
+
+test("the same applies to a list item and a heading", { skip: dom.skip }, () => {
+  const item = awarenessEditor("<ul><li>word </li></ul>", "hybrid");
+  const heading = awarenessEditor("<h1>word </h1>", "hybrid");
+
+  assert.equal(item._visibleText(item._visualEl), "word");
+  assert.equal(heading._visibleText(heading._visualEl), "word");
+
+  item.cleanup();
+  heading.cleanup();
+});
+
+test("whitespace inside a line is text and stays", { skip: dom.skip }, () => {
+  const e = awarenessEditor("<p>a b</p>");
+
+  assert.equal(e._visibleText(e._visualEl), "a b", "only trailing whitespace is trimmed");
+
+  e.cleanup();
+});
+
+test("a caret past the trailing space still reports the end of the line", { skip: dom.skip }, () => {
+  const e = awarenessEditor("<p>word </p>");
+  const text = e._visualEl.querySelector("p").firstChild;
+
+  // The caret sits after the invisible space; there are only four characters.
+  assert.equal(e._visibleOffset(text, 5), 4);
+
+  e.cleanup();
+});
+
+test("an offset resolves past trailing whitespace to the real position", { skip: dom.skip }, () => {
+  const e = awarenessEditor("<p>word </p>");
+
+  const point = e._visibleNodeAt(4);
+  assert.equal(point.node.nodeValue, "word ");
+  assert.equal(point.offset, 5, "the end of the line is past the space, in real terms");
+
+  e.cleanup();
+});
+
+// replaceData counts real characters, so the shortcut can only be used where
+// the two kinds of offset coincide.
+test("the shortcut declines a line ending in invisible whitespace", { skip: dom.skip }, () => {
+  const e = awarenessEditor("<p>word </p>");
+
+  assert.equal(
+    e._applyRemoteFastPath({ rendered: { at: 2, remove: 1, insert: "X" } }),
+    false,
+    "writing with shared offsets into a node that holds untracked characters is wrong"
+  );
+  assert.equal(e._visibleText(e._visualEl), "word", "and nothing may have been written");
+
+  e.cleanup();
+});

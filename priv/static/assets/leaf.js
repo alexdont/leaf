@@ -3567,16 +3567,11 @@
         }
 
         if (count + segment.text.length >= offset) {
-          // Back from a visible offset to a real one, stepping over any
-          // placeholders sitting in this node.
           var wanted = offset - count;
-          var raw = 0;
-          var seen = 0;
-
-          while (raw < segment.raw.length && seen < wanted) {
-            if (this._visibleChars(segment.raw.charAt(raw))) seen++;
-            raw++;
-          }
+          // Past the last visible character, the position is the end of the
+          // node — anything after it is not part of the document.
+          var raw =
+            wanted < segment.map.length ? segment.map[wanted] : segment.raw.length;
 
           return { node: segment.node, offset: raw, boundary: false };
         }
@@ -7704,39 +7699,88 @@
       );
 
       var segments = [];
-      var length = 0;
       var node;
 
       while ((node = walker.nextNode())) {
         if (node.nodeType === 1) {
-          // A line break inside a block counts exactly when it serializes as
-          // one, so the coordinates and the markdown agree about where the
-          // lines are.
-          if (isHardBreak(node)) {
-            segments.push({ node: null, text: "\n", raw: "\n" });
-            length += 1;
-            continue;
+          if (isHardBreak(node) || (segments.length > 0 && this._BLOCK_TAGS.test(node.tagName))) {
+            segments.push({ node: null, text: "\n", raw: "\n", map: [0] });
           }
-
-          // Nothing emitted yet means this is the outermost block opening,
-          // not a break between two lines.
-          if (length > 0 && this._BLOCK_TAGS.test(node.tagName)) {
-            segments.push({ node: null, text: "\n", raw: "\n" });
-            length += 1;
-          }
-
           continue;
         }
 
         if (this._inSourceMarker(node, scope)) continue;
 
-        var raw = node.nodeValue || "";
-        var text = this._visibleChars(raw);
-        segments.push({ node: node, text: text, raw: raw });
-        length += text.length;
+        segments.push({ node: node, raw: node.nodeValue || "" });
       }
 
-      return segments;
+      this._markVisible(segments);
+
+      // Whether a block opening is a break between two lines depends on there
+      // being a line before it, and that is only known once it is settled which
+      // characters count. An item holding nothing but a placeholder has no
+      // line in it, and a session that has put one there must not read a break
+      // where a session that has not reads none.
+      var firstLine = segments.length;
+      for (var f = 0; f < segments.length; f++) {
+        if (segments[f].node && segments[f].text !== "") {
+          firstLine = f;
+          break;
+        }
+      }
+
+      var kept = [];
+      for (var k = 0; k < segments.length; k++) {
+        // A break before the first line is not between two lines.
+        if (k < firstLine && !segments[k].node) continue;
+        kept.push(segments[k]);
+      }
+
+      return kept;
+    },
+
+    // Decide which characters of each segment are part of the shared document,
+    // and record where each one really sits so an offset can be turned back
+    // into a DOM position.
+    //
+    // Two kinds are not part of it. Zero-width placeholders, which are
+    // scaffolding for the caret. And whitespace at the end of a line, which
+    // the editor shows — Leaf substitutes a non-breaking space so a trailing
+    // space stays visible — but which markdown trims away. A character the
+    // host never stores cannot be in the coordinates, or the session that
+    // typed it counts one more character than every session that received the
+    // document, and every later edit is placed one position out.
+    _markVisible: function (segments) {
+      var trailing = true;
+
+      for (var i = segments.length - 1; i >= 0; i--) {
+        var segment = segments[i];
+
+        if (!segment.node) {
+          trailing = true;
+          continue;
+        }
+
+        var raw = segment.raw;
+        var keep = [];
+
+        for (var j = raw.length - 1; j >= 0; j--) {
+          var ch = raw.charAt(j);
+
+          if (ch === "\u200B" || ch === "\uFEFF") continue;
+
+          if (trailing && (ch === " " || ch === "\u00A0" || ch === "\t")) continue;
+
+          trailing = false;
+          keep.push(j);
+        }
+
+        keep.reverse();
+        segment.map = keep;
+        segment.text = keep.map(function (index) {
+          return raw.charAt(index);
+        }).join("");
+      }
     },
 
     // Tag-driven rather than computed: this runs against detached and
@@ -7748,6 +7792,20 @@
         if (segments[i].node) return segments[i];
       }
       return null;
+    },
+
+    // True when every character of this node is part of the document, so real
+    // offsets and shared offsets mean the same thing inside it.
+    _fullyVisible: function (node) {
+      var segments = this._visibleSegments();
+
+      for (var i = 0; i < segments.length; i++) {
+        if (segments[i].node === node) {
+          return segments[i].map.length === (segments[i].raw || "").length;
+        }
+      }
+
+      return false;
     },
 
     _visibleText: function (root) {
@@ -7830,7 +7888,13 @@
 
         count += pendingBreaks;
         pendingBreaks = 0;
-        count += this._visibleChars(segment.raw.slice(0, take)).length;
+
+        // How many of this segment's visible characters lie before the caret.
+        var seen = 0;
+        for (var m = 0; m < segment.map.length; m++) {
+          if (segment.map[m] < take) seen++;
+        }
+        count += seen;
 
         if (reached) break;
       }
@@ -7871,9 +7935,10 @@
       if (point.offset + remove > point.node.nodeValue.length) return false;
 
       // `remove` counts visible characters and replaceData counts real ones.
-      // They differ wherever a placeholder is sitting in this node, so leave
-      // those to the slow path rather than deleting the wrong span.
-      if (this._visibleChars(point.node.nodeValue) !== point.node.nodeValue) return false;
+      // They part company wherever this node holds something the document does
+      // not — a placeholder, or whitespace at the end of a line — so those are
+      // left to the slow path rather than writing over the wrong span.
+      if (!this._fullyVisible(point.node)) return false;
 
       try {
         point.node.replaceData(point.offset, remove, insert);
