@@ -613,6 +613,7 @@ defmodule Leaf do
     {:ok,
      socket
      |> assign(:collab_revision, revision)
+     |> assign(:collab_settled_seq, Map.get(assigns, :seq))
      |> push_event("leaf-revision:#{socket.assigns.id}", %{
        revision: revision,
        # Which of this editor's own edits this settles. Until an edit is
