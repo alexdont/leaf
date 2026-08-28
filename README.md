@@ -14,6 +14,7 @@ Visual WYSIWYG + Obsidian-style hybrid live preview + markdown editor for Phoeni
 - **Drag-and-drop reordering**: drag any block element (headings, paragraphs, lists, images, blockquotes, code blocks) to rearrange content
 - **Resizable**: drag the bottom-right grip to change height; double-click the grip to auto-fit to content
 - **Spoilers**: Discord-style `||hidden||` markdown that renders as a click-to-reveal censored block in published content
+- **Live editing** (optional): several people in one document, each other's carets and selections visible, edits merged as they cross on the wire — one call to wire up, and nothing at all when unused
 - Content syncs between modes via [Earmark](https://hex.pm/packages/earmark) and client-side HTML→Markdown conversion
 - No npm dependencies — vendored JS bundle
 
@@ -340,6 +341,14 @@ def handle_info({:leaf_flushed, %{editor_id: id, ref: ref, markdown: md}}, socke
 end
 ```
 
+Live editing adds `{:leaf_operation, …}`, `{:leaf_awareness, …}`,
+`{:leaf_ready, …}` and `{:leaf_resync, …}`, answered with the `:apply_operation`,
+`:peer_cursors` and `:revision` commands. `Leaf.Collab.join/2` handles all of
+them — see "Live editing". Handle them yourself only if you are replacing that
+wholesale; placing edits that crossed on the wire is harder than it looks, and
+getting it slightly wrong shows up as somebody's typing landing a character or
+two from where they put it.
+
 ### Flushing (save before navigate)
 
 `action: :flush` tells the client to push its pending keystrokes immediately.
@@ -389,6 +398,146 @@ send_update(Leaf,
   results: [%{value: "elixir", label: "#elixir", sublabel: "12 posts", icon: "hero-hashtag"}]
 )
 ```
+
+## Live editing
+
+Several people in one document at once. Off unless you ask for it: an editor
+that has not been told to collaborate measures nothing, sends nothing, and
+listens for nothing.
+
+### Wiring it up
+
+Start a room for the document. One room per document — a note, a page, a draft:
+
+```elixir
+# In your application supervisor, or wherever you supervise per-document
+# processes. A vault would start one per note, on demand.
+{Leaf.Collab.Room,
+ name: MyApp.Notes.room_name(id),
+ pubsub: MyApp.PubSub,
+ document_id: id,
+ initial_content: File.read!(path),
+ store: MyApp.NoteStore}
+```
+
+Then join it from the LiveView:
+
+```elixir
+def mount(%{"id" => id}, _session, socket) do
+  {:ok,
+   Leaf.Collab.join(socket,
+     room: MyApp.Notes.room_name(id),
+     editor_id: "note-editor",
+     identity: %{name: socket.assigns.current_user.name}
+   )}
+end
+```
+
+and hand the editor what `join/2` gave you:
+
+```heex
+<.leaf_editor
+  id="note-editor"
+  content={@leaf_collab.content}
+  collaboration={@leaf_collab.collaboration}
+/>
+```
+
+That is the whole integration. `join/2` attaches a `handle_info` hook, so you
+write no message handling of your own and your existing `handle_info` clauses
+are left alone.
+
+### What `join/2` puts in your assigns
+
+| | |
+|---|---|
+| `@leaf_collab.content` | the document as it stands |
+| `@leaf_collab.collaboration` | what the editor needs; pass it straight through |
+| `@leaf_collab.people` | everyone with a caret in the document — `%{id, label, color, offset, anchor}` |
+| `@leaf_collab.activity` | recent edits, newest first, if you want to show a feed |
+| `@leaf_collab.revision` | which version the document is on |
+
+### Who is editing
+
+`identity` is `%{name:, color:}` and both are optional, because you may
+genuinely not know who is editing — a public page, a draft nobody has signed
+in for. Give a name and everyone sees it on that person's caret and in
+`@leaf_collab.people`; give nothing and a short identifier and a colour from a
+palette stand in.
+
+### Carets and selections
+
+Everyone's caret is drawn in the text in their colour, with their name on it.
+So is whatever they have selected, which is the more useful thing to know
+before somebody changes it. Both move with the text as edits arrive, rather
+than pointing at whatever has since taken their place.
+
+Nothing is added to the editable content: the carets are drawn on a layer of
+their own, so they cannot end up in the document.
+
+### Where documents live
+
+A room holds a document while people are editing it and dies with the process.
+Anything worth keeping needs somewhere to go, and where is your decision:
+
+```elixir
+defmodule MyApp.NoteStore do
+  @behaviour Leaf.Collab.Store
+
+  @impl true
+  def load(id), do: MyApp.Notes.read(id)
+
+  # Called on every change. For a store cheap enough to write to constantly,
+  # so a crash costs seconds rather than a session. Make it a no-op if you
+  # have no such store.
+  @impl true
+  def save(id, snapshot), do: MyApp.Notes.record(id, snapshot)
+
+  # Called when the writing pauses, at a bounded interval while it continues,
+  # and once more on the way down. For the expensive, canonical copy.
+  @impl true
+  def flush(id, snapshot), do: MyApp.Notes.write(id, snapshot)
+end
+```
+
+`Leaf.Collab.Store.File` ships as a working implementation for a vault of
+markdown files: with nobody editing, the `.md` file is the document. It records
+the hash it read and checks it before writing, so a note edited outside the
+session is answered with `{:error, :conflict}` rather than overwritten. A room
+that gets that keeps the document and stops flushing rather than destroying
+somebody's work.
+
+`Leaf.Collab.Store.None` is the default and keeps nothing — right for a scratch
+pad, and an honest answer for a host that has not said where documents live.
+
+### What it costs when you are not using it
+
+Nothing. No coordinates measured, no fingerprints taken, no selection listener
+attached. On an 18,000-character document, collaboration adds about 1.5ms per
+keystroke to the ~15ms the editor already spent converting to markdown.
+
+### When something looks wrong
+
+`debug: true` on `join/2` turns on a running account of what every session
+believes it is holding — see `Leaf.Collab.Log`. It fingerprints the whole
+document on every keystroke, so it is for finding a problem rather than for
+running with.
+
+Two sessions can hold the same document and still disagree about how many
+characters are in it, which is what misplaces a caret and is invisible from
+either side alone. The log notices that, asks both for the text they are
+counting, and names the character they stop agreeing on.
+
+### What it does not do
+
+Edits are text operations rebased against each other, not a CRDT. Two people
+typing in different places, or different words, merge exactly. Two people
+changing *the same characters* at the same instant have no answer that keeps
+both intentions: everyone converges on the same text, but somebody's keystroke
+loses.
+
+Starting and supervising rooms is yours, as is deciding there is only one per
+document across a cluster. Leaf has no opinion about how many nodes you run.
 
 ## Gettext (optional)
 

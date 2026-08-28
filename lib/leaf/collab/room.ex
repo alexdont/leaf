@@ -42,6 +42,32 @@ defmodule Leaf.Collab.Room do
   # Enough to tell people apart at a glance without a colour picker.
   @palette ~w(#e11d48 #2563eb #16a34a #d97706 #9333ea #0891b2)
 
+  @doc """
+  Start a room for one document.
+
+  One per document, started and supervised by the host — a vault would start
+  one per note, on demand, and stop it when everybody has left.
+
+  Options:
+
+    * `:name` — how to reach it. Required in practice: every other function
+      names the room it means.
+    * `:pubsub` — your `Phoenix.PubSub`, how the sessions in this document
+      hear about each other.
+    * `:document_id` — what to call this document when talking to the store.
+    * `:initial_content` — what an empty document contains. The store wins if
+      it has anything, so this is the text for a document nobody has written
+      yet.
+    * `:store` — where the document lives; see `Leaf.Collab.Store`. Defaults to
+      `Leaf.Collab.Store.None`, which keeps nothing.
+    * `:flush_after` — how long a pause in the writing counts as finished, in
+      milliseconds. Defaults to 2 seconds.
+    * `:flush_at_most_every` — how long writing that never pauses may go
+      unwritten. Defaults to 15 seconds.
+
+  Stop it rather than killing it: the last thing a room does is write down what
+  it was holding.
+  """
   def start_link(opts) do
     GenServer.start_link(
       __MODULE__,
