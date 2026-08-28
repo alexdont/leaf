@@ -2,11 +2,12 @@
 
 // A line break in the middle of a paragraph.
 //
-// It used to serialize as a bare newline, which is a SOFT break: markdown
-// renders it back as a space, so the break was lost on every round trip. In a
-// shared document that meant pressing Enter did nothing visible to anyone else
-// until a second Enter turned it into a paragraph — and on reload it was gone
-// for the author too.
+// The host renders with hardbreaks on, so a plain newline in the markdown comes
+// back as a <br> and the round trip is stable. What was missing is that the
+// <br> occupied no position in the coordinates sessions share: pressing Enter
+// changed the markdown but not, as far as the editor could tell, the text — so
+// there was nothing for a peer to apply and the break did not arrive until a
+// second one turned it into a paragraph.
 
 const { test } = require("node:test");
 const assert = require("node:assert");
@@ -22,12 +23,13 @@ function receive(html) {
   return e;
 }
 
-test("a break with text after it becomes a hard break", { skip: dom.skip }, () => {
+test("a break serializes as the newline the host renders back", { skip: dom.skip }, () => {
   const e = dom.editor("<p>a<br>b</p>", "hybrid");
 
-  // Backslash-newline, not a bare newline: the bare one is a soft break and
-  // renders back as a space.
-  assert.equal(e._currentMarkdown(), "a\\\nb");
+  // A plain newline. Writing an explicit hard break instead would serialize
+  // the same document one character longer than the one the host holds, and
+  // the first keystroke after loading would be refused.
+  assert.equal(e._currentMarkdown(), "a\nb");
 
   e.cleanup();
 });
@@ -99,7 +101,7 @@ test("the newline html puts after a break is not text", { skip: dom.skip }, () =
   const e = receive("<p>a<br />\nb</p>");
 
   assert.equal(e._visibleText(e._visualEl), "a\nb");
-  assert.equal(e._currentMarkdown(), "a\\\nb");
+  assert.equal(e._currentMarkdown(), "a\nb");
 
   e.cleanup();
 });
@@ -108,7 +110,7 @@ test("a paragraph break and a line break are told apart", { skip: dom.skip }, ()
   const line = dom.editor("<p>a<br>b</p>", "hybrid");
   const para = dom.editor("<p>a</p><p>b</p>", "hybrid");
 
-  assert.equal(line._currentMarkdown(), "a\\\nb");
+  assert.equal(line._currentMarkdown(), "a\nb");
   assert.equal(para._currentMarkdown(), "a\n\nb");
 
   // They look the same on screen, and must: one line break either way.
@@ -116,4 +118,38 @@ test("a paragraph break and a line break are told apart", { skip: dom.skip }, ()
 
   line.cleanup();
   para.cleanup();
+});
+
+// The regression this file exists to prevent a repeat of.
+//
+// A host stores markdown and renders it for the editor. If the editor
+// serializes that same document to anything other than what the host is
+// holding, the first keystroke after loading describes a document nobody has
+// and is refused — the warning, and a caret thrown across the page, from
+// having typed one character into a document nobody had touched.
+test("the editor serializes a rendered document back to what was stored", { skip: dom.skip }, () => {
+  // What a host stores, and what it renders with hardbreaks on. Verified
+  // against the running server.
+  const stored = "one\ntwo\n\n- three\n- four";
+  const rendered =
+    "<p>one<br />\ntwo</p>\n<ul>\n<li>three</li>\n<li>four</li>\n</ul>\n";
+
+  const e = receive(rendered);
+
+  assert.equal(
+    e._currentMarkdown(),
+    stored,
+    "a document that came from the host must go back to the host unchanged"
+  );
+
+  e.cleanup();
+});
+
+test("a soft break in stored markdown is not rewritten on the way back", { skip: dom.skip }, () => {
+  const e = receive("<p>a<br />\nb</p>");
+
+  assert.equal(e._currentMarkdown().length, "a\nb".length, "no character may be added");
+  assert.equal(e._currentMarkdown(), "a\nb");
+
+  e.cleanup();
 });

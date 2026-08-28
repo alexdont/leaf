@@ -920,11 +920,12 @@
           return "";
         }
 
-        // A real break in the text needs to be a HARD break in the markdown.
-        // A bare newline is a soft break, which renders back as a space — so
-        // the line break was lost on every round trip, and a peer never saw it
-        // until a second one turned it into a paragraph.
-        return isHardBreak(node) ? "\\\n" : "\n";
+        // A newline, not a backslash-newline. The host renders with hardbreaks
+        // on, so a newline already comes back as a <br> — writing an explicit
+        // hard break instead would serialize the same document one character
+        // longer than the one the host is holding, and the first keystroke
+        // after loading would be refused as an edit to a document nobody has.
+        return "\n";
 
       case "strong":
       case "b":
