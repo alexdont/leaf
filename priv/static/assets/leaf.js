@@ -3679,6 +3679,13 @@
       var segments = this._visibleSegments();
       var count = 0;
       var last = null;
+      // Whether any line break has gone by. An offset that runs past every
+      // line with text in it, having crossed a break, belongs to a line with
+      // nothing on it — a bullet just made with Enter — and the end of the
+      // line above is not where it goes. Not reset when a line does have text:
+      // an offset past the end of everything is out of range whichever line it
+      // followed, and declining is the safer answer either way.
+      var pastBreak = false;
 
       for (var i = 0; i < segments.length; i++) {
         var segment = segments[i];
@@ -3689,6 +3696,7 @@
             if (next) return { node: next.node, offset: 0, boundary: true };
           }
           count += 1;
+          pastBreak = true;
           continue;
         }
 
@@ -3706,7 +3714,12 @@
         last = segment.node;
       }
 
-      if (last) return { node: last, offset: last.nodeValue.length, boundary: false };
+      // Nothing matched, so the offset is past the end of everything with text
+      // in it. If a line break got us here it belongs to an empty line — a
+      // bullet just made with Enter and not yet typed into — and the end of
+      // the line above is emphatically not where it goes. Saying so lets the
+      // caller decline rather than write into the wrong item.
+      if (last) return { node: last, offset: last.nodeValue.length, boundary: pastBreak };
       return null;
     },
 
@@ -7706,11 +7719,20 @@
 
       var rendered = payload.resync ? null : this._rebaseOverPending(payload.rendered);
 
-      // Our own edits are still in the air, and this one cannot be placed
-      // against them. The host's copy does not contain them either, so taking
-      // it would throw them away — wait until ours are acknowledged and settle
-      // it from the host then.
-      if (!payload.resync && !rendered && this._pending && this._pending.length) {
+      // Can this be written into the text as it stands, or does it need the
+      // host's html? Asked before anything is changed, because the answer
+      // decides whether our own unsent work is about to be thrown away.
+      var placeable =
+        !payload.resync &&
+        rendered &&
+        this._mode !== "markdown" &&
+        this._mode !== "html" &&
+        this._canFastPath(rendered);
+
+      // Our own edits are still in the air, and this one needs the host's copy
+      // — which does not contain them. Taking it would throw them away, so
+      // wait until ours are acknowledged and settle it from the host then.
+      if (!payload.resync && !placeable && this._pending && this._pending.length) {
         this._needsResync = true;
         if (typeof payload.revision === "number") this._collabRevision = payload.revision;
         return;
@@ -7733,7 +7755,7 @@
         if (this._mode === "markdown") {
           this._applyRemoteToTextarea(this._getMarkdownTextarea(), payload);
         } else if (this._mode !== "html") {
-          if (this._applyRemoteFastPath(local)) {
+          if (placeable && this._applyRemoteFastPath(local)) {
             // The caret moved itself: replaceData adjusts live ranges, so this
             // user's selection is already where it should be.
             visual = rendered;
@@ -8063,19 +8085,24 @@
     // Deliberately narrow. Anything that could be structure (a newline, an
     // edit spanning more than the one text node) falls through to the slow
     // path, where the server's HTML is the authority.
-    _applyRemoteFastPath: function (payload) {
-      var rendered = payload && payload.rendered;
+    // Whether an edit can be written straight into the text, asked separately
+    // from doing it: the caller has to know before it changes anything,
+    // because the alternative replaces the document with the host's copy and
+    // that copy does not contain work of ours still in flight.
+    _canFastPath: function (rendered) {
       if (!rendered || !this._visualEl) return false;
       if (this._mode === "markdown" || this._mode === "html") return false;
 
       var insert = rendered.insert || "";
       var remove = rendered.remove || 0;
       if (!insert && !remove) return false;
+      // A newline is structure, and structure is the host's to describe.
       if (insert.indexOf("\n") !== -1) return false;
 
       var point = this._visibleNodeAt(rendered.at || 0);
       if (!point || !point.node || point.node.nodeType !== 3) return false;
-      // On a line break, belonging to neither line — the slow path decides.
+      // On a line break, belonging to neither line — including an empty line
+      // with nothing to write into, such as a bullet just made with Enter.
       if (point.boundary) return false;
       if (this._inSourceMarker(point.node)) return false;
 
@@ -8087,7 +8114,16 @@
       // They part company wherever this node holds something the document does
       // not — a placeholder, or whitespace at the end of a line — so those are
       // left to the slow path rather than writing over the wrong span.
-      if (!this._fullyVisible(point.node)) return false;
+      return this._fullyVisible(point.node);
+    },
+
+    _applyRemoteFastPath: function (payload) {
+      var rendered = payload && payload.rendered;
+      if (!this._canFastPath(rendered)) return false;
+
+      var insert = rendered.insert || "";
+      var remove = rendered.remove || 0;
+      var point = this._visibleNodeAt(rendered.at || 0);
 
       try {
         point.node.replaceData(point.offset, remove, insert);

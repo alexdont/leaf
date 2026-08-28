@@ -186,3 +186,91 @@ test("a document replaced by the host counts the same as one loaded", { skip: do
   loaded.cleanup();
   replaced.cleanup();
 });
+
+// ---------------------------------------------------------------------------
+// A bullet just made with Enter
+// ---------------------------------------------------------------------------
+//
+// Press Enter in a list and the new item exists before anything is typed into
+// it. On the receiving side it is a line with no text in it, so an offset just
+// past the break has nothing to point at — and the end of the line ABOVE is
+// emphatically not where the next character goes. It went there anyway: the
+// writer watched their typing arrive on the previous bullet.
+
+test("an offset on a new empty bullet is not the end of the one above", { skip: dom.skip }, () => {
+  const e = receive("<ul>\n<li>item</li>\n<li></li>\n</ul>\n");
+
+  assert.equal(e._visibleText(e._visualEl), "item\n", "the new line counts");
+
+  // Whether it reports a boundary or an unwritable node depends on whether the
+  // empty item picked up a placeholder, and both happen. What must never
+  // happen is landing on the line above.
+  const point = e._visibleNodeAt(5);
+  assert.notEqual(
+    point.node.nodeValue,
+    "item",
+    "the offset belongs to the new line, not the end of the previous one"
+  );
+
+  e.cleanup();
+});
+
+// Without a placeholder there is no node on that line at all, and the fallback
+// used to hand back the previous line's text node — which is how typing ended
+// up on the bullet above.
+test("with nothing at all on the new line, the offset says so", { skip: dom.skip }, () => {
+  const e = dom.editor("<ul><li>item</li><li></li></ul>", "hybrid");
+
+  const point = e._visibleNodeAt(5);
+  assert.equal(point.boundary, true, "past a break, with no line to point into");
+
+  e.cleanup();
+});
+
+test("typing into a new bullet does not land on the previous one", { skip: dom.skip }, () => {
+  const e = receive("<ul>\n<li>item</li>\n<li></li>\n</ul>\n");
+
+  assert.equal(
+    e._applyRemoteFastPath({ rendered: { at: 5, remove: 0, insert: "x" } }),
+    false,
+    "there is no text node on that line to write into"
+  );
+
+  assert.equal(
+    e._visibleText(e._visualEl),
+    "item\n",
+    "and nothing may have been written onto the line above"
+  );
+
+  e.cleanup();
+});
+
+test("the same holds when the empty bullet has a placeholder", { skip: dom.skip }, () => {
+  // Whether an empty item carries a placeholder depends on what that session
+  // has been doing, so both shapes have to behave the same.
+  const e = receive("<ul>\n<li>item</li>\n<li>​</li>\n</ul>\n");
+
+  assert.equal(e._visibleText(e._visualEl), "item\n");
+  assert.equal(
+    e._applyRemoteFastPath({ rendered: { at: 5, remove: 0, insert: "x" } }),
+    false
+  );
+  assert.equal(e._visibleText(e._visualEl), "item\n");
+
+  e.cleanup();
+});
+
+test("an offset inside a line that has text still writes there", { skip: dom.skip }, () => {
+  const e = receive("<ul>\n<li>item</li>\n<li>next</li>\n</ul>\n");
+
+  // Start of "next" is offset 5: past the break, but onto a line with text.
+  assert.equal(
+    e._applyRemoteFastPath({ rendered: { at: 5, remove: 0, insert: "X" } }),
+    true,
+    "a line with something in it is still a place to write"
+  );
+
+  assert.equal(e._visibleText(e._visualEl), "item\nXnext");
+
+  e.cleanup();
+});

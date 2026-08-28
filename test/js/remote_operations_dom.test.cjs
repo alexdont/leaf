@@ -646,3 +646,49 @@ test("a known version is sent as given, including zero", { skip: dom.skip }, () 
 
   e.cleanup();
 });
+
+// Structure needs the host's html, and the host's html does not contain work
+// of ours it has not been told about yet. Deciding that before touching the
+// document is the difference between waiting a moment and losing a sentence.
+test("a structural edit waits rather than discard our unsent work", { skip: dom.skip }, () => {
+  const e = collabEditor("<p>hello</p>");
+
+  typeLocally(e, 0, "MINE");
+  e._emitOperation(e._currentMarkdown());
+  assert.equal(e._pending.length, 1);
+
+  // A rendered splice this time, but one carrying a line break: it cannot be
+  // written into a text node, so it needs the html — which lacks our MINE.
+  e._applyRemoteOperation({
+    content: "the host's copy, without MINE",
+    html: "<p>the host's copy, without MINE</p>",
+    at: 0,
+    remove: 0,
+    insert: "\n",
+    rendered: { at: 0, remove: 0, insert: "\n" },
+  });
+
+  assert.match(e._visibleText(e._visualEl), /MINE/, "our typing must still be here");
+  assert.equal(e._needsResync, true, "and a settle-up queued for once ours has landed");
+
+  e.cleanup();
+});
+
+test("with nothing of ours in the air, a structural edit applies at once", { skip: dom.skip }, () => {
+  // Derived from the DOM, so the flush of unsent local work finds nothing —
+  // overriding it to the post-apply text would look like the user typed it.
+  const e = collabEditor("<p>hello</p>");
+
+  e._applyRemoteOperation({
+    content: "hello\n\nthere",
+    html: "<p>hello</p><p>there</p>",
+    at: 5,
+    remove: 0,
+    insert: "\n\nthere",
+    rendered: { at: 5, remove: 0, insert: "\nthere" },
+  });
+
+  assert.equal(e._visualEl.querySelectorAll("p").length, 2, "no reason to wait");
+
+  e.cleanup();
+});
