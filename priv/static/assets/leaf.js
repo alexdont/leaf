@@ -3420,31 +3420,68 @@
       if (!this._collabAwareness) return;
 
       var offset = null;
+      // Where the selection started. Equal to the caret when nothing is
+      // selected; the two together are what lets a peer draw the range and put
+      // the caret on the end the person is actually moving.
+      var anchor = null;
       var focused = !blurred;
 
       if (focused) {
         if (this._mode === "markdown") {
           var ta = this._getMarkdownTextarea();
-          offset = ta && document.activeElement === ta ? ta.selectionStart : null;
+
+          if (ta && document.activeElement === ta) {
+            offset = ta.selectionEnd;
+            anchor = ta.selectionStart;
+            // A textarea does not say which end is being dragged, so take the
+            // caret to be at the end nearest the last known one.
+            if (ta.selectionDirection === "backward") {
+              offset = ta.selectionStart;
+              anchor = ta.selectionEnd;
+            }
+          }
         } else if (this._visualEl) {
           var sel = window.getSelection();
+
           if (sel && sel.rangeCount && this._visualEl.contains(sel.getRangeAt(0).startContainer)) {
             var range = sel.getRangeAt(0);
-            offset = this._visibleOffset(range.startContainer, range.startOffset);
+            offset = this._visibleOffset(range.endContainer, range.endOffset);
+            anchor = this._visibleOffset(range.startContainer, range.startOffset);
+
+            // getSelection reports the range in document order; anchorNode says
+            // which end the person is holding.
+            if (sel.anchorNode && sel.focusNode && !sel.isCollapsed) {
+              var anchorAt = this._visibleOffset(sel.anchorNode, sel.anchorOffset);
+              var headAt = this._visibleOffset(sel.focusNode, sel.focusOffset);
+              anchor = anchorAt;
+              offset = headAt;
+            }
           }
         }
       }
 
-      if (offset === null) focused = false;
+      if (offset === null) {
+        focused = false;
+        anchor = null;
+      }
+
       // Nothing changed — do not spend a round trip saying so.
-      if (focused === this._lastAwarenessFocused && offset === this._lastAwarenessOffset) return;
+      if (
+        focused === this._lastAwarenessFocused &&
+        offset === this._lastAwarenessOffset &&
+        anchor === this._lastAwarenessAnchor
+      ) {
+        return;
+      }
 
       this._lastAwarenessFocused = focused;
       this._lastAwarenessOffset = offset;
+      this._lastAwarenessAnchor = anchor;
 
       this.pushEventTo(this.el, "awareness", {
         editor_id: this._editorId,
         offset: offset,
+        anchor: anchor,
         focused: focused,
         debug: this._collabDebug ? this._debugState() : null
       });
@@ -3511,6 +3548,12 @@
 
       for (var i = 0; i < this._peerCursors.length; i++) {
         var cursor = this._peerCursors[i];
+
+        // Their selection first, so their caret is drawn on top of it.
+        if (typeof cursor.anchor === "number" && cursor.anchor !== cursor.offset) {
+          this._drawSelection(layer, host, cursor);
+        }
+
         var rect = this._rectAtVisibleOffset(cursor.offset);
         if (!rect) continue;
 
@@ -3547,6 +3590,54 @@
         }
 
         layer.appendChild(caret);
+      }
+    },
+
+    // One box per line the selection covers, which is what getClientRects
+    // gives for a range: a selection running over three lines is three boxes,
+    // not one tall one.
+    _drawSelection: function (layer, host, cursor) {
+      var rects = this._rectsBetween(cursor.anchor, cursor.offset);
+
+      for (var i = 0; i < rects.length; i++) {
+        var rect = rects[i];
+        if (!rect.width && !rect.height) continue;
+
+        var band = document.createElement("div");
+        band.className = "leaf-peer-selection";
+
+        this._style(band, {
+          position: "absolute",
+          pointerEvents: "none",
+          borderRadius: "2px",
+          backgroundColor: cursor.color || "#888",
+          // Faint enough to read the words through. This sits behind nothing —
+          // it is on the overlay — so the text has to show through it.
+          opacity: "0.22",
+          left: rect.left - host.left + "px",
+          top: rect.top - host.top + "px",
+          width: rect.width + "px",
+          height: rect.height + "px"
+        });
+
+        layer.appendChild(band);
+      }
+    },
+
+    _rectsBetween: function (from, to) {
+      if (!this._visualEl || typeof from !== "number" || typeof to !== "number") return [];
+
+      var start = this._visibleNodeAt(Math.min(from, to));
+      var end = this._visibleNodeAt(Math.max(from, to));
+      if (!start || !end) return [];
+
+      try {
+        var range = document.createRange();
+        range.setStart(start.node, start.offset);
+        range.setEnd(end.node, end.offset);
+        return Array.prototype.slice.call(range.getClientRects());
+      } catch (e) {
+        return [];
       }
     },
 
@@ -7660,7 +7751,13 @@
           for (var i = 0; i < this._peerCursors.length; i++) {
             var peer = this._peerCursors[i];
             shifted.push(
-              Object.assign({}, peer, { offset: this._shiftOffset(peer.offset || 0, visual) })
+              Object.assign({}, peer, {
+                offset: this._shiftOffset(peer.offset || 0, visual),
+                anchor:
+                  typeof peer.anchor === "number"
+                    ? this._shiftOffset(peer.anchor, visual)
+                    : peer.anchor
+              })
             );
           }
           this._peerCursors = shifted;

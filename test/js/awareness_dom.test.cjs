@@ -168,6 +168,8 @@ test("a caret is reported once per position, not once per selectionchange", { sk
   assert.deepEqual(sent[0][1], {
     editor_id: "test-editor",
     offset: 4,
+    // Equal to the caret: nothing is selected, so a peer draws no range.
+    anchor: 4,
     focused: true,
     debug: null,
   });
@@ -196,6 +198,7 @@ test("leaving the editor reports no caret at all", { skip: dom.skip }, () => {
   assert.deepEqual(sent[1], {
     editor_id: "test-editor",
     offset: null,
+    anchor: null,
     focused: false,
     debug: null,
   });
@@ -492,6 +495,155 @@ test("the shortcut declines a line ending in invisible whitespace", { skip: dom.
     "writing with shared offsets into a node that holds untracked characters is wrong"
   );
   assert.equal(e._visibleText(e._visualEl), "word", "and nothing may have been written");
+
+  e.cleanup();
+});
+
+// ---------------------------------------------------------------------------
+// Selections
+// ---------------------------------------------------------------------------
+//
+// A caret says where somebody is. A selection says what they are about to
+// change, which is the more useful thing to know before they change it.
+
+function select(e, from, to) {
+  const start = e._visibleNodeAt(from);
+  const end = e._visibleNodeAt(to);
+  const range = document.createRange();
+  range.setStart(start.node, start.offset);
+  range.setEnd(end.node, end.offset);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  return sel;
+}
+
+test("a selection is reported as both of its ends", { skip: dom.skip }, () => {
+  const e = awarenessEditor("<p>hello world</p>");
+  const sent = [];
+  e.pushEventTo = (_el, _name, payload) => sent.push(payload);
+
+  select(e, 6, 11);
+  e._emitAwareness();
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].anchor, 6, "where the selection began");
+  assert.equal(sent[0].offset, 11, "and where the caret is");
+
+  e.cleanup();
+});
+
+test("moving only the far end of a selection is reported", { skip: dom.skip }, () => {
+  const e = awarenessEditor("<p>hello world</p>");
+  const sent = [];
+  e.pushEventTo = (_el, _name, payload) => sent.push(payload);
+
+  select(e, 6, 11);
+  e._emitAwareness();
+
+  // The anchor has not moved, so a check on the caret alone would say nothing
+  // happened and the peers would keep drawing the old range.
+  select(e, 6, 8);
+  e._emitAwareness();
+
+  assert.equal(sent.length, 2, "a changed selection is a change worth sending");
+  assert.equal(sent[1].anchor, 6);
+  assert.equal(sent[1].offset, 8);
+
+  e.cleanup();
+});
+
+// Dragging the other end of a selection leaves the caret where it was. A check
+// on the caret alone would call that no change, and the peers would go on
+// drawing a range nobody has selected any more.
+test("moving only the near end of a selection is reported", { skip: dom.skip }, () => {
+  const e = awarenessEditor("<p>hello world</p>");
+  const sent = [];
+  e.pushEventTo = (_el, _name, payload) => sent.push(payload);
+
+  select(e, 6, 11);
+  e._emitAwareness();
+
+  select(e, 8, 11);
+  e._emitAwareness();
+
+  assert.equal(sent.length, 2, "the selection changed, so it has to be sent");
+  assert.equal(sent[1].anchor, 8);
+  assert.equal(sent[1].offset, 11, "and the caret has genuinely not moved");
+
+  e.cleanup();
+});
+
+test("a peer's selection is drawn behind their caret", { skip: dom.skip }, () => {
+  const e = withFakeLayout(awarenessEditor("<p>hello world</p>"));
+  // jsdom lays nothing out, so a range reports no boxes. One line, one box.
+  e._rectsBetween = () => [{ left: 10, top: 20, width: 40, height: 16 }];
+
+  e._renderPeerCursors([
+    { id: "abc", label: "abc", color: "#e11d48", offset: 11, anchor: 6 },
+  ]);
+
+  const layer = e.el.querySelector(".leaf-peer-cursors");
+  const bands = layer.querySelectorAll(".leaf-peer-selection");
+  const carets = layer.querySelectorAll(".leaf-peer-caret");
+
+  assert.equal(bands.length, 1, "the range they have selected");
+  assert.equal(carets.length, 1, "and the caret on the end they are holding");
+
+  // Drawn faint: the words underneath have to stay readable.
+  assert.ok(Number(bands[0].style.opacity) < 0.5);
+
+  e.cleanup();
+});
+
+test("no selection means no band, only a caret", { skip: dom.skip }, () => {
+  const e = withFakeLayout(awarenessEditor("<p>hello world</p>"));
+  e._rectsBetween = () => [{ left: 10, top: 20, width: 40, height: 16 }];
+
+  e._renderPeerCursors([{ id: "abc", label: "abc", color: "#f00", offset: 4, anchor: 4 }]);
+
+  const layer = e.el.querySelector(".leaf-peer-cursors");
+  assert.equal(layer.querySelectorAll(".leaf-peer-selection").length, 0);
+  assert.equal(layer.querySelectorAll(".leaf-peer-caret").length, 1);
+
+  e.cleanup();
+});
+
+test("a selection covering three lines is drawn as three bands", { skip: dom.skip }, () => {
+  const e = withFakeLayout(awarenessEditor("<p>one</p><p>two</p><p>three</p>"));
+  e._rectsBetween = () => [
+    { left: 0, top: 0, width: 30, height: 16 },
+    { left: 0, top: 16, width: 30, height: 16 },
+    { left: 0, top: 32, width: 20, height: 16 },
+  ];
+
+  e._renderPeerCursors([{ id: "abc", label: "abc", color: "#f00", offset: 12, anchor: 0 }]);
+
+  assert.equal(
+    e.el.querySelectorAll(".leaf-peer-selection").length,
+    3,
+    "one box per line, not one tall box over the paragraphs between"
+  );
+
+  e.cleanup();
+});
+
+test("a remote edit moves a peer's selection as well as their caret", { skip: dom.skip }, () => {
+  const e = awarenessEditor("<p>hello world</p>");
+  e._currentMarkdown = () => "big hello world";
+  e._peerCursors = [{ id: "abc", label: "abc", color: "#f00", offset: 11, anchor: 6 }];
+
+  e._applyRemoteOperation({
+    content: "big hello world",
+    html: "<p>big hello world</p>",
+    at: 0,
+    remove: 0,
+    insert: "big ",
+    rendered: { at: 0, remove: 0, insert: "big " },
+  });
+
+  assert.equal(e._peerCursors[0].offset, 15);
+  assert.equal(e._peerCursors[0].anchor, 10, "or the range would cover different words");
 
   e.cleanup();
 });

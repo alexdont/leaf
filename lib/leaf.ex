@@ -2625,6 +2625,10 @@ defmodule Leaf do
        %{
          editor_id: socket.assigns.id,
          offset: Map.get(params, "offset"),
+         # Where the selection began. Equal to the caret when nothing is
+         # selected; the pair is what a peer needs to draw the range and put
+         # the caret on the end being moved.
+         anchor: Map.get(params, "anchor"),
          focused: Map.get(params, "focused", true) == true,
          debug: atomize_debug(Map.get(params, "debug"))
        }}
@@ -3698,11 +3702,17 @@ defmodule Leaf do
   defp normalize_rendered(_), do: nil
 
   defp normalize_cursor(cursor) do
+    offset = Map.get(cursor, :offset) || 0
+
     %{
       id: to_string(Map.get(cursor, :id, "")),
+      # Whatever the host calls this person. A session id is a reasonable
+      # fallback and a poor label; hosts with real users pass their names.
       label: to_string(Map.get(cursor, :label, "")),
       color: to_string(Map.get(cursor, :color, "#888")),
-      offset: Map.get(cursor, :offset) || 0
+      offset: offset,
+      # Defaults to the caret, which draws nothing: no selection.
+      anchor: Map.get(cursor, :anchor) || offset
     }
   end
 
