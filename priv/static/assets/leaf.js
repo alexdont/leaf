@@ -844,15 +844,40 @@
     return leading + marker + trimmed + marker + trailing;
   }
 
+  // A <br> is a line break only when something comes after it. The one that
+  // sits at the end of a block is there so the caret has a visible line to
+  // rest on, and an empty paragraph is written <p><br></p> — neither is a
+  // break in the text, and treating them as one puts stray markers in the
+  // markdown.
+  function isHardBreak(node) {
+    if (!node || node.nodeType !== Node.ELEMENT_NODE) return false;
+    if (node.tagName.toLowerCase() !== "br") return false;
+    if (node.hasAttribute && node.hasAttribute("data-leaf-filler")) return false;
+
+    var sibling = node.nextSibling;
+
+    while (sibling) {
+      var text = sibling.nodeType === Node.TEXT_NODE ? sibling.nodeValue : sibling.textContent;
+      if (text && text.replace(/[\s\u200B\uFEFF]/g, "") !== "") return true;
+      sibling = sibling.nextSibling;
+    }
+
+    return false;
+  }
+
   function convertNode(node) {
     if (node.nodeType === Node.TEXT_NODE) {
       // Hybrid-mode keystroke redirects insert U+00A0 for trailing spaces
       // (so HTML doesn't collapse them); normalize back to regular spaces
       // when serializing to markdown. Heading-decoration cursor anchoring
       // sometimes leaves U+200B (ZWSP) — strip those too.
-      return node.textContent
-        .replace(/​/g, "")
-        .replace(/\u00a0/g, " ");
+      var text = node.textContent.replace(/​/g, "").replace(/\u00a0/g, " ");
+
+      // Markup pretty-printing, not text: MDEx writes "<br />\n" and that
+      // newline would otherwise serialize as a second break on the way back.
+      if (isHardBreak(node.previousSibling)) text = text.replace(/^\n/, "");
+
+      return text;
     }
 
     if (node.nodeType !== Node.ELEMENT_NODE) {
@@ -894,7 +919,12 @@
         if (node.hasAttribute && node.hasAttribute("data-leaf-filler")) {
           return "";
         }
-        return "\n";
+
+        // A real break in the text needs to be a HARD break in the markdown.
+        // A bare newline is a soft break, which renders back as a space — so
+        // the line break was lost on every round trip, and a peer never saw it
+        // until a second one turned it into a paragraph.
+        return isHardBreak(node) ? "\\\n" : "\n";
 
       case "strong":
       case "b":
@@ -1783,6 +1813,7 @@
             // with blank lines between items round-trips through here, and
             // the inner `<p>` otherwise traps Enter inside the item.
             this._stripInterBlockWhitespace(this._visualEl);
+            this._stripBreakWhitespace(this._visualEl);
             this._unwrapLooseListItems(this._visualEl);
             this._ensureListItemPlaceholders(this._visualEl);
             this._resolveWikiLinks();
@@ -7277,6 +7308,24 @@
     // bullet looks permanently stuck. These nodes carry no meaning inside
     // these containers (only element children are valid there), so
     // dropping them is safe and leaves the markdown unchanged.
+    // MDEx pretty-prints a newline after every <br />. It is punctuation of
+    // the markup, not of the text: left in place it reads as a second line
+    // break here while the editor that sent it has only one, and the two stop
+    // agreeing about where every later character is.
+    _stripBreakWhitespace: function (root) {
+      if (!root || !root.querySelectorAll) return;
+
+      var breaks = root.querySelectorAll("br");
+
+      for (var i = 0; i < breaks.length; i++) {
+        var next = breaks[i].nextSibling;
+        if (!next || next.nodeType !== 3) continue;
+
+        next.nodeValue = next.nodeValue.replace(/^\n/, "");
+        if (next.nodeValue === "") next.parentNode.removeChild(next);
+      }
+    },
+
     _stripInterBlockWhitespace: function (root) {
       if (!root) return;
       var containers = [root];
@@ -7659,12 +7708,22 @@
 
       while ((node = walker.nextNode())) {
         if (node.nodeType === 1) {
+          // A line break inside a block counts exactly when it serializes as
+          // one, so the coordinates and the markdown agree about where the
+          // lines are.
+          if (isHardBreak(node)) {
+            segments.push({ node: null, text: "\n", raw: "\n" });
+            length += 1;
+            continue;
+          }
+
           // Nothing emitted yet means this is the outermost block opening,
           // not a break between two lines.
           if (length > 0 && this._BLOCK_TAGS.test(node.tagName)) {
             segments.push({ node: null, text: "\n", raw: "\n" });
             length += 1;
           }
+
           continue;
         }
 
@@ -7846,6 +7905,7 @@
       // Same cleanup leaf-set-html does — server HTML arrives pretty-printed,
       // and the stray whitespace nodes break caret placement in lists.
       this._stripInterBlockWhitespace(el);
+      this._stripBreakWhitespace(el);
       this._unwrapLooseListItems(el);
       this._ensureListItemPlaceholders(el);
       this._resolveWikiLinks();
