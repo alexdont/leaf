@@ -2594,6 +2594,20 @@ defmodule Leaf do
   # is the length of the text the splice applies to, so a host holding a
   # document of a different length can tell it has diverged instead of applying
   # an offset that no longer means what it meant.
+  def handle_event("ready", params, socket) do
+    send(
+      self(),
+      {:leaf_ready,
+       %{
+         editor_id: socket.assigns.id,
+         markdown: to_string(Map.get(params, "markdown", "")),
+         revision: Map.get(params, "revision")
+       }}
+    )
+
+    {:noreply, socket}
+  end
+
   def handle_event("debug_state", params, socket) do
     send(self(), {:leaf_debug_state, atomize_debug(params)})
     {:noreply, socket}

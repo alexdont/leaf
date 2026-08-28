@@ -1749,6 +1749,7 @@
       // pending changes on blur (so a host "Save" doesn't lose the last
       // debounced keystrokes).
       this._setupHostEvents();
+      this._announceState();
 
       // Handle commands from LiveView
       this.handleEvent(
@@ -1872,6 +1873,39 @@
         "webkitfullscreenchange",
         this._fullscreenChangeHandler
       );
+    },
+
+    // The socket dropped and came back. The editor kept on working — its
+    // document has moved, and the host's may have moved too, or been restarted
+    // out from under it. Neither can assume anything about the other, so say
+    // what we are holding and let the host settle it.
+    //
+    // Without this the two simply carried on disagreeing: every keystroke
+    // refused, the caret thrown about, until a snapshot happened to arrive and
+    // reconciled it several characters later.
+    reconnected() {
+      this._announceState();
+    },
+
+    // What this editor is holding, and the last version it heard about. Sent
+    // on mount as well: markdown that has been through the editor is not
+    // always character-for-character what the host stored, and it is better to
+    // agree about that before anyone types than to discover it on the first
+    // keystroke.
+    _announceState() {
+      if (!this._collabOperations) return;
+
+      var self = this;
+
+      setTimeout(function () {
+        if (!self.el || !self.el.isConnected) return;
+
+        self.pushEventTo(self.el, "ready", {
+          editor_id: self._editorId,
+          markdown: self._currentMarkdown(),
+          revision: typeof self._collabRevision === "number" ? self._collabRevision : null
+        });
+      }, 0);
     },
 
     updated() {
