@@ -12902,7 +12902,7 @@
         return;
       }
 
-      this._taskGesture = { li: li, x: e.clientX, y: e.clientY };
+      this._taskGesture = { li: li, x: e.clientX, y: e.clientY, detail: e.detail };
     },
 
     _onTaskMouseUp: function (e) {
@@ -12914,6 +12914,16 @@
       if (!li.isConnected) return;
       var box = li.querySelector(".leaf-task-box");
       if (!box) return;
+
+      // A double or triple click is a selection gesture by definition — and
+      // in some browsers the word-selection is not committed yet at the
+      // second mouseup, so "is anything selected?" answers no at exactly the
+      // wrong moment. The corrector then collapsed the fresh selection to
+      // after the box: the highlight still painted, but typing went to a
+      // caret nobody could see. Keyboard-made selections replaced fine,
+      // mouse-made ones died — and only on the first word, the one inside
+      // the box's stranding zone.
+      if (gesture.detail > 1 || e.detail > 1) return;
 
       // Any real movement, or any selection, means this was a drag — the
       // person was selecting, and selecting must win.

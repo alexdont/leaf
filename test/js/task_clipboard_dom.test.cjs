@@ -642,3 +642,77 @@ test("typing diagnostics exist, stay silent unarmed, and are torn down", { skip:
   assert.match(src, /NO INPUT FOLLOWED/, "the abort signal is the whole point");
   assert.match(src, /_typingDiagObserver\.disconnect\(\)/, "observers do not outlive the editor");
 });
+
+// ---------------------------------------------------------------------------
+// Multi-clicks are selections, not gestures
+// ---------------------------------------------------------------------------
+//
+// In some browsers the word-selection is not committed yet at the second
+// mouseup, so "is anything selected?" answers no at exactly the wrong moment
+// — and the stranded-caret corrector collapsed the fresh selection to after
+// the box. The highlight still painted; typing went to a caret nobody could
+// see. Only the first word, the one inside the box's stranding zone, and
+// only by mouse: shift+arrow selections never touch this handler.
+
+test("the second mouseup of a double-click runs no gesture at all", { skip: dom.skip }, () => {
+  const e = dom.editor(
+    '<ul><li class="leaf-task" data-checked="false"><span class="leaf-task-box" contenteditable="false"></span>does yes</li></ul>',
+    "hybrid"
+  );
+  const li = e._visualEl.querySelector("li");
+  const box = li.querySelector(".leaf-task-box");
+  box.getBoundingClientRect = () => ({ left: 30, width: 14, top: 0, height: 14 });
+
+  // The browser that bites: selection still COLLAPSED at mouseup #2.
+  const text = li.lastChild;
+  const r = document.createRange();
+  r.setStart(text, 1);
+  r.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+
+  // caretFromPoint resolving into the stranding zone, as it does for the
+  // first word.
+  e._caretFromPoint = () => ({ node: li, offset: 0 });
+
+  e._onTaskMouseDown(fakeEvent({ target: li, clientX: 50, clientY: 7, detail: 2 }));
+  e._onTaskMouseUp(fakeEvent({ target: li, clientX: 50, clientY: 7, detail: 2 }));
+
+  const after = window.getSelection().getRangeAt(0);
+  assert.equal(after.startContainer, text, "the caret must be exactly where the click left it");
+  assert.equal(after.startOffset, 1, "not corrected away from a selection mid-construction");
+
+  e.cleanup();
+});
+
+test("a single click in the stranding zone still gets corrected", { skip: dom.skip }, () => {
+  const e = dom.editor(
+    '<ul><li class="leaf-task" data-checked="false"><span class="leaf-task-box" contenteditable="false"></span>does yes</li></ul>',
+    "hybrid"
+  );
+  const li = e._visualEl.querySelector("li");
+  const box = li.querySelector(".leaf-task-box");
+  box.getBoundingClientRect = () => ({ left: 30, width: 14, top: 0, height: 14 });
+
+  const r = document.createRange();
+  r.setStart(li, 0);
+  r.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+
+  e._caretFromPoint = () => ({ node: li, offset: 0 });
+
+  e._onTaskMouseDown(fakeEvent({ target: li, clientX: 50, clientY: 7, detail: 1 }));
+  e._onTaskMouseUp(fakeEvent({ target: li, clientX: 50, clientY: 7, detail: 1 }));
+
+  const after = window.getSelection().getRangeAt(0);
+  assert.notEqual(
+    after.startContainer === li && after.startOffset === 0,
+    true,
+    "the single-click correction is the behaviour worth keeping"
+  );
+
+  e.cleanup();
+});
