@@ -2465,18 +2465,6 @@
     _onVisualKeydown: function (e) {
       if (this._readonly) return;
 
-      // A selection that swallowed a task box is one some engines refuse to
-      // edit: the box is contenteditable=false, and an edit whose range
-      // contains a non-editable island is silently dropped. Double-click on
-      // the first word can anchor the range at the row boundary — before the
-      // box — and a whole-row sweep contains it outright; both LOOK like
-      // ordinary text selections, and typing over them did nothing. Shrink
-      // the range to the text before the engine sees the key, and the same
-      // gesture behaves like it does on a plain bullet row. The box itself
-      // survives a replacement, which is also the sane semantic: replacing a
-      // row's words should not eat its checkbox.
-      this._shrinkSelectionPastTaskBoxes();
-
       // While the suggestion popup is open it owns ↑/↓/Enter/Tab/Esc. This
       // has to come first so Enter can't also run the list auto-continue
       // further down.
@@ -12777,8 +12765,45 @@
       if (!this._visualEl) return;
       var self = this;
 
-      this._visualEl.addEventListener("beforeinput", function () {
+      this._visualEl.addEventListener("beforeinput", function (e) {
         self._typingCommandOpen = true;
+
+        // An edit over a selection that swallowed a task box. The box is
+        // contenteditable=false, and some engines start such an edit and
+        // abandon it — the reporter's panel read "NO INPUT FOLLOWED".
+        // Double-click on the first word anchors the range at the row
+        // boundary, before the box; a whole-row sweep contains it outright;
+        // drags anchor in text, which is why dragging always worked. The
+        // selection is deliberately left alone until this moment — rewriting
+        // it at keydown fought both the engine's own command and
+        // shift+arrow selection-building — and here the native command is
+        // cancelled outright and the same edit performed through
+        // execCommand, which builds a fresh command over the shrunk range.
+        if (
+          /^(insertText|insertParagraph|insertLineBreak|deleteContentBackward|deleteContentForward)$/.test(
+            e.inputType || ""
+          ) &&
+          self._selectionHoldsTaskBox()
+        ) {
+          e.preventDefault();
+          self._typingCommandOpen = false;
+          self._shrinkSelectionPastTaskBoxes();
+
+          try {
+            if (e.inputType === "insertText") {
+              document.execCommand("insertText", false, e.data || "");
+            } else if (e.inputType === "deleteContentForward") {
+              document.execCommand("forwardDelete", false, null);
+            } else if (e.inputType === "deleteContentBackward") {
+              document.execCommand("delete", false, null);
+            } else {
+              document.execCommand("insertParagraph", false, null);
+            }
+          } catch (err) {
+            /* an engine with no execCommand left is one we cannot help */
+          }
+          return;
+        }
       });
 
       this._visualEl.addEventListener("input", function () {
@@ -12951,6 +12976,34 @@
       } catch (err) {
         /* consoles */
       }
+    },
+
+    // Whether the current selection's range holds a task box — the shape
+    // some engines refuse to edit over.
+    _selectionHoldsTaskBox: function () {
+      var sel = window.getSelection();
+      if (!sel || !sel.rangeCount || sel.isCollapsed) return false;
+
+      var range = sel.getRangeAt(0);
+      if (!this._visualEl || !this._visualEl.contains(range.commonAncestorContainer)) {
+        return false;
+      }
+
+      var boxes = this._visualEl.querySelectorAll(".leaf-task-box");
+
+      for (var i = 0; i < boxes.length; i++) {
+        var boxRange = document.createRange();
+        boxRange.selectNode(boxes[i]);
+
+        if (
+          range.compareBoundaryPoints(Range.START_TO_START, boxRange) <= 0 &&
+          range.compareBoundaryPoints(Range.END_TO_START, boxRange) < 0
+        ) {
+          return true;
+        }
+      }
+
+      return false;
     },
 
     // Move a selection's boundaries off any task box they contain or sit

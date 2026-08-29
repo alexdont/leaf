@@ -805,12 +805,54 @@ test("a text-only selection is left untouched", { skip: dom.skip }, () => {
   e.cleanup();
 });
 
-test("keydown runs the shrink before anything else can decline", { skip: dom.skip }, () => {
+test("the edit is intercepted at beforeinput, and selections are never touched at rest", { skip: dom.skip }, () => {
   const fs = require("fs");
   const src = fs.readFileSync(require.resolve("../../priv/static/assets/leaf.js"), "utf8");
-  const head = src.slice(
+
+  // The keydown shrink is the bug two ways: it rewrote the selection in the
+  // keystroke's face — "NO INPUT FOLLOWED", the engine abandoning the edit —
+  // and it ran on shift+arrow, snapping the anchor away mid-extension.
+  const keydownHead = src.slice(
     src.indexOf("_onVisualKeydown: function"),
     src.indexOf("_suggestKeydown(e)")
   );
-  assert.match(head, /_shrinkSelectionPastTaskBoxes\(\)/, "the fix is only real if the key path runs it");
+  assert.doesNotMatch(keydownHead, /_shrinkSelectionPastTaskBoxes/);
+
+  const gate = src.slice(
+    src.indexOf("_setupCommandWindow: function"),
+    src.indexOf("_setupTypingDiagnostics: function")
+  );
+  assert.match(gate, /_selectionHoldsTaskBox\(\)/, "detected where edits begin");
+  assert.match(gate, /e\.preventDefault\(\)/, "the native command is cancelled outright");
+  assert.match(
+    gate,
+    /execCommand\("insertText", false, e\.data/,
+    "and the same edit is performed over the shrunk range"
+  );
+});
+
+test("_selectionHoldsTaskBox tells the refusing shape from a plain one", { skip: dom.skip }, () => {
+  const e = dom.editor(
+    '<ul><li class="leaf-task" data-checked="false"><span class="leaf-task-box" contenteditable="false"></span>does yes</li></ul>',
+    "hybrid"
+  );
+  const li = e._visualEl.querySelector("li");
+  const text = li.lastChild;
+  const sel = window.getSelection();
+
+  const r1 = document.createRange();
+  r1.setStart(li, 0);
+  r1.setEnd(text, 4);
+  sel.removeAllRanges();
+  sel.addRange(r1);
+  assert.equal(e._selectionHoldsTaskBox(), true, "the double-click shape");
+
+  const r2 = document.createRange();
+  r2.setStart(text, 0);
+  r2.setEnd(text, 4);
+  sel.removeAllRanges();
+  sel.addRange(r2);
+  assert.equal(e._selectionHoldsTaskBox(), false, "the drag shape — nothing to fix");
+
+  e.cleanup();
 });
