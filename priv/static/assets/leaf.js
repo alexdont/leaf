@@ -12768,39 +12768,46 @@
       this._visualEl.addEventListener("beforeinput", function (e) {
         self._typingCommandOpen = true;
 
-        // An edit over a selection that swallowed a task box. The box is
-        // contenteditable=false, and some engines start such an edit and
-        // abandon it — the reporter's panel read "NO INPUT FOLLOWED".
+        // Typing over a selection that swallowed a task box. The box is
+        // contenteditable=false, and some engines start such an insertText
+        // and abandon it — the reporter's panel read "NO INPUT FOLLOWED".
         // Double-click on the first word anchors the range at the row
-        // boundary, before the box; a whole-row sweep contains it outright;
-        // drags anchor in text, which is why dragging always worked. The
-        // selection is deliberately left alone until this moment — rewriting
-        // it at keydown fought both the engine's own command and
-        // shift+arrow selection-building — and here the native command is
-        // cancelled outright and the same edit performed through
-        // execCommand, which builds a fresh command over the shrunk range.
-        if (
-          /^(insertText|insertParagraph|insertLineBreak|deleteContentBackward|deleteContentForward)$/.test(
-            e.inputType || ""
-          ) &&
-          self._selectionHoldsTaskBox()
-        ) {
+        // boundary, before the box; drags anchor in text, which is why
+        // dragging always worked.
+        //
+        // Only insertText, and the edit is performed BY HAND — deleteContents
+        // on the shrunk range, a text node, the caret after it. The previous
+        // cure ran execCommand from inside the cancelled command's dispatch,
+        // nesting one editing command inside another: characters landed in
+        // neighbouring rows, and intercepting Backspace along the way broke
+        // select-all-delete. Deletes and Enter stay native; engines handle
+        // those over non-editable islands themselves.
+        if (e.inputType === "insertText" && self._selectionHoldsTaskBox()) {
           e.preventDefault();
           self._typingCommandOpen = false;
+          self._taskLog("takeover: insertText over box-holding range");
           self._shrinkSelectionPastTaskBoxes();
+          self._taskLog("takeover: after shrink");
 
           try {
-            if (e.inputType === "insertText") {
-              document.execCommand("insertText", false, e.data || "");
-            } else if (e.inputType === "deleteContentForward") {
-              document.execCommand("forwardDelete", false, null);
-            } else if (e.inputType === "deleteContentBackward") {
-              document.execCommand("delete", false, null);
-            } else {
-              document.execCommand("insertParagraph", false, null);
+            var sel2 = window.getSelection();
+            if (sel2 && sel2.rangeCount) {
+              var editRange = sel2.getRangeAt(0);
+              editRange.deleteContents();
+
+              var inserted = document.createTextNode(e.data || "");
+              editRange.insertNode(inserted);
+
+              var after = document.createRange();
+              after.setStart(inserted, inserted.length);
+              after.collapse(true);
+              sel2.removeAllRanges();
+              sel2.addRange(after);
+
+              self._visualEl.dispatchEvent(new Event("input", { bubbles: true }));
             }
           } catch (err) {
-            /* an engine with no execCommand left is one we cannot help */
+            /* if even this cannot edit, there is nothing left to try */
           }
           return;
         }
@@ -12992,18 +12999,32 @@
       var boxes = this._visualEl.querySelectorAll(".leaf-task-box");
 
       for (var i = 0; i < boxes.length; i++) {
-        var boxRange = document.createRange();
-        boxRange.selectNode(boxes[i]);
-
-        if (
-          range.compareBoundaryPoints(Range.START_TO_START, boxRange) <= 0 &&
-          range.compareBoundaryPoints(Range.END_TO_START, boxRange) < 0
-        ) {
-          return true;
-        }
+        if (this._rangeContainsNode(range, boxes[i])) return true;
       }
 
       return false;
+    },
+
+    // Containment spelled with comparePoint, whose answer is unambiguous.
+    // The compareBoundaryPoints spelling this replaces read a box ENTIRELY
+    // AFTER the selection as contained: the takeover fired for a selection
+    // in one row because the NEXT row had a box, the shrink moved the range
+    // start past that next row's box — start after end, a collapsed caret in
+    // the wrong row — and the typed characters followed it there.
+    _rangeContainsNode: function (range, node) {
+      var parent = node.parentNode;
+      if (!parent) return false;
+
+      var index = Array.prototype.indexOf.call(parent.childNodes, node);
+
+      try {
+        return (
+          range.comparePoint(parent, index) === 0 &&
+          range.comparePoint(parent, index + 1) === 0
+        );
+      } catch (err) {
+        return false;
+      }
     },
 
     // Move a selection's boundaries off any task box they contain or sit
@@ -13027,18 +13048,7 @@
       for (var i = 0; i < boxes.length; i++) {
         var box = boxes[i];
 
-        var boxRange = document.createRange();
-        boxRange.selectNode(box);
-
-        // The box is inside the selection (or the start boundary sits at or
-        // before it) exactly when the selection starts no later than the
-        // box's start and ends after the box's start.
-        var startsBeforeBox =
-          newRange.compareBoundaryPoints(Range.START_TO_START, boxRange) <= 0;
-        var endsAfterBox =
-          newRange.compareBoundaryPoints(Range.END_TO_START, boxRange) < 0;
-
-        if (startsBeforeBox && endsAfterBox) {
+        if (this._rangeContainsNode(newRange, box)) {
           newRange.setStartAfter(box);
           adjusted = true;
         }

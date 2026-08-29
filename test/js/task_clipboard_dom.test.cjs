@@ -824,11 +824,12 @@ test("the edit is intercepted at beforeinput, and selections are never touched a
   );
   assert.match(gate, /_selectionHoldsTaskBox\(\)/, "detected where edits begin");
   assert.match(gate, /e\.preventDefault\(\)/, "the native command is cancelled outright");
-  assert.match(
-    gate,
-    /execCommand\("insertText", false, e\.data/,
-    "and the same edit is performed over the shrunk range"
-  );
+  // BY HAND, not execCommand: running execCommand from inside the cancelled
+  // command's dispatch nested one editing command in another, and characters
+  // landed in neighbouring rows.
+  assert.match(gate, /editRange\.deleteContents\(\)/);
+  assert.match(gate, /createTextNode\(e\.data/);
+  assert.doesNotMatch(gate, /execCommand\("insertText"/);
 });
 
 test("_selectionHoldsTaskBox tells the refusing shape from a plain one", { skip: dom.skip }, () => {
@@ -853,6 +854,55 @@ test("_selectionHoldsTaskBox tells the refusing shape from a plain one", { skip:
   sel.removeAllRanges();
   sel.addRange(r2);
   assert.equal(e._selectionHoldsTaskBox(), false, "the drag shape — nothing to fix");
+
+  e.cleanup();
+});
+
+// The comparator bug that sent typed characters into the NEXT row: a box
+// entirely after the selection read as contained, the shrink moved the range
+// start past it — start after end, a collapsed caret in the wrong row.
+test("a box in the next row is nobody's business", { skip: dom.skip }, () => {
+  const e = dom.editor(
+    '<ul><li class="leaf-task" data-checked="false"><span class="leaf-task-box" contenteditable="false"></span>REPLACED other words</li>' +
+      '<li class="leaf-task" data-checked="false"><span class="leaf-task-box" contenteditable="false"></span>​</li></ul>',
+    "hybrid"
+  );
+  const text = e._visualEl.querySelector("li").lastChild;
+  const r = document.createRange();
+  r.setStart(text, 0);
+  r.setEnd(text, 8);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+
+  assert.equal(
+    e._selectionHoldsTaskBox(),
+    false,
+    "a text-anchored selection in row 1 holds no box, next row or not"
+  );
+
+  e._shrinkSelectionPastTaskBoxes();
+  const after = window.getSelection().getRangeAt(0);
+  assert.equal(after.startContainer, text, "and the shrink has nothing to do");
+  assert.equal(String(window.getSelection()), "REPLACED");
+
+  e.cleanup();
+});
+
+test("a box genuinely inside the range is still caught", { skip: dom.skip }, () => {
+  const e = dom.editor(
+    '<ul><li class="leaf-task" data-checked="false"><span class="leaf-task-box" contenteditable="false"></span>does yes</li></ul>',
+    "hybrid"
+  );
+  const li = e._visualEl.querySelector("li");
+  const r = document.createRange();
+  r.setStart(li, 0);
+  r.setEnd(li.lastChild, 4);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+
+  assert.equal(e._selectionHoldsTaskBox(), true, "the double-click shape still detected");
 
   e.cleanup();
 });
