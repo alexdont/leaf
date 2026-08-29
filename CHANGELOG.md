@@ -1,5 +1,92 @@
 # Changelog
 
+## 0.6.1
+
+The checkbox-and-lists review release: everything here came out of one
+maintainer's pass over 0.6.0, reported one issue at a time and fixed the
+same way.
+
+### Fixed
+
+- **The list buttons start a list from nothing.** The bullet and numbered
+  toolbar buttons did nothing without a selection to convert; like the task
+  button before them, they now create one empty item ready to type into.
+
+- **Typing over a selection in a checklist row works.** A whole family of
+  silent failures with one root: when a selection contained the row's
+  non-editable checkbox — a double-clicked lone word, a selected row, some
+  drag shapes — the browser's editing engine abandoned the edit without a
+  word. Leaf now takes the edit over at `beforeinput`: the selection is
+  shrunk past the chrome (or the whole row replaced, see below) and the text
+  placed by hand. Along the way: the caret-home placeholder is no longer
+  counted as content by Enter and Backspace, and the source machinery no
+  longer mutates the DOM mid-command from `selectionchange`, which was the
+  abort's other trigger.
+
+- **A rendered `[[wiki-link]]` can be followed in hybrid mode.** The press
+  seated the caret, the source swap that followed detached the link's span,
+  and the click handler then held a dead node — so no gesture followed, in
+  either follow mode, and it read as broken. The mousedown now captures the
+  link before the caret moves, and the click acts on the capture when the
+  swap has taken the span.
+
+- **Freshly typed wiki links resolve.** Mount and server pushes already
+  asked the host which targets exist; a link typed mid-edit — the one the
+  person is looking at — was exactly the one both missed.
+
+- **`Leaf.Collab.Room`'s moduledoc caught up with its code.** It still
+  described mismatches as "recorded rather than resolved", text from its
+  testbed era that `rebase_over/2` and the refusal path in the same file
+  contradict.
+
+### Added
+
+- **Selecting a row selects its markdown.** Sweeping a selection across
+  list rows reveals each row's source marker under it — `- [ ]`, `- `,
+  `3. ` — the way Obsidian shows what a selection really holds, and copy
+  and cut carry those markers so a row pasted elsewhere is still a task,
+  a bullet, a numbered item. Pasted GFM checkboxes (`li > input`) are
+  adopted on the way in.
+
+- **Selecting the whole row means the whole row.** With the row's revealed
+  marker inside the selection — the triple-click shape — typing replaces
+  the entire row, checkbox or bullet or number gone with it, leaving the
+  typed text as a plain line. Anything less keeps the row and replaces
+  only what was selected. One rule for all three list kinds.
+
+- **Numbered lists divide and rejoin.** Enter on an empty item leaves the
+  list wherever it happens; mid-list, the items below become a fresh list
+  that restarts at 1, so a divided 1–6 reads 1–3, text, 1–3. Delete the
+  divider and the halves merge back into one list — adjacent lists of the
+  same kind are one list that something used to separate, which is how
+  markdown already reads them.
+
+- **Checklist rows have a face, a way in, and a way out.** A new task row
+  shows the clickable checkbox rather than raw `- [ ]`; clicking beside
+  the box (or arrowing in) opens the source for editing; leaving closes it.
+
+- **A click on a wiki link is an action; the caret edits it.**
+  `follow: :click` is now the default — Obsidian's live-preview gesture. A
+  bare click on a rendered link reports `{:leaf_link_clicked, …}` to the
+  host and never places the caret; arrow keys, shift+click and double-click
+  still open the raw `[[target]]` for editing. The payload now carries
+  `modifier: boolean` so a host can mean something extra by Ctrl-click.
+  The old behaviour remains as `follow: :modifier`.
+
+- **`Leaf.Collab.leave/1`** undoes what `join/2` did, for a LiveView that
+  switches documents without remounting: the session leaves the room (its
+  caret disappears for everyone now, not at tab close), the topic is
+  unsubscribed, the hook detached, `@leaf_collab` cleared. Idempotent, so
+  `socket |> leave() |> join(room: next)` needs no first-mount special
+  case. Before this, the next `join/2` raised on the hook it could not
+  attach twice and the person lingered as a ghost caret.
+
+- **`debug_typing` attribute.** Mirrors the typing-diagnostics trace into
+  a panel on the page, so a reporter can reproduce and paste without
+  opening devtools. The panel is click-through except for its copy button
+  — it floats over the page, and a click meant for a row underneath must
+  reach that row.
+
 ## 0.6.0
 
 ### Fixed
