@@ -10506,7 +10506,19 @@
           var liContent = liNormalized
             .replace(/^(- |\d+\. )/, "")
             .replace(/^\[([ xX]?)\] /, "");
-          if (liContent.trim() === "" && (liListTag === "ul" || liListTag === "ol")) {
+
+          // A third exemption, same reasoning as the task one: the ONLY item
+          // in a list IS the list. The bullet and numbered buttons create
+          // exactly this — one empty item to start typing into — and tidying
+          // it away on blur undid the click that made it. A trailing empty
+          // among other items is still residue and still goes.
+          var loneItem = liList && liList.children && liList.children.length === 1;
+
+          if (
+            liContent.trim() === "" &&
+            (liListTag === "ul" || liListTag === "ol") &&
+            !loneItem
+          ) {
             this._syntaxMutating = true;
             try {
               liList.removeChild(sourceBlock);
@@ -11953,10 +11965,17 @@
           this._toggleHeading("h6");
           break;
         case "bulletList":
-          document.execCommand("insertUnorderedList", false, null);
+          // Built by hand where execCommand has nothing to act on — an empty
+          // line, an editor nobody has clicked into. The native command keeps
+          // the cases it is better at: selections, toggling, kind-switching.
+          if (!this._insertList("ul")) {
+            document.execCommand("insertUnorderedList", false, null);
+          }
           break;
         case "orderedList":
-          document.execCommand("insertOrderedList", false, null);
+          if (!this._insertList("ol")) {
+            document.execCommand("insertOrderedList", false, null);
+          }
           break;
         case "indent":
           // execCommand("indent") on a list item produces invalid DOM
@@ -12374,6 +12393,78 @@
       var sel = window.getSelection();
       sel.removeAllRanges();
       sel.addRange(range);
+    },
+
+    // The bullet and numbered list buttons, for where execCommand cannot go.
+    //
+    // execCommand("insert*List") needs a caret on content to act on: on a
+    // fresh editor nobody has clicked into, or an empty line, it does nothing
+    // — the button appeared dead, which is the same complaint the task-list
+    // button drew before it was taught to build its item itself. This is that
+    // lesson applied to the other two buttons.
+    //
+    // Deliberately narrow. With text actually selected, or with the caret
+    // already inside a list, the native command is the better tool — it
+    // converts multi-line selections in one gesture, toggles an item back out
+    // of its list, and switches a list between kinds. Returning false hands
+    // those cases to it.
+    _insertList: function (tag) {
+      if (!this._visualEl) return false;
+
+      // Read the selection BEFORE focusing: focus can collapse it, and a
+      // collapsed selection here reads as "nothing selected" — sending the
+      // multi-line case down the single-item path.
+      var sel = window.getSelection();
+
+      if (
+        sel &&
+        sel.rangeCount > 0 &&
+        !sel.getRangeAt(0).collapsed &&
+        this._visualEl.contains(sel.getRangeAt(0).startContainer)
+      ) {
+        return false;
+      }
+
+      this._visualEl.focus();
+
+      var block = this._getCurrentBlock();
+
+      if (block && block.closest && block.closest("li, ul, ol")) return false;
+
+      var li = document.createElement("li");
+      var list = document.createElement(tag);
+      list.appendChild(li);
+
+      // Convert the current line rather than splitting it — the same shape
+      // the task-list button settled on.
+      var isPlainBlock =
+        block &&
+        block.parentElement === this._visualEl &&
+        /^(p|h[1-6]|div)$/i.test(block.tagName || "");
+
+      if (isPlainBlock) {
+        // Only carry the line's children over when there is text among them.
+        // An empty line's lone <br> must NOT come: a <br> blocks the
+        // placeholder (it is on that helper's skip list), leaving an item
+        // with no text — which hybrid's empty-line tidying then deletes the
+        // moment the caret moves on. Created and gone before anyone typed.
+        if (/\S/.test(block.textContent || "")) {
+          while (block.firstChild) li.appendChild(block.firstChild);
+        }
+
+        block.parentNode.replaceChild(list, block);
+        this._forgetSourceBlock(block);
+      } else {
+        this._insertBlockAfterCurrent(list);
+      }
+
+      // An empty line converts to an empty item; the placeholder is where the
+      // caret sits and what the tidying rules recognise as deliberate.
+      this._ensureListItemPlaceholder(li);
+
+      this._placeCaretIn(li);
+      this._debouncedPushVisualChange();
+      return true;
     },
 
     _insertTaskList: function () {

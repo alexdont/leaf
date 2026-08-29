@@ -379,3 +379,137 @@ test("Enter on the last, empty task item finishes the checklist", { skip }, () =
   assert.match(e._visualEl.innerHTML, /<p>/, "and lands in a paragraph below the list");
   e.cleanup();
 });
+
+// ---------------------------------------------------------------------------
+// The bullet and numbered list buttons on nothing
+// ---------------------------------------------------------------------------
+//
+// execCommand("insert*List") needs a caret on content: on an empty line or a
+// fresh editor it did nothing, so the buttons could not START a list — the
+// same complaint the task-list button drew, fixed the same way.
+
+function listEditor(html) {
+  const e = editor(html, "hybrid");
+
+  e._insertBlockAfterCurrent = (node) => e._visualEl.appendChild(node);
+  e._placeCaretIn = (n) => {
+    try {
+      caretAtEndOf(n);
+    } catch (_) {
+      /* nothing to place in an empty node */
+    }
+  };
+
+  return e;
+}
+
+test("the bullet button on an empty line starts a list you can type into", { skip }, () => {
+  const e = listEditor("<p><br></p>");
+  const block = e._visualEl.children[0];
+  e._getCurrentBlock = () => block;
+
+  assert.equal(e._insertList("ul"), true, "the button must handle this itself");
+
+  const li = e._visualEl.querySelector("ul > li");
+  assert.ok(li, "an empty item to start the list from");
+  assert.equal(e._visualEl.querySelector("p"), null, "the empty line became the list");
+
+  e.cleanup();
+});
+
+test("the numbered button does the same with an ol", { skip }, () => {
+  const e = listEditor("<p><br></p>");
+  const block = e._visualEl.children[0];
+  e._getCurrentBlock = () => block;
+
+  assert.equal(e._insertList("ol"), true);
+  assert.ok(e._visualEl.querySelector("ol > li"), "a numbered list, not a bulleted one");
+
+  e.cleanup();
+});
+
+test("an editor nobody has clicked into still gets its list", { skip }, () => {
+  const e = listEditor("<p>existing</p>");
+  e._getCurrentBlock = () => null;
+
+  assert.equal(e._insertList("ul"), true);
+  assert.ok(e._visualEl.querySelector("ul > li"), "appended, since there is no current line");
+  assert.ok(e._visualEl.querySelector("p"), "and the existing text is untouched");
+
+  e.cleanup();
+});
+
+test("a line with text on it converts rather than splits", { skip }, () => {
+  const e = listEditor("<p>groceries</p>");
+  const block = e._visualEl.children[0];
+  e._getCurrentBlock = () => block;
+
+  assert.equal(e._insertList("ul"), true);
+
+  const li = e._visualEl.querySelector("ul > li");
+  assert.equal(li.textContent, "groceries", "the line's text becomes the first item");
+  assert.equal(e._visualEl.querySelector("p"), null);
+
+  e.cleanup();
+});
+
+test("with the caret already in a list, the native command keeps the job", { skip }, () => {
+  const e = listEditor("<ul><li>item</li></ul>");
+  const li = e._visualEl.querySelector("li");
+  e._getCurrentBlock = () => li;
+
+  assert.equal(e._insertList("ul"), false, "toggling out of a list is execCommand's case");
+  assert.equal(e._visualEl.querySelectorAll("ul").length, 1, "and nothing was built");
+
+  e.cleanup();
+});
+
+test("with text selected, the native command keeps the job", { skip }, () => {
+  const e = listEditor("<p>one</p><p>two</p>");
+  const range = document.createRange();
+  range.setStart(e._visualEl.children[0].firstChild, 0);
+  range.setEnd(e._visualEl.children[1].firstChild, 3);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+
+  assert.equal(e._insertList("ul"), false, "multi-line conversion is execCommand's case");
+  assert.equal(e._visualEl.querySelector("ul"), null);
+
+  e.cleanup();
+});
+
+test("the empty item is one the empty-line rules will not tidy away", { skip }, () => {
+  // The task-list lesson's second half: creating it is nothing if hybrid's
+  // cleanup deletes it the moment the caret leaves.
+  const e = listEditor("<p><br></p><p>after</p>");
+  const block = e._visualEl.children[0];
+  e._getCurrentBlock = () => block;
+
+  e._insertList("ul");
+
+  const li = e._visualEl.querySelector("ul > li");
+  caretAtEndOf(li);
+  e._sourceBlock = e._enterSourceMode(li);
+  e._exitSourceMode(e._sourceBlock);
+
+  assert.ok(e._visualEl.querySelector("ul > li"), "the empty item must survive the caret leaving");
+
+  e.cleanup();
+});
+
+test("the toolbar arms actually route through _insertList", { skip }, () => {
+  // jsdom cannot run execCommand, so no behavioural test reaches the case
+  // arms — and a fix that exists but is never called is the bug back again.
+  const fs = require("fs");
+  const src = fs.readFileSync(require.resolve("../../priv/static/assets/leaf.js"), "utf8");
+
+  for (const [action, tag] of [["bulletList", "ul"], ["orderedList", "ol"]]) {
+    const arm = src.slice(src.indexOf(`case "${action}":`));
+    const insertAt = arm.indexOf(`_insertList("${tag}")`);
+    const execAt = arm.indexOf("document.execCommand");
+
+    assert.ok(insertAt >= 0, `${action} must try _insertList`);
+    assert.ok(insertAt < execAt, `${action} must try it BEFORE falling back to execCommand`);
+  }
+});
