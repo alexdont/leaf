@@ -1654,6 +1654,12 @@
         );
 
         this._visualEl.addEventListener("paste", this._onPaste.bind(this));
+        // Copy and cut carry a task row's checkbox with it. Native copy
+        // reads the DOM's text, and the box is a contenteditable=false span
+        // with none — so a copied row arrived as a bare label, its state
+        // left behind.
+        this._visualEl.addEventListener("copy", this._onCopyOrCut.bind(this));
+        this._visualEl.addEventListener("cut", this._onCopyOrCut.bind(this));
 
         this._visualEl.addEventListener(
           "click",
@@ -3129,6 +3135,169 @@
       }
     },
 
+    // Copy or cut a checklist row — or a run of them — with the checkboxes.
+    //
+    // The box holds no text, so native copy gives just the labels: paste the
+    // row anywhere and its state is gone. When the selection covers whole
+    // task rows and nothing else, the clipboard gets the real thing instead —
+    // GFM markdown as text ("- [x] label") for editors that read text, and
+    // GFM html (li > input[type=checkbox]) for the html path, which is what
+    // our own paste rebuilds a working checkbox from. Anything messier than
+    // whole rows — half a row, a row plus a paragraph — stays with the
+    // native behaviour rather than guessing.
+    // `<li><input type="checkbox"> label` → a working task item. The input
+    // is interchange, not furniture: left in place it would be an editable
+    // form control inside the content, serialized as nothing.
+    _adoptPastedCheckboxes: function (container) {
+      var boxes = container.querySelectorAll('li > input[type="checkbox"]');
+
+      for (var i = 0; i < boxes.length; i++) {
+        var input = boxes[i];
+        var li = input.parentNode;
+
+        li.classList.add("leaf-task");
+        li.setAttribute(
+          "data-checked",
+          input.checked || input.hasAttribute("checked") ? "true" : "false"
+        );
+
+        var box = document.createElement("span");
+        box.className = "leaf-task-box";
+        box.setAttribute("contenteditable", "false");
+        li.replaceChild(box, input);
+
+        // The interchange form puts a space between the input and the label;
+        // ours puts the label straight after the box.
+        var after = box.nextSibling;
+        if (after && after.nodeType === Node.TEXT_NODE) {
+          after.textContent = after.textContent.replace(/^[\s\u00a0]+/, "");
+        }
+      }
+    },
+
+    _onCopyOrCut: function (e) {
+      var clipboardData = e.clipboardData || window.clipboardData;
+      if (!clipboardData || !this._visualEl) return;
+      if (this._mode !== "visual" && this._mode !== "hybrid") return;
+
+      var sel = window.getSelection();
+      if (!sel || !sel.rangeCount || sel.isCollapsed) return;
+
+      var range = sel.getRangeAt(0);
+      if (!this._visualEl.contains(range.commonAncestorContainer)) return;
+
+      var covered = this._coveredTaskItems(range);
+      if (!covered.length) return;
+
+      // Whole rows and nothing else: the selection's own text must be the
+      // rows' labels and no more, or this is a mixed selection native copy
+      // understands better.
+      // Compared with ALL whitespace removed, and against the rows' full
+      // text rather than their labels: a row mid-edit carries its "- [ ] "
+      // marker as literal span text, which is in the selection but not the
+      // label — that is representation, not extra content.
+      var scrub = function (text) {
+        return (text || "").replace(/[\u200B\uFEFF\s\u00a0]/g, "");
+      };
+      var rowText = covered
+        .map(function (item) {
+          return item.li.textContent;
+        })
+        .join("");
+      if (scrub(range.toString()) !== scrub(rowText)) return;
+
+      var markdown = covered
+        .map(function (item) {
+          return (item.checked ? "- [x] " : "- [ ] ") + item.label;
+        })
+        .join("\n");
+
+      var html =
+        "<ul>" +
+        covered
+          .map(function (item) {
+            return (
+              '<li><input type="checkbox"' +
+              (item.checked ? " checked" : "") +
+              "> " +
+              item.label
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;") +
+              "</li>"
+            );
+          })
+          .join("") +
+        "</ul>";
+
+      e.preventDefault();
+      clipboardData.setData("text/plain", markdown);
+      clipboardData.setData("text/html", html);
+
+      if (e.type === "cut" && !this._readonly) {
+        for (var i = 0; i < covered.length; i++) {
+          var li = covered[i].li;
+          var list = li.parentNode;
+          if (!list) continue;
+          this._forgetSourceBlock(li);
+          list.removeChild(li);
+          // A list with nothing left in it is not a list.
+          if (!list.firstElementChild && list.parentNode) {
+            list.parentNode.removeChild(list);
+          }
+        }
+        this._visualEl.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    },
+
+    // The task items whose visible text the range covers entirely, in
+    // document order, with their state and label read off the DOM.
+    _coveredTaskItems: function (range) {
+      var items = this._visualEl.querySelectorAll("li.leaf-task");
+      var covered = [];
+
+      for (var i = 0; i < items.length; i++) {
+        var li = items[i];
+        var first = this._firstTextDescendant(li);
+        var walker = document.createTreeWalker(li, NodeFilter.SHOW_TEXT, null, false);
+        var last = null;
+        var node;
+        while ((node = walker.nextNode())) last = node;
+
+        if (!first || !last) continue;
+
+        var inRange;
+        try {
+          inRange =
+            range.comparePoint(first, 0) === 0 &&
+            range.comparePoint(last, last.textContent.length) === 0;
+        } catch (err) {
+          inRange = false;
+        }
+        if (!inRange) continue;
+
+        // The label is the row's text minus its chrome: the box has none,
+        // but a row currently in source mode carries its "- [ ] " marker as
+        // literal span text.
+        var clone = li.cloneNode(true);
+        var chrome = clone.querySelectorAll(".leaf-task-box, .leaf-source-marker");
+        for (var c = 0; c < chrome.length; c++) {
+          chrome[c].parentNode.removeChild(chrome[c]);
+        }
+
+        covered.push({
+          li: li,
+          checked: li.getAttribute("data-checked") === "true",
+          label: clone.textContent
+            .replace(/[\u200B\uFEFF]/g, "")
+            .replace(/\u00a0/g, " ")
+            .trim()
+        });
+      }
+
+      return covered;
+    },
+
     _onPaste: function (e) {
       var clipboardData = e.clipboardData || window.clipboardData;
       if (!clipboardData) return;
@@ -3163,6 +3332,12 @@
         var cleaned = cleanPastedHtml(html);
         var container = document.createElement("div");
         container.innerHTML = cleaned;
+
+        // GFM checklists — from our own copy, GitHub, or anywhere else that
+        // writes `li > input[type=checkbox]` — become real task items. The
+        // cleaner has already stripped classes, so this is the only form a
+        // checkbox can arrive in.
+        this._adoptPastedCheckboxes(container);
 
         if (this._denyLinks) {
           container.querySelectorAll("a").forEach(function (anchor) {
@@ -10854,10 +11029,19 @@
         // typing the marker itself (`- `, `- [ ] `). Without that the marker
         // would hide the instant you finish typing it and strand the caret
         // in the now-`display:none` span, corrupting the next keystrokes.
+        //
+        // Task items are exempt from the empty-body half. Every Enter on a
+        // checklist creates an empty item, so the rule made every new line
+        // open as raw `- [ ] ` instead of the checkbox — the marker text is
+        // for editing the marker, not the face of a freshly made row. The
+        // stranding the rule guards against is handled for task items by
+        // seating the caret in a placeholder AFTER the hidden marker (see
+        // the rebuild below); revealing the marker deliberately is the
+        // click in the gutter left of the box.
         var markerActive =
           !!scan.listMarker &&
           (cursorOffset < scan.blockPrefixLen ||
-            sourceText.length <= scan.blockPrefixLen);
+            (!scan.isTask && sourceText.length <= scan.blockPrefixLen));
         this._sourceBlock.classList.toggle("leaf-marker-active", markerActive);
         // Marker just deleted (`- ` / `N. ` gone) — the item is no longer a
         // list item (it breaks out to a `<p>` on cursor-leave). Hide the
@@ -10890,6 +11074,25 @@
             scan,
             cursorOffset
           );
+
+          // A task item whose body is empty seats its caret AFTER the hidden
+          // marker, in a placeholder of its own. Left where the build put it
+          // — inside the marker span — the caret sits in a display:none node:
+          // invisible, and the next keystrokes go somewhere the user cannot
+          // see. This is what lets the marker stay hidden on a fresh
+          // checklist row at all.
+          if (
+            scan.kind === "li" &&
+            scan.isTask &&
+            cursorOffset <= scan.blockPrefixLen &&
+            sourceText.length <= scan.blockPrefixLen &&
+            !this._sourceBlock.classList.contains("leaf-marker-active")
+          ) {
+            var home = document.createTextNode("\u200B");
+            this._sourceBlock.appendChild(home);
+            caretTarget = { node: home, offset: 1 };
+          }
+
           if (caretTarget && caretTarget.node) {
             var newRange = document.createRange();
             newRange.setStart(caretTarget.node, caretTarget.offset);
@@ -12319,6 +12522,19 @@
           return;
         }
 
+        // Click in the gutter LEFT of the box: open the raw `- [ ] ` marker
+        // for editing. It is the one deliberate way in — the marker hides
+        // behind the checkbox everywhere else, including on freshly made
+        // rows, so without this gesture the source form would be
+        // unreachable on an empty item.
+        var boxRect = box.getBoundingClientRect();
+        if (boxRect.width > 0 && e.clientX < boxRect.left) {
+          e.preventDefault();
+          self._visualEl.focus({ preventScroll: true });
+          self._revealTaskMarker(li);
+          return;
+        }
+
         // Would the caret land on/before the box? Place it at the task text
         // instead — done on mousedown so there's no visible jump.
         var pos = self._caretFromPoint(e.clientX, e.clientY);
@@ -12340,6 +12556,46 @@
         sel.removeAllRanges();
         sel.addRange(r);
       });
+    },
+
+    // Put a task item into source mode with its `- [ ] ` marker revealed and
+    // the caret at the marker's start — the editing entrance the gutter click
+    // opens. Everywhere else the marker stays hidden behind the checkbox.
+    _revealTaskMarker: function (li) {
+      if (!li || !this._visualEl) return false;
+
+      // Get the caret into the item first: source mode follows the caret.
+      var seed = this._firstTextDescendant(li);
+      var range = document.createRange();
+
+      if (seed) range.setStart(seed, 0);
+      else range.setStart(li, li.childNodes.length);
+      range.collapse(true);
+
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+
+      var sourceBlock =
+        li.hasAttribute && li.hasAttribute("data-leaf-source")
+          ? li
+          : this._enterSourceMode(li);
+      if (!sourceBlock) return false;
+
+      var marker = sourceBlock.querySelector(".leaf-list-marker");
+      var markerText = marker && marker.firstChild;
+      if (!markerText || markerText.nodeType !== Node.TEXT_NODE) return false;
+
+      // Caret onto the marker's first character: cursorOffset 0 is strictly
+      // inside the marker, so the refresh reveals it.
+      var reveal = document.createRange();
+      reveal.setStart(markerText, 0);
+      reveal.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(reveal);
+
+      this._refreshSourceBlock();
+      return true;
     },
 
     // Resolve the caret position the browser would pick for a viewport

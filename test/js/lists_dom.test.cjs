@@ -513,3 +513,177 @@ test("the toolbar arms actually route through _insertList", { skip }, () => {
     assert.ok(insertAt < execAt, `${action} must try it BEFORE falling back to execCommand`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// A new checklist row shows its checkbox, not its markdown
+// ---------------------------------------------------------------------------
+//
+// Every Enter on a checklist creates an empty item, and the "keep the marker
+// visible while the body is empty" rule made each one open as raw `- [ ] `
+// text. The marker text is for editing the marker; the face of a fresh row is
+// the checkbox. Revealing the source is now the deliberate gesture (the click
+// in the gutter), not the default.
+
+// The shared harness stubs the hybrid refresh to a noop; these tests are
+// ABOUT that refresh, so the stubs come off and the prototype's real ones run.
+function hybridEditor(html) {
+  const e = editor(html, "hybrid");
+  delete e._refreshSourceBlock;
+  delete e._updateSourceBlock;
+  return e;
+}
+
+test("an empty task row in source mode keeps its checkbox face", { skip }, () => {
+  const e = hybridEditor("<ul><li class=\"leaf-task\" data-checked=\"false\"><span class=\"leaf-task-box\" contenteditable=\"false\"></span>label</li></ul>");
+  const li = e._visualEl.querySelector("li");
+
+  // Caret at the end of the label — then the label is deleted, leaving the
+  // row empty, which is exactly the state a fresh Enter produces.
+  caretAtEndOf(li);
+  e._sourceBlock = e._enterSourceMode(li);
+
+  const sourceLi = e._visualEl.querySelector("li[data-leaf-source]");
+  // Empty the body: remove the label from the source text, keep the marker.
+  const marker = sourceLi.querySelector(".leaf-list-marker");
+  assert.ok(marker, "the marker span exists (hidden by CSS)");
+
+  assert.equal(
+    sourceLi.classList.contains("leaf-marker-active"),
+    false,
+    "with the caret in the body, the raw marker must stay hidden"
+  );
+
+  e.cleanup();
+});
+
+test("an EMPTY task row in source mode hides the marker and homes the caret", { skip }, () => {
+  const e = hybridEditor("<ul><li class=\"leaf-task\" data-checked=\"false\"><span class=\"leaf-task-box\" contenteditable=\"false\"></span>​</li></ul>");
+  const li = e._visualEl.querySelector("li");
+
+  caretAtEndOf(li);
+  e._sourceBlock = e._enterSourceMode(li);
+
+  const sourceLi = e._visualEl.querySelector("li[data-leaf-source]");
+
+  assert.equal(
+    sourceLi.classList.contains("leaf-marker-active"),
+    false,
+    "a fresh empty row must wear its checkbox, not its markdown"
+  );
+
+  // The caret must have somewhere VISIBLE to sit: a placeholder outside the
+  // hidden marker span, or the next keystrokes type into display:none.
+  const sel = window.getSelection();
+  assert.ok(sel.rangeCount, "a caret exists");
+  const caretNode = sel.getRangeAt(0).startContainer;
+  const inMarker =
+    caretNode.parentNode &&
+    caretNode.parentNode.classList &&
+    caretNode.parentNode.classList.contains("leaf-source-marker");
+
+  assert.equal(inMarker, false, "the caret must not sit inside the hidden marker");
+  assert.match(sourceLi.textContent, /​/, "seated in a placeholder of its own");
+
+  e.cleanup();
+});
+
+test("a plain empty bullet still reveals its marker while being typed", { skip }, () => {
+  // The empty-body rule exists so a hand-typed `- ` does not hide mid-typing
+  // and strand the caret. Task items opted out; plain bullets must not have.
+  const e = hybridEditor("<ul><li>​</li></ul>");
+  const li = e._visualEl.querySelector("li");
+
+  caretAtEndOf(li);
+  e._sourceBlock = e._enterSourceMode(li);
+
+  const sourceLi = e._visualEl.querySelector("li[data-leaf-source]");
+
+  assert.equal(
+    sourceLi.classList.contains("leaf-marker-active"),
+    true,
+    "an empty plain bullet keeps its marker visible, as before"
+  );
+
+  e.cleanup();
+});
+
+// ---------------------------------------------------------------------------
+// The gutter click: the one deliberate way into the raw marker
+// ---------------------------------------------------------------------------
+
+test("the gutter click reveals the raw marker with the caret on it", { skip }, () => {
+  const e = hybridEditor(
+    '<ul><li class="leaf-task" data-checked="false"><span class="leaf-task-box" contenteditable="false"></span>label</li></ul>'
+  );
+  const li = e._visualEl.querySelector("li");
+
+  assert.equal(e._revealTaskMarker(li), true);
+
+  const sourceLi = e._visualEl.querySelector("li[data-leaf-source]");
+  assert.ok(sourceLi, "the item entered source mode");
+  assert.equal(
+    sourceLi.classList.contains("leaf-marker-active"),
+    true,
+    "and the `- [ ] ` marker is revealed for editing"
+  );
+
+  const sel = window.getSelection();
+  const node = sel.getRangeAt(0).startContainer;
+  assert.ok(
+    node.parentNode.classList.contains("leaf-source-marker"),
+    "with the caret inside the marker, ready to edit it"
+  );
+
+  e.cleanup();
+});
+
+test("the gutter click works on an EMPTY row too", { skip }, () => {
+  // The whole reason the gesture exists: on an empty item the marker cannot
+  // be reached by keyboard at all once it hides behind the checkbox.
+  const e = hybridEditor(
+    '<ul><li class="leaf-task" data-checked="false"><span class="leaf-task-box" contenteditable="false"></span>​</li></ul>'
+  );
+  const li = e._visualEl.querySelector("li");
+
+  assert.equal(e._revealTaskMarker(li), true);
+
+  const sourceLi = e._visualEl.querySelector("li[data-leaf-source]");
+  assert.equal(sourceLi.classList.contains("leaf-marker-active"), true);
+  assert.match(
+    sourceLi.textContent.replace(/\u00a0/g, " "),
+    /- \[ \] /,
+    "the raw marker is there to edit"
+  );
+
+  e.cleanup();
+});
+
+test("the checked state survives the reveal", { skip }, () => {
+  const e = hybridEditor(
+    '<ul><li class="leaf-task" data-checked="true"><span class="leaf-task-box" contenteditable="false"></span>done</li></ul>'
+  );
+
+  e._revealTaskMarker(e._visualEl.querySelector("li"));
+
+  const sourceLi = e._visualEl.querySelector("li[data-leaf-source]");
+  assert.match(
+    sourceLi.textContent.replace(/\u00a0/g, " "),
+    /- \[x\] /i,
+    "a checked item reveals [x], not [ ]"
+  );
+
+  e.cleanup();
+});
+
+test("the mousedown handler routes the gutter to the reveal", { skip }, () => {
+  // jsdom has no layout, so the geometry (clientX left of the box) cannot be
+  // exercised — pin the wiring statically instead.
+  const fs = require("fs");
+  const src = fs.readFileSync(require.resolve("../../priv/static/assets/leaf.js"), "utf8");
+  const handler = src.slice(src.indexOf("_setupTaskLists:"), src.indexOf("_revealTaskMarker:"));
+
+  assert.ok(
+    /clientX < boxRect\.left[\s\S]{0,200}_revealTaskMarker/.test(handler),
+    "a click left of the box must call the reveal"
+  );
+});
