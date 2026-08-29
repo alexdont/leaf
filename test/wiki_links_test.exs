@@ -34,6 +34,15 @@ defmodule Leaf.WikiLinksTest do
       assert editor_html("x") =~ ~s(data-wikilinks="true")
       assert editor_html("x", wiki_links: nil) =~ ~s(data-wikilinks="false")
     end
+
+    test "a bare click follows by default — Obsidian's live-preview gesture" do
+      assert editor_html("x") =~ ~s(data-wikilinks-follow="click")
+    end
+
+    test "a host whose links are decoration first can keep the click for the caret" do
+      assert editor_html("x", wiki_links: %{follow: :modifier}) =~
+               ~s(data-wikilinks-follow="modifier")
+    end
   end
 
   describe "the three shapes" do

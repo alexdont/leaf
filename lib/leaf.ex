@@ -2699,7 +2699,8 @@ defmodule Leaf do
          editor_id: socket.assigns.id,
          target: target,
          heading: params["heading"],
-         href: params["href"]
+         href: params["href"],
+         modifier: params["modifier"] == true
        }}
     )
 
@@ -3725,11 +3726,14 @@ defmodule Leaf do
   defp wiki_links_resolve?(%{} = config), do: Map.get(config, :resolve, true) != false
   defp wiki_links_resolve?(other), do: wiki_links_enabled?(other)
 
-  # How a link is followed. `:modifier` (the default) keeps a bare click for the
-  # caret while editing; `:click` suits a surface where nothing competes for it.
-  # A host knows which its editor is; Leaf should not assume.
-  defp wiki_links_follow(%{} = config), do: to_string(Map.get(config, :follow, :modifier))
-  defp wiki_links_follow(_), do: "modifier"
+  # How a link is followed. `:click` (the default) is Obsidian's live-preview
+  # gesture: a bare click on the rendered link follows it and never places the
+  # caret — editing is entered by arrowing in, shift+clicking, or
+  # double-clicking, any of which reveals the raw `[[target]]`. `:modifier`
+  # keeps a bare click for the caret and asks Ctrl/Cmd to follow, for a host
+  # whose links are decoration first.
+  defp wiki_links_follow(%{} = config), do: to_string(Map.get(config, :follow, :click))
+  defp wiki_links_follow(_), do: "click"
 
   # `#` is only a tag sigil if the host said so by configuring a `#`
   # suggestion trigger. Without that, `#` is left alone — a document using

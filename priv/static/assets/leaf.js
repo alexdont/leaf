@@ -1610,7 +1610,7 @@
       // another person is sitting there waiting to see.
       this._collabIntervalMs = parseInt(this.el.dataset.collabInterval || "40", 10);
       this._wikiLinksResolve = this.el.dataset.wikilinksResolve !== "false";
-      this._wikiLinksFollow = this.el.dataset.wikilinksFollow || "modifier";
+      this._wikiLinksFollow = this.el.dataset.wikilinksFollow || "click";
       this._warnStaleBundle();
       this._debounceTimer = null;
       this._markdownDebounceTimer = null;
@@ -1688,6 +1688,19 @@
           "click",
           function (e) {
             this._onWikiLinkClick(e);
+          }.bind(this)
+        );
+
+        // In `:click` follow mode the caret must not land on a plain
+        // mousedown over a link — landing would reveal the row's source, and
+        // the click is a follow, not an edit. Every other way in still
+        // edits: shift+click extends a selection, a second click of a
+        // double-click selects the word, a modifier click is a follow that
+        // never needed the caret suppressed.
+        this._visualEl.addEventListener(
+          "mousedown",
+          function (e) {
+            this._onWikiLinkMouseDown(e);
           }.bind(this)
         );
 
@@ -1992,7 +2005,7 @@
       // another person is sitting there waiting to see.
       this._collabIntervalMs = parseInt(this.el.dataset.collabInterval || "40", 10);
       this._wikiLinksResolve = this.el.dataset.wikilinksResolve !== "false";
-      this._wikiLinksFollow = this.el.dataset.wikilinksFollow || "modifier";
+      this._wikiLinksFollow = this.el.dataset.wikilinksFollow || "click";
 
       // The host can widen or narrow the deny list at runtime. Falling back
       // to a hardcoded "visual" stopped being safe once :visual itself
@@ -2054,6 +2067,10 @@
       if (this._selectionTimer) {
         clearTimeout(this._selectionTimer);
         this._selectionTimer = null;
+      }
+      if (this._wikiLinkResolveTimer) {
+        clearTimeout(this._wikiLinkResolveTimer);
+        this._wikiLinkResolveTimer = null;
       }
       if (this._onSelectionChange) {
         document.removeEventListener(
@@ -6905,6 +6922,10 @@
 
         var span = document.createElement("span");
         span.className = "leaf-wikilink";
+        // A freshly typed link needs resolving too — mount and server pushes
+        // already resolve, but a span minted right here mid-edit is exactly
+        // the one they both miss.
+        this._scheduleWikiLinkResolve();
         span.setAttribute("data-leaf-wikilink", target);
         if (heading) span.setAttribute("data-leaf-wikilink-heading", heading);
         span.setAttribute("data-leaf-wikilink-raw", m[0]);
@@ -6919,6 +6940,19 @@
     },
 
     // ---- wiki-link resolution ------------------------------------------
+
+    // Debounced: decoration runs per text node mid-render, and one resolve
+    // after the dust settles covers every span the pass created. Repeat
+    // resolves are already cheap — only unresolved targets are asked about,
+    // and a stale answer is dropped by seq.
+    _scheduleWikiLinkResolve: function () {
+      if (!this._wikiLinks || !this._wikiLinksResolve) return;
+      var self = this;
+      clearTimeout(this._wikiLinkResolveTimer);
+      this._wikiLinkResolveTimer = setTimeout(function () {
+        self._resolveWikiLinks();
+      }, 150);
+    },
     //
     // Only the host knows which notes exist, so the client collects the targets
     // it has no answer for and asks. Answers are cached for the life of the
@@ -7001,6 +7035,19 @@
     // Leaf reports the click and does nothing else. Where a target lives is the
     // host's question — it may want a modal, a new tab, or a "create this note"
     // flow for one that does not exist yet.
+    _onWikiLinkMouseDown: function (e) {
+      if (!this._wikiLinks) return;
+      if (e.detail > 1 || e.shiftKey || e.altKey) return;
+      if (!(this._readonly || this._wikiLinksFollow === "click")) return;
+
+      var span = e.target && e.target.closest
+        ? e.target.closest("[data-leaf-wikilink]")
+        : null;
+      if (!span || !this._visualEl.contains(span)) return;
+
+      e.preventDefault();
+    },
+
     _onWikiLinkClick: function (e) {
       if (!this._wikiLinks) return;
 
@@ -7011,26 +7058,35 @@
       if (!span || !this._visualEl.contains(span)) return;
 
       // Which gesture follows a link is the host's call, declared as
-      // `follow: :modifier | :click`.
+      // `follow: :click | :modifier`.
       //
-      // `:modifier` is the default because in an editable surface a bare click
-      // has to place the caret — the gesture Obsidian uses in edit mode. A
-      // read-only surface has no caret competing for the click, so it is
-      // treated as `:click` regardless; requiring Ctrl to follow a link in a
-      // viewer would be strange.
+      // `:click` is the default — Obsidian's live-preview gesture. A bare
+      // click on the rendered link is an ACTION, reported to the host; it
+      // never places the caret (the mousedown guard below saw to that), so
+      // the row's source stays hidden. Editing is entered the other ways in:
+      // arrow keys, shift+click, double-click — each of which reveals the raw
+      // `[[target]]`. A modifier click follows too, and the modifier is
+      // reported so a host can mean something extra by it (a new tab, say).
+      //
+      // `:modifier` keeps a bare click for the caret and asks Ctrl/Cmd to
+      // follow. A read-only surface is treated as `:click` regardless; there
+      // is no caret competing for the click, and requiring Ctrl to follow a
+      // link in a viewer would be strange.
       var withModifier = e.ctrlKey || e.metaKey;
       var plainClick = !withModifier && !e.altKey && !e.shiftKey;
-      var follows =
-        this._readonly || this._wikiLinksFollow === "click" ? plainClick : withModifier;
+      var clickMode = this._readonly || this._wikiLinksFollow === "click";
+      var follows = clickMode ? plainClick || withModifier : withModifier;
 
       if (!follows) return;
+      if (e.detail > 1) return; // a double-click means editing, not following
 
       e.preventDefault();
       this.pushEventTo(this.el, "link_clicked", {
         editor_id: this._editorId,
         target: span.getAttribute("data-leaf-wikilink"),
         heading: span.getAttribute("data-leaf-wikilink-heading"),
-        href: span.getAttribute("data-leaf-wikilink-href")
+        href: span.getAttribute("data-leaf-wikilink-href"),
+        modifier: withModifier
       });
     },
 

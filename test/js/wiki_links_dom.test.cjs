@@ -17,7 +17,7 @@ function wikiEditor(html, opts = {}) {
 
   e._wikiLinks = true;
   e._wikiLinksResolve = opts.resolve !== false;
-  e._wikiLinksFollow = opts.follow || "modifier";
+  e._wikiLinksFollow = opts.follow || "click"; // the shipped default
   e._hashtags = true;
   e._readonly = !!opts.readonly;
   e._editorId = "wl";
@@ -204,19 +204,84 @@ function clickFirstLink(e, mods) {
   return e.pushed.filter((p) => p.event === "link_clicked");
 }
 
-test("editing: a bare click places the caret rather than following", { skip }, () => {
+test("editing: a bare click is an action — Obsidian's live-preview gesture", { skip }, () => {
   const e = wikiEditor(LINKS);
+  const clicks = clickFirstLink(e, {});
 
-  assert.equal(clickFirstLink(e, {}).length, 0);
+  assert.equal(clicks.length, 1);
+  assert.equal(clicks[0].payload.target, "Ideas");
+  assert.equal(clicks[0].payload.modifier, false);
   e.cleanup();
 });
 
-test("editing: ctrl-click follows, as in Obsidian", { skip }, () => {
+test("editing: ctrl-click follows too, and says so", { skip }, () => {
+  // The host may mean something extra by the modifier — a new tab, say.
   const e = wikiEditor(LINKS);
   const clicks = clickFirstLink(e, { ctrlKey: true });
 
   assert.equal(clicks.length, 1);
-  assert.equal(clicks[0].payload.target, "Ideas");
+  assert.equal(clicks[0].payload.modifier, true);
+  e.cleanup();
+});
+
+test("a double-click means editing, not following", { skip }, () => {
+  const e = wikiEditor(LINKS);
+
+  assert.equal(clickFirstLink(e, { detail: 2 }).length, 0);
+  e.cleanup();
+});
+
+test("follow: modifier keeps the bare click for the caret", { skip }, () => {
+  const e = wikiEditor(LINKS, { follow: "modifier" });
+
+  assert.equal(clickFirstLink(e, {}).length, 0);
+  assert.equal(clickFirstLink(e, { ctrlKey: true }).length, 1);
+  e.cleanup();
+});
+
+// The other half of the click-follows gesture: the caret must never land on
+// the plain mousedown, or the row's source would reveal under a click that
+// meant "follow".
+function mousedownFirstLink(e, mods) {
+  const span = e._visualEl.querySelector("[data-leaf-wikilink]");
+  const event = new window.MouseEvent("mousedown", {
+    bubbles: true,
+    cancelable: true,
+    detail: 1,
+    ...mods,
+  });
+
+  Object.defineProperty(event, "target", { value: span });
+  e._onWikiLinkMouseDown(event);
+
+  return event;
+}
+
+test("a plain mousedown on a link never seats the caret", { skip }, () => {
+  const e = wikiEditor(LINKS);
+
+  assert.equal(mousedownFirstLink(e, {}).defaultPrevented, true);
+  e.cleanup();
+});
+
+test("shift+mousedown still extends a selection through the link", { skip }, () => {
+  const e = wikiEditor(LINKS);
+
+  assert.equal(mousedownFirstLink(e, { shiftKey: true }).defaultPrevented, false);
+  e.cleanup();
+});
+
+test("the second press of a double-click is an editing gesture", { skip }, () => {
+  const e = wikiEditor(LINKS);
+
+  assert.equal(mousedownFirstLink(e, { detail: 2 }).defaultPrevented, false);
+  e.cleanup();
+});
+
+test("follow: modifier never suppresses the caret", { skip }, () => {
+  const e = wikiEditor(LINKS, { follow: "modifier" });
+
+  assert.equal(mousedownFirstLink(e, {}).defaultPrevented, false);
   e.cleanup();
 });
 
@@ -289,4 +354,40 @@ test("follow: click lets a bare click follow while editing", { skip }, () => {
 
   assert.equal(clickFirstLink(e, {}).length, 1);
   e.cleanup();
+});
+
+
+test("a freshly typed link schedules its own resolution", { skip }, async () => {
+  // Mount and server pushes already resolve; a span minted mid-edit is
+  // exactly the one they both miss.
+  const e = wikiEditor();
+  const asked = [];
+  e._resolveWikiLinks = () => asked.push(true);
+
+  decorate(e, "see [[Fresh]] here");
+  assert.equal(asked.length, 0, "debounced, not mid-render");
+
+  await new Promise((r) => setTimeout(r, 250));
+  assert.equal(asked.length, 1);
+  e.cleanup();
+});
+
+test("resolve: false never schedules either", { skip }, async () => {
+  const e = wikiEditor("<p>x</p>", { resolve: false });
+  const asked = [];
+  e._resolveWikiLinks = () => asked.push(true);
+
+  decorate(e, "see [[Fresh]] here");
+  await new Promise((r) => setTimeout(r, 250));
+  assert.equal(asked.length, 0);
+  e.cleanup();
+});
+
+test("the shipped default is the live-preview gesture", { skip }, () => {
+  const fs = require("fs");
+  const src = fs.readFileSync(require.resolve("../../priv/static/assets/leaf.js"), "utf8");
+
+  const wired = src.match(/this\._wikiLinksFollow = this\.el\.dataset\.wikilinksFollow \|\| "(\w+)";/g);
+  assert.ok(wired && wired.length >= 2, "both dataset reads present");
+  wired.forEach((line) => assert.ok(line.includes('"click"'), line));
 });
