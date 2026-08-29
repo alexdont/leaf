@@ -12996,10 +12996,20 @@
         return false;
       }
 
-      var boxes = this._visualEl.querySelectorAll(".leaf-task-box");
+      // The box, and the row's list-marker span — the revealed "- [ ] " a
+      // covered row shows. NOT inline source markers (the ** around bold):
+      // those are body content a replacement may legitimately eat.
+      var chrome = this._visualEl.querySelectorAll(
+        ".leaf-task-box, .leaf-source-marker.leaf-list-marker"
+      );
 
-      for (var i = 0; i < boxes.length; i++) {
-        if (this._rangeContainsNode(range, boxes[i])) return true;
+      for (var i = 0; i < chrome.length; i++) {
+        if (
+          this._rangeContainsNode(range, chrome[i]) ||
+          chrome[i].contains(range.startContainer)
+        ) {
+          return true;
+        }
       }
 
       return false;
@@ -13041,15 +13051,25 @@
         return;
       }
 
-      var boxes = this._visualEl.querySelectorAll(".leaf-task-box");
+      var chrome = this._visualEl.querySelectorAll(
+        ".leaf-task-box, .leaf-source-marker.leaf-list-marker"
+      );
       var adjusted = false;
       var newRange = range.cloneRange();
 
-      for (var i = 0; i < boxes.length; i++) {
-        var box = boxes[i];
+      // Document order matters: the box precedes the marker span, and moving
+      // the start past the box leaves the marker contained for the next
+      // pass of the same loop. A start INSIDE a chrome element — a
+      // double-click that grabbed the revealed "- [ ] " — steps out the same
+      // way.
+      for (var i = 0; i < chrome.length; i++) {
+        var piece = chrome[i];
 
-        if (this._rangeContainsNode(newRange, box)) {
-          newRange.setStartAfter(box);
+        if (
+          this._rangeContainsNode(newRange, piece) ||
+          piece.contains(newRange.startContainer)
+        ) {
+          newRange.setStartAfter(piece);
           adjusted = true;
         }
       }

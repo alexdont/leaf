@@ -906,3 +906,76 @@ test("a box genuinely inside the range is still caught", { skip: dom.skip }, () 
 
   e.cleanup();
 });
+
+// The reporter's lone-word shape: the double-click grabbed the revealed
+// "- [ ] " marker along with the word. Shrinking past the box alone left the
+// marker span in the range — his engine refused the edit; the manual edit
+// here destroyed the whole row.
+test("a selection holding the revealed marker shrinks to the label", { skip: dom.skip }, () => {
+  const e = dom.editor(
+    '<ul><li data-leaf-source="li" class="leaf-task" data-checked="false">' +
+      '<span class="leaf-task-box" contenteditable="false"></span>' +
+      '<span class="leaf-source-marker leaf-list-marker">- [ ] </span>word</li></ul>',
+    "hybrid"
+  );
+  const li = e._visualEl.querySelector("li");
+  const r = document.createRange();
+  r.selectNodeContents(li);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+
+  assert.equal(e._selectionHoldsTaskBox(), true, "chrome in range — the takeover's case");
+
+  e._shrinkSelectionPastTaskBoxes();
+  assert.equal(String(window.getSelection()), "word",
+    "only the label stays selected — the marker and box survive a replacement");
+
+  e.cleanup();
+});
+
+test("a start inside the marker span steps out of it", { skip: dom.skip }, () => {
+  const e = dom.editor(
+    '<ul><li data-leaf-source="li" class="leaf-task" data-checked="false">' +
+      '<span class="leaf-task-box" contenteditable="false"></span>' +
+      '<span class="leaf-source-marker leaf-list-marker">- [ ] </span>word</li></ul>',
+    "hybrid"
+  );
+  const li = e._visualEl.querySelector("li");
+  const markerText = li.querySelector(".leaf-source-marker").firstChild;
+  const r = document.createRange();
+  r.setStart(markerText, 2);
+  r.setEnd(li.lastChild, 4);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+
+  assert.equal(e._selectionHoldsTaskBox(), true);
+  e._shrinkSelectionPastTaskBoxes();
+  assert.equal(String(window.getSelection()), "word");
+
+  e.cleanup();
+});
+
+test("inline bold markers are body content, not chrome", { skip: dom.skip }, () => {
+  const e = dom.editor(
+    '<ul><li class="leaf-task" data-checked="false"><span class="leaf-task-box" contenteditable="false"></span>' +
+      '<strong><span class="leaf-source-marker">**</span>bold<span class="leaf-source-marker">**</span></strong> word</li></ul>',
+    "hybrid"
+  );
+  const li = e._visualEl.querySelector("li");
+  const strong = li.querySelector("strong");
+  const r = document.createRange();
+  r.selectNodeContents(strong);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+
+  assert.equal(
+    e._selectionHoldsTaskBox(),
+    false,
+    "a replacement may legitimately eat the ** around bold"
+  );
+
+  e.cleanup();
+});
