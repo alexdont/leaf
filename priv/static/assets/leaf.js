@@ -323,6 +323,13 @@
     "  margin-right: 0.45em; border: 1.5px solid currentColor; border-radius: 0.25em;",
     "  position: relative; cursor: pointer; opacity: 0.65; box-sizing: border-box;",
     "}",
+    // A row wholly inside the selection paints its checkbox in the
+    // selection colour too. The box holds no text, so the native highlight
+    // skips it and a selected row read as "just the text".
+    ".content-editor-visual li.leaf-task.leaf-task-in-selection .leaf-task-box {",
+    "  background-color: rgba(59, 130, 246, 0.35);",
+    "  background-color: Highlight;",
+    "}",
     ".content-editor-visual li.leaf-task[data-checked='true'] .leaf-task-box {",
     "  background: currentColor; opacity: 0.85;",
     "}",
@@ -2038,6 +2045,17 @@
           this._onSelectionChange
         );
         this._onSelectionChange = null;
+      }
+      if (this._onTaskSelectionChange) {
+        document.removeEventListener(
+          "selectionchange",
+          this._onTaskSelectionChange
+        );
+        this._onTaskSelectionChange = null;
+      }
+      if (this._onTaskMouseUpBound) {
+        document.removeEventListener("mouseup", this._onTaskMouseUpBound);
+        this._onTaskMouseUpBound = null;
       }
       if (this._awarenessTimer) {
         clearTimeout(this._awarenessTimer);
@@ -12499,63 +12517,123 @@
 
     _setupTaskLists: function () {
       if (!this._visualEl) return;
-      var self = this;
-      // mousedown so we act before the browser places the caret (toggling
-      // the box, or pre-empting a caret that would otherwise strand itself
-      // "behind" the contenteditable=false box where nothing is typeable).
-      this._visualEl.addEventListener("mousedown", function (e) {
-        if (self._readonly) return;
-        var li = e.target.closest && e.target.closest("li.leaf-task");
-        if (!li) return;
-        var box = li.querySelector(".leaf-task-box");
-        if (!box) return;
 
-        // Click on the box → toggle.
-        if (e.target.closest(".leaf-task-box")) {
-          e.preventDefault();
-          e.stopPropagation();
-          li.setAttribute(
-            "data-checked",
-            li.getAttribute("data-checked") === "true" ? "false" : "true"
-          );
-          self._debouncedPushVisualChange();
-          return;
-        }
+      this._visualEl.addEventListener("mousedown", this._onTaskMouseDown.bind(this));
 
-        // Click in the gutter LEFT of the box: open the raw `- [ ] ` marker
-        // for editing. It is the one deliberate way in — the marker hides
-        // behind the checkbox everywhere else, including on freshly made
-        // rows, so without this gesture the source form would be
-        // unreachable on an empty item.
-        var boxRect = box.getBoundingClientRect();
-        if (boxRect.width > 0 && e.clientX < boxRect.left) {
-          e.preventDefault();
-          self._visualEl.focus({ preventScroll: true });
-          self._revealTaskMarker(li);
-          return;
-        }
+      // The gestures resolve on mouseup, and a drag can end anywhere — off
+      // the row, off the editor — so the up listener is document-wide.
+      this._onTaskMouseUpBound = this._onTaskMouseUp.bind(this);
+      document.addEventListener("mouseup", this._onTaskMouseUpBound);
 
-        // Would the caret land on/before the box? Place it at the task text
-        // instead — done on mousedown so there's no visible jump.
-        var pos = self._caretFromPoint(e.clientX, e.clientY);
-        if (!pos) return;
-        var stranded =
-          pos.node === box ||
-          box.contains(pos.node) ||
-          (pos.node === li && pos.offset === 0);
-        if (!stranded) return;
+      // Paint the checkbox as selected while its whole row is inside the
+      // selection. The box holds no text, so the browser's own highlight
+      // skips it — a fully selected row read as "just the text", as if the
+      // checkbox were being left behind.
+      this._onTaskSelectionChange = this._mirrorTaskSelection.bind(this);
+      document.addEventListener("selectionchange", this._onTaskSelectionChange);
+    },
 
+    // mousedown handles only what must beat the browser to the caret: the
+    // box toggle. Everything else used to be decided here too — and
+    // preventDefault on mousedown is how you make a row unselectable, since
+    // a drag-selection that starts in the gutter dies before it begins. The
+    // gutter and stranded-caret gestures wait for mouseup and only fire when
+    // no drag happened.
+    _onTaskMouseDown: function (e) {
+      if (this._readonly) return;
+      var li = e.target.closest && e.target.closest("li.leaf-task");
+      if (!li) return;
+      var box = li.querySelector(".leaf-task-box");
+      if (!box) return;
+
+      // Click on the box → toggle.
+      if (e.target.closest(".leaf-task-box")) {
         e.preventDefault();
-        self._visualEl.focus({ preventScroll: true });
-        var r = document.createRange();
-        var after = box.nextSibling;
-        if (after && after.nodeType === Node.TEXT_NODE) r.setStart(after, 0);
-        else r.setStartAfter(box);
-        r.collapse(true);
-        var sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(r);
-      });
+        e.stopPropagation();
+        li.setAttribute(
+          "data-checked",
+          li.getAttribute("data-checked") === "true" ? "false" : "true"
+        );
+        this._debouncedPushVisualChange();
+        return;
+      }
+
+      this._taskGesture = { li: li, x: e.clientX, y: e.clientY };
+    },
+
+    _onTaskMouseUp: function (e) {
+      var gesture = this._taskGesture;
+      this._taskGesture = null;
+      if (!gesture || this._readonly) return;
+
+      var li = gesture.li;
+      if (!li.isConnected) return;
+      var box = li.querySelector(".leaf-task-box");
+      if (!box) return;
+
+      // Any real movement, or any selection, means this was a drag — the
+      // person was selecting, and selecting must win.
+      if (Math.abs(e.clientX - gesture.x) + Math.abs(e.clientY - gesture.y) > 4) return;
+      var sel = window.getSelection();
+      if (sel && sel.rangeCount && !sel.isCollapsed) return;
+
+      // Click in the gutter LEFT of the box: open the raw `- [ ] ` marker
+      // for editing — the one deliberate way in, since the marker hides
+      // behind the checkbox everywhere else.
+      var boxRect = box.getBoundingClientRect();
+      if (boxRect.width > 0 && e.clientX < boxRect.left) {
+        this._visualEl.focus({ preventScroll: true });
+        this._revealTaskMarker(li);
+        return;
+      }
+
+      // Caret left stranded on/behind the box, where nothing is typeable?
+      // Move it to the label.
+      var pos = this._caretFromPoint(e.clientX, e.clientY);
+      if (!pos) return;
+      var stranded =
+        pos.node === box ||
+        box.contains(pos.node) ||
+        (pos.node === li && pos.offset === 0);
+      if (!stranded) return;
+
+      this._visualEl.focus({ preventScroll: true });
+      var r = document.createRange();
+      var after = box.nextSibling;
+      if (after && after.nodeType === Node.TEXT_NODE) r.setStart(after, 0);
+      else r.setStartAfter(box);
+      r.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(r);
+    },
+
+    // Mark every task row whose text the selection covers entirely, so CSS
+    // can paint its checkbox with the selection colour.
+    _mirrorTaskSelection: function () {
+      if (!this._visualEl) return;
+
+      var marked = this._visualEl.querySelectorAll("li.leaf-task-in-selection");
+      var covered = [];
+      var sel = window.getSelection();
+
+      if (
+        (this._mode === "visual" || this._mode === "hybrid") &&
+        sel &&
+        sel.rangeCount &&
+        !sel.isCollapsed
+      ) {
+        var range = sel.getRangeAt(0);
+        if (this._visualEl.contains(range.commonAncestorContainer)) {
+          covered = this._coveredTaskItems(range);
+        }
+      }
+
+      for (var i = 0; i < marked.length; i++) {
+        marked[i].classList.remove("leaf-task-in-selection");
+      }
+      for (var j = 0; j < covered.length; j++) {
+        covered[j].li.classList.add("leaf-task-in-selection");
+      }
     },
 
     // Put a task item into source mode with its `- [ ] ` marker revealed and
