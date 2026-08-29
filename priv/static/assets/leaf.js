@@ -12792,7 +12792,7 @@
           // stands as a plain line, the way Obsidian treats a selected
           // marker as just more text. Anything less keeps the chrome and
           // replaces only the label.
-          if (self._replaceWholeTaskRow(e.data || "")) {
+          if (self._replaceWholeListRow(e.data || "")) {
             self._taskLog("takeover: whole row replaced");
             return;
           }
@@ -12842,13 +12842,38 @@
         window.LEAF_DEBUG_TYPING = true;
         this._typingPanel = document.createElement("pre");
         this._typingPanel.setAttribute("data-leaf-typing-panel", "");
+        // pointer-events:none — the panel floats over the page, and a
+        // click meant for a row underneath must reach that row, not the
+        // panel. It swallowed such clicks once, and a swallowed click looks
+        // exactly like the bug being reported. The copy button is the one
+        // part that stays clickable.
         this._typingPanel.style.cssText =
           "position:fixed;bottom:0;right:0;max-width:46rem;max-height:14rem;" +
           "overflow:auto;background:#111;color:#9fe870;font-size:11px;" +
-          "padding:6px 8px;z-index:9999;opacity:0.92;margin:0;";
+          "padding:6px 8px;z-index:9999;opacity:0.92;margin:0;" +
+          "pointer-events:none;";
         this._typingPanel.textContent =
-          "[leaf] typing trace — reproduce, then copy this box\n";
+          "[leaf] typing trace — reproduce, then press copy\n";
+        var copyBtn = document.createElement("button");
+        copyBtn.type = "button";
+        copyBtn.textContent = "copy";
+        copyBtn.style.cssText =
+          "position:fixed;bottom:2px;right:2px;z-index:10000;font-size:10px;" +
+          "padding:1px 6px;pointer-events:auto;opacity:0.92;";
+        copyBtn.addEventListener("click", function () {
+          try {
+            navigator.clipboard.writeText(self._typingPanel.textContent);
+            copyBtn.textContent = "copied";
+            setTimeout(function () {
+              copyBtn.textContent = "copy";
+            }, 1200);
+          } catch (err) {
+            copyBtn.textContent = "select it manually";
+            self._typingPanel.style.pointerEvents = "auto";
+          }
+        });
         document.body.appendChild(this._typingPanel);
+        document.body.appendChild(copyBtn);
       }
 
       var log = function (label, details) {
@@ -12997,24 +13022,24 @@
       }
     },
 
-    // When the selection covers a task row's ENTIRE text — marker included —
+    // When the selection covers a list row's ENTIRE text — marker included —
     // replace the row itself: the item leaves its list and the typed text
-    // stands as a plain paragraph. Returns false when the selection is
-    // anything less, leaving the label-only path to handle it.
-    _replaceWholeTaskRow: function (text) {
+    // stands as a plain paragraph. Any list row: "- [ ]", "- ", "3. " are
+    // one rule. Returns false when the selection is anything less, leaving
+    // the label-only path to handle it.
+    _replaceWholeListRow: function (text) {
       var sel = window.getSelection();
       if (!sel || !sel.rangeCount || sel.isCollapsed) return false;
 
       var range = sel.getRangeAt(0);
       var host = range.commonAncestorContainer;
-      var li =
-        host.nodeType === 1 ? host.closest && host.closest("li.leaf-task") : null;
+      var li = host.nodeType === 1 ? host.closest && host.closest("li") : null;
       if (!li && host.parentNode && host.parentNode.closest) {
-        li = host.parentNode.closest("li.leaf-task");
+        li = host.parentNode.closest("li");
       }
       if (!li && host.nodeType === 1) {
         // A row-level range (li itself, or its list) — the triple-click shape.
-        var lis = host.querySelectorAll ? host.querySelectorAll("li.leaf-task") : [];
+        var lis = host.querySelectorAll ? host.querySelectorAll("li") : [];
         if (lis.length === 1) li = lis[0];
       }
       if (!li || !this._visualEl.contains(li)) return false;
@@ -13057,7 +13082,20 @@
         list.removeChild(li);
       } else {
         // Mid-list: the rows below move to a second list after the paragraph.
-        var tail = document.createElement(list.tagName.toLowerCase());
+        // A numbered tail keeps its numbers — without the start attribute the
+        // rows below would snap back to 1.
+        var tag = list.tagName.toLowerCase();
+        var tail = document.createElement(tag);
+
+        if (tag === "ol") {
+          var startAttr = parseInt(list.getAttribute("start"), 10);
+          var start = isNaN(startAttr) ? 1 : startAttr;
+          tail.setAttribute(
+            "start",
+            Array.prototype.indexOf.call(list.children, li) + start + 1
+          );
+        }
+
         while (li.nextElementSibling) tail.appendChild(li.nextElementSibling);
         list.removeChild(li);
         list.parentNode.insertBefore(paragraph, list.nextSibling);

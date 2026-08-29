@@ -1006,7 +1006,7 @@ test("the only row: the list itself becomes the paragraph", { skip: dom.skip }, 
   const e = dom.editor("<ul>" + TASK_LI + "</ul>", "hybrid");
   fullRowSelected(e);
 
-  assert.equal(e._replaceWholeTaskRow("R"), true);
+  assert.equal(e._replaceWholeListRow("R"), true);
   assert.equal(e._visualEl.querySelector("ul"), null, "an emptied list is not a list");
   assert.equal(e._visualEl.querySelector("p").textContent, "R");
 
@@ -1017,7 +1017,7 @@ test("the first row: the paragraph lands before the list", { skip: dom.skip }, (
   const e = dom.editor("<ul>" + TASK_LI + "<li>stays</li></ul>", "hybrid");
   fullRowSelected(e);
 
-  assert.equal(e._replaceWholeTaskRow("R"), true);
+  assert.equal(e._replaceWholeListRow("R"), true);
   const kids = e._visualEl.children;
   assert.equal(kids[0].tagName, "P");
   assert.equal(kids[1].tagName, "UL");
@@ -1030,7 +1030,7 @@ test("a mid-list row splits the list around the paragraph", { skip: dom.skip }, 
   const e = dom.editor("<ul><li>above</li>" + TASK_LI + "<li>below</li></ul>", "hybrid");
   fullRowSelected(e);
 
-  assert.equal(e._replaceWholeTaskRow("R"), true);
+  assert.equal(e._replaceWholeListRow("R"), true);
   const kids = e._visualEl.children;
   assert.equal(
     [kids[0].tagName, kids[1].tagName, kids[2].tagName].join(","),
@@ -1054,7 +1054,7 @@ test("less than the whole row falls through to the label path", { skip: dom.skip
   sel.removeAllRanges();
   sel.addRange(r);
 
-  assert.equal(e._replaceWholeTaskRow("R"), false, "the word is not the row");
+  assert.equal(e._replaceWholeListRow("R"), false, "the word is not the row");
   assert.ok(e._visualEl.querySelector("li.leaf-task"), "and nothing was replaced");
 
   e.cleanup();
@@ -1068,8 +1068,79 @@ test("the takeover consults the whole-row branch before shrinking", { skip: dom.
     src.indexOf("_setupTypingDiagnostics: function")
   );
 
-  const wholeRow = gate.indexOf("_replaceWholeTaskRow(e.data");
+  const wholeRow = gate.indexOf("_replaceWholeListRow(e.data");
   const shrink = gate.indexOf("_shrinkSelectionPastTaskBoxes()");
   assert.ok(wholeRow >= 0, "the whole-row branch must be wired in");
   assert.ok(wholeRow < shrink, "and asked FIRST — the shrink is the lesser intent");
+});
+
+// "- [ ]", "- ", "3. " — one rule. A wholly selected row of ANY list kind is
+// replaced whole, chrome and all.
+
+function markedLi(marker, label) {
+  return (
+    '<li><span class="leaf-source-marker leaf-list-marker">' +
+    marker +
+    "</span>" +
+    label +
+    "</li>"
+  );
+}
+
+function selectWholeLi(e) {
+  const li = e._visualEl.querySelector("ul li, ol li");
+  const r = document.createRange();
+  r.selectNodeContents(li);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+  return li;
+}
+
+test("a whole bullet row goes the way of the checkbox row", { skip: dom.skip }, () => {
+  const e = dom.editor("<ul>" + markedLi("- ", "word") + "</ul>", "hybrid");
+  selectWholeLi(e);
+
+  assert.equal(e._replaceWholeListRow("R"), true);
+  assert.equal(e._visualEl.querySelector("ul"), null);
+  assert.equal(e._visualEl.querySelector("p").textContent, "R");
+
+  e.cleanup();
+});
+
+test("a numbered tail keeps its numbers after the split", { skip: dom.skip }, () => {
+  const e = dom.editor(
+    "<ol><li>one</li>" + markedLi("2. ", "two") + "<li>three</li></ol>",
+    "hybrid"
+  );
+  const li = e._visualEl.querySelectorAll("ol li")[1];
+  const r = document.createRange();
+  r.selectNodeContents(li);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+
+  assert.equal(e._replaceWholeListRow("R"), true);
+  const kids = e._visualEl.children;
+  assert.equal([kids[0].tagName, kids[1].tagName, kids[2].tagName].join(","), "OL,P,OL");
+  assert.equal(kids[2].getAttribute("start"), "3", "the row below is still number three");
+  assert.equal(kids[2].textContent, "three");
+
+  e.cleanup();
+});
+
+test("a bullet label alone is still just a label", { skip: dom.skip }, () => {
+  const e = dom.editor("<ul>" + markedLi("- ", "word") + "</ul>", "hybrid");
+  const text = e._visualEl.querySelector("li").lastChild;
+  const r = document.createRange();
+  r.setStart(text, 0);
+  r.setEnd(text, 4);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+
+  assert.equal(e._replaceWholeListRow("R"), false, "no chrome in hand, no row replaced");
+  assert.ok(e._visualEl.querySelector("ul li"), "the bullet row survives");
+
+  e.cleanup();
 });
