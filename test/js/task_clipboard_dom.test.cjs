@@ -482,3 +482,89 @@ test("cut on bullet rows removes them and their emptied list", { skip: dom.skip 
 
   e.cleanup();
 });
+
+// ---------------------------------------------------------------------------
+// The mirror must never mutate mid-keystroke
+// ---------------------------------------------------------------------------
+//
+// Typing over a selection is one editing command: the browser deletes the
+// selection, a selectionchange fires in the middle, and then the key is
+// inserted. A DOM mutation from inside that event makes engines abandon the
+// insertion — so marked rows being unmarked synchronously killed the
+// keystroke: select a word in a short row, type, nothing.
+
+test("the selectionchange listener defers; nothing mutates synchronously", { skip: dom.skip }, async () => {
+  const e = dom.editor(
+    '<ul><li class="leaf-task" data-checked="false"><span class="leaf-task-box" contenteditable="false"></span>word</li></ul>',
+    "hybrid"
+  );
+  const li = e._visualEl.querySelector("li");
+  selectAll(li);
+
+  e._scheduleTaskSelectionMirror();
+  assert.equal(
+    li.classList.contains("leaf-row-in-selection"),
+    false,
+    "inside the event, the DOM must be left exactly alone"
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(
+    li.classList.contains("leaf-row-in-selection"),
+    true,
+    "the reveal lands a frame later, after the editing command is done"
+  );
+
+  e.cleanup();
+});
+
+test("a burst of selection changes coalesces into one deferred run", { skip: dom.skip }, async () => {
+  const e = dom.editor("<ul><li>word</li></ul>", "hybrid");
+  let runs = 0;
+  const real = e._mirrorTaskSelection.bind(e);
+  e._mirrorTaskSelection = () => {
+    runs++;
+    real();
+  };
+
+  e._scheduleTaskSelectionMirror();
+  e._scheduleTaskSelectionMirror();
+  e._scheduleTaskSelectionMirror();
+
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(runs, 1, "a drag fires selectionchange constantly; one run answers them all");
+
+  e.cleanup();
+});
+
+test("an unchanged covered set writes nothing to the DOM", { skip: dom.skip }, async () => {
+  const e = dom.editor("<ul><li>word</li></ul>", "hybrid");
+  const li = e._visualEl.querySelector("li");
+  selectAll(li);
+
+  e._mirrorTaskSelection();
+  assert.equal(li.classList.contains("leaf-row-in-selection"), true);
+
+  const observer = new window.MutationObserver(() => {});
+  observer.observe(li, { attributes: true });
+
+  // The selection has not moved; the mirror runs again (as it does on every
+  // selectionchange during a drag) and must have nothing to say.
+  e._mirrorTaskSelection();
+
+  assert.deepEqual(observer.takeRecords(), [], "rewriting the same state is churn");
+  observer.disconnect();
+
+  e.cleanup();
+});
+
+test("the listener is the scheduler, not the mirror itself", { skip: dom.skip }, () => {
+  const fs = require("fs");
+  const src = fs.readFileSync(require.resolve("../../priv/static/assets/leaf.js"), "utf8");
+
+  assert.match(
+    src,
+    /this\._onTaskSelectionChange = this\._scheduleTaskSelectionMirror\.bind\(this\)/,
+    "wiring the mirror in directly is the bug back again"
+  );
+});

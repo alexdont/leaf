@@ -12657,11 +12657,14 @@
       this._onTaskMouseUpBound = this._onTaskMouseUp.bind(this);
       document.addEventListener("mouseup", this._onTaskMouseUpBound);
 
-      // Paint the checkbox as selected while its whole row is inside the
-      // selection. The box holds no text, so the browser's own highlight
-      // skips it — a fully selected row read as "just the text", as if the
-      // checkbox were being left behind.
-      this._onTaskSelectionChange = this._mirrorTaskSelection.bind(this);
+      // Reveal covered rows' markers while they are inside the selection.
+      // DEFERRED, never synchronous: typing over a selection makes the
+      // browser delete it and insert the key in one editing command, with a
+      // selectionchange fired in the middle — and a DOM mutation from inside
+      // that event makes engines abandon the insertion. Marked rows got
+      // unmarked mid-keystroke, and the keystroke died with it: select a
+      // word, type, and nothing happened.
+      this._onTaskSelectionChange = this._scheduleTaskSelectionMirror.bind(this);
       document.addEventListener("selectionchange", this._onTaskSelectionChange);
     },
 
@@ -12739,6 +12742,26 @@
       sel.addRange(r);
     },
 
+    // One deferred run per burst of selection changes. requestAnimationFrame
+    // lands after the editing command that triggered the change has finished
+    // with the DOM, which is the entire point.
+    _scheduleTaskSelectionMirror: function () {
+      if (this._taskMirrorScheduled) return;
+      this._taskMirrorScheduled = true;
+
+      var self = this;
+      var run = function () {
+        self._taskMirrorScheduled = false;
+        self._mirrorTaskSelection();
+      };
+
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(run);
+      } else {
+        setTimeout(run, 0);
+      }
+    },
+
     // Mark every list row whose text the selection covers entirely, carrying
     // the literal marker it would show in source form, so CSS can reveal
     // "- " / "3. " / "- [x] " under the sweep the way Obsidian does.
@@ -12761,7 +12784,14 @@
         }
       }
 
+      var keep = [];
+      for (var j2 = 0; j2 < covered.length; j2++) keep.push(covered[j2].li);
+
       for (var i = 0; i < marked.length; i++) {
+        // Still covered: leave it exactly as it is. A drag extending across
+        // a marked row fires selectionchange constantly, and rewriting the
+        // same class is churn with no message.
+        if (keep.indexOf(marked[i]) !== -1) continue;
         marked[i].classList.remove("leaf-row-in-selection");
         marked[i].removeAttribute("data-leaf-selmarker");
         // A source-mode row had its real marker revealed below; hand it
@@ -12774,7 +12804,9 @@
       }
       for (var j = 0; j < covered.length; j++) {
         var row = covered[j].li;
-        row.classList.add("leaf-row-in-selection");
+        if (!row.classList.contains("leaf-row-in-selection")) {
+          row.classList.add("leaf-row-in-selection");
+        }
 
         if (row.hasAttribute("data-leaf-source")) {
           // A row already in source form carries its real marker as hidden
@@ -12782,7 +12814,7 @@
           // survives — and since that text sits inside the selected range,
           // the native highlight paints it: the genuine Obsidian article.
           row.classList.add("leaf-marker-active");
-        } else {
+        } else if (row.getAttribute("data-leaf-selmarker") !== covered[j].marker) {
           row.setAttribute("data-leaf-selmarker", covered[j].marker);
         }
       }
