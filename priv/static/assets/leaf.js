@@ -2465,6 +2465,18 @@
     _onVisualKeydown: function (e) {
       if (this._readonly) return;
 
+      // A selection that swallowed a task box is one some engines refuse to
+      // edit: the box is contenteditable=false, and an edit whose range
+      // contains a non-editable island is silently dropped. Double-click on
+      // the first word can anchor the range at the row boundary — before the
+      // box — and a whole-row sweep contains it outright; both LOOK like
+      // ordinary text selections, and typing over them did nothing. Shrink
+      // the range to the text before the engine sees the key, and the same
+      // gesture behaves like it does on a plain bullet row. The box itself
+      // survives a replacement, which is also the sane semantic: replacing a
+      // row's words should not eat its checkbox.
+      this._shrinkSelectionPastTaskBoxes();
+
       // While the suggestion popup is open it owns ↑/↓/Enter/Tab/Esc. This
       // has to come first so Enter can't also run the list auto-continue
       // further down.
@@ -12894,6 +12906,59 @@
       } catch (err) {
         /* consoles */
       }
+    },
+
+    // Move a selection's boundaries off any task box they contain or sit
+    // before, without changing which TEXT is selected. Boundaries at element
+    // level (li@0, before the box) select the same characters as boundaries
+    // in the text — but only the text-level form is one every engine will
+    // let an edit replace.
+    _shrinkSelectionPastTaskBoxes: function () {
+      var sel = window.getSelection();
+      if (!sel || !sel.rangeCount || sel.isCollapsed) return;
+
+      var range = sel.getRangeAt(0);
+      if (!this._visualEl || !this._visualEl.contains(range.commonAncestorContainer)) {
+        return;
+      }
+
+      var boxes = this._visualEl.querySelectorAll(".leaf-task-box");
+      var adjusted = false;
+      var newRange = range.cloneRange();
+
+      for (var i = 0; i < boxes.length; i++) {
+        var box = boxes[i];
+
+        var boxRange = document.createRange();
+        boxRange.selectNode(box);
+
+        // The box is inside the selection (or the start boundary sits at or
+        // before it) exactly when the selection starts no later than the
+        // box's start and ends after the box's start.
+        var startsBeforeBox =
+          newRange.compareBoundaryPoints(Range.START_TO_START, boxRange) <= 0;
+        var endsAfterBox =
+          newRange.compareBoundaryPoints(Range.END_TO_START, boxRange) < 0;
+
+        if (startsBeforeBox && endsAfterBox) {
+          newRange.setStartAfter(box);
+          adjusted = true;
+        }
+      }
+
+      if (!adjusted) return;
+
+      // Anchor the start inside the first TEXT after the box when there is
+      // one, so the boundary is unambiguous to the engine.
+      var startNode = newRange.startContainer;
+      if (startNode.nodeType !== 3) {
+        var probe = startNode.childNodes[newRange.startOffset];
+        if (probe && probe.nodeType === 3) newRange.setStart(probe, 0);
+      }
+
+      this._taskLog("selection shrunk past task box");
+      sel.removeAllRanges();
+      sel.addRange(newRange);
     },
 
     _onTaskMouseDown: function (e) {

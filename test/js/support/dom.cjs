@@ -41,6 +41,7 @@ function hook() {
   global.window = dom.window;
   global.document = dom.window.document;
   global.Node = dom.window.Node;
+  global.Range = dom.window.Range;
   global.NodeFilter = dom.window.NodeFilter;
   global.Event = dom.window.Event;
   global.KeyboardEvent = dom.window.KeyboardEvent;

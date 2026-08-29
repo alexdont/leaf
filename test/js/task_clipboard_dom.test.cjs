@@ -716,3 +716,101 @@ test("a single click in the stranding zone still gets corrected", { skip: dom.sk
 
   e.cleanup();
 });
+
+// ---------------------------------------------------------------------------
+// Selections that swallowed the box get shrunk before the engine edits
+// ---------------------------------------------------------------------------
+//
+// An edit whose range contains a contenteditable=false island is silently
+// dropped by some engines. Double-click on the first word can anchor the
+// range at the row boundary — before the box — and a whole-row sweep
+// contains it outright; both look like ordinary text selections, and typing
+// over them did nothing. Plain rows have no box, which is why "lists work,
+// checkboxes don't".
+
+test("a range starting before the box is shrunk to its text", { skip: dom.skip }, () => {
+  const e = dom.editor(
+    '<ul><li class="leaf-task" data-checked="false"><span class="leaf-task-box" contenteditable="false"></span>does yes</li></ul>',
+    "hybrid"
+  );
+  const li = e._visualEl.querySelector("li");
+  const text = li.lastChild;
+
+  // The dblclick-on-first-word shape: start at (li, 0) — BEFORE the box —
+  // end after "does". Selects the same characters as a text-anchored range.
+  const r = document.createRange();
+  r.setStart(li, 0);
+  r.setEnd(text, 4);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+
+  e._shrinkSelectionPastTaskBoxes();
+
+  const after = window.getSelection().getRangeAt(0);
+  assert.equal(after.startContainer, text, "anchored in the text, past the box");
+  assert.equal(after.startOffset, 0);
+  assert.equal(String(window.getSelection()), "does", "the selected characters are unchanged");
+
+  e.cleanup();
+});
+
+test("a whole-row sweep keeps its text but releases the box", { skip: dom.skip }, () => {
+  const e = dom.editor(
+    '<ul><li class="leaf-task" data-checked="false"><span class="leaf-task-box" contenteditable="false"></span>does yes</li></ul>',
+    "hybrid"
+  );
+  const li = e._visualEl.querySelector("li");
+
+  const r = document.createRange();
+  r.selectNodeContents(li);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+
+  e._shrinkSelectionPastTaskBoxes();
+
+  const after = window.getSelection().getRangeAt(0);
+  const boxRange = document.createRange();
+  boxRange.selectNode(li.querySelector(".leaf-task-box"));
+  assert.equal(
+    after.compareBoundaryPoints(Range.START_TO_START, boxRange) > 0,
+    true,
+    "the box is out of the range — an engine will now accept the edit"
+  );
+  assert.equal(String(window.getSelection()), "does yes", "every character still selected");
+
+  e.cleanup();
+});
+
+test("a text-only selection is left untouched", { skip: dom.skip }, () => {
+  const e = dom.editor(
+    '<ul><li class="leaf-task" data-checked="false"><span class="leaf-task-box" contenteditable="false"></span>does yes</li></ul>',
+    "hybrid"
+  );
+  const text = e._visualEl.querySelector("li").lastChild;
+  const r = document.createRange();
+  r.setStart(text, 0);
+  r.setEnd(text, 4);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+
+  e._shrinkSelectionPastTaskBoxes();
+
+  const after = window.getSelection().getRangeAt(0);
+  assert.equal(after.startContainer, text);
+  assert.equal(after.startOffset, 0, "already editable — nothing to fix, nothing touched");
+
+  e.cleanup();
+});
+
+test("keydown runs the shrink before anything else can decline", { skip: dom.skip }, () => {
+  const fs = require("fs");
+  const src = fs.readFileSync(require.resolve("../../priv/static/assets/leaf.js"), "utf8");
+  const head = src.slice(
+    src.indexOf("_onVisualKeydown: function"),
+    src.indexOf("_suggestKeydown(e)")
+  );
+  assert.match(head, /_shrinkSelectionPastTaskBoxes\(\)/, "the fix is only real if the key path runs it");
+});
