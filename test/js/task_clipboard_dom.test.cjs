@@ -979,3 +979,97 @@ test("inline bold markers are body content, not chrome", { skip: dom.skip }, () 
 
   e.cleanup();
 });
+
+// ---------------------------------------------------------------------------
+// Selecting the WHOLE row means replacing the whole row
+// ---------------------------------------------------------------------------
+//
+// Triple-click grabs "- [ ] test test test" — marker and all — and typing
+// should leave a plain line of the typed text, the way Obsidian treats a
+// selected marker as just more text. Anything less than the whole row keeps
+// the checkbox and replaces only what was selected.
+
+function fullRowSelected(e) {
+  const li = e._visualEl.querySelector("li.leaf-task");
+  const r = document.createRange();
+  r.selectNodeContents(li);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+  return li;
+}
+
+const TASK_LI =
+  '<li class="leaf-task" data-checked="false"><span class="leaf-task-box" contenteditable="false"></span>test</li>';
+
+test("the only row: the list itself becomes the paragraph", { skip: dom.skip }, () => {
+  const e = dom.editor("<ul>" + TASK_LI + "</ul>", "hybrid");
+  fullRowSelected(e);
+
+  assert.equal(e._replaceWholeTaskRow("R"), true);
+  assert.equal(e._visualEl.querySelector("ul"), null, "an emptied list is not a list");
+  assert.equal(e._visualEl.querySelector("p").textContent, "R");
+
+  e.cleanup();
+});
+
+test("the first row: the paragraph lands before the list", { skip: dom.skip }, () => {
+  const e = dom.editor("<ul>" + TASK_LI + "<li>stays</li></ul>", "hybrid");
+  fullRowSelected(e);
+
+  assert.equal(e._replaceWholeTaskRow("R"), true);
+  const kids = e._visualEl.children;
+  assert.equal(kids[0].tagName, "P");
+  assert.equal(kids[1].tagName, "UL");
+  assert.equal(kids[1].textContent, "stays");
+
+  e.cleanup();
+});
+
+test("a mid-list row splits the list around the paragraph", { skip: dom.skip }, () => {
+  const e = dom.editor("<ul><li>above</li>" + TASK_LI + "<li>below</li></ul>", "hybrid");
+  fullRowSelected(e);
+
+  assert.equal(e._replaceWholeTaskRow("R"), true);
+  const kids = e._visualEl.children;
+  assert.equal(
+    [kids[0].tagName, kids[1].tagName, kids[2].tagName].join(","),
+    "UL,P,UL",
+    "the rows below keep their list"
+  );
+  assert.equal(kids[0].textContent, "above");
+  assert.equal(kids[2].textContent, "below");
+
+  e.cleanup();
+});
+
+test("less than the whole row falls through to the label path", { skip: dom.skip }, () => {
+  const e = dom.editor("<ul>" + TASK_LI + "</ul>", "hybrid");
+  const li = e._visualEl.querySelector("li");
+  const text = li.lastChild;
+  const r = document.createRange();
+  r.setStart(text, 0);
+  r.setEnd(text, 4);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+
+  assert.equal(e._replaceWholeTaskRow("R"), false, "the word is not the row");
+  assert.ok(e._visualEl.querySelector("li.leaf-task"), "and nothing was replaced");
+
+  e.cleanup();
+});
+
+test("the takeover consults the whole-row branch before shrinking", { skip: dom.skip }, () => {
+  const fs = require("fs");
+  const src = fs.readFileSync(require.resolve("../../priv/static/assets/leaf.js"), "utf8");
+  const gate = src.slice(
+    src.indexOf("_setupCommandWindow: function"),
+    src.indexOf("_setupTypingDiagnostics: function")
+  );
+
+  const wholeRow = gate.indexOf("_replaceWholeTaskRow(e.data");
+  const shrink = gate.indexOf("_shrinkSelectionPastTaskBoxes()");
+  assert.ok(wholeRow >= 0, "the whole-row branch must be wired in");
+  assert.ok(wholeRow < shrink, "and asked FIRST — the shrink is the lesser intent");
+});

@@ -12785,6 +12785,18 @@
         if (e.inputType === "insertText" && self._selectionHoldsTaskBox()) {
           e.preventDefault();
           self._typingCommandOpen = false;
+
+          // Two intents, told apart by what was selected. The WHOLE row —
+          // marker and all, the triple-click shape — means the row itself is
+          // being replaced: the item leaves its list and the typed text
+          // stands as a plain line, the way Obsidian treats a selected
+          // marker as just more text. Anything less keeps the chrome and
+          // replaces only the label.
+          if (self._replaceWholeTaskRow(e.data || "")) {
+            self._taskLog("takeover: whole row replaced");
+            return;
+          }
+
           self._taskLog("takeover: insertText over box-holding range");
           self._shrinkSelectionPastTaskBoxes();
           self._taskLog("takeover: after shrink");
@@ -12983,6 +12995,83 @@
       } catch (err) {
         /* consoles */
       }
+    },
+
+    // When the selection covers a task row's ENTIRE text — marker included —
+    // replace the row itself: the item leaves its list and the typed text
+    // stands as a plain paragraph. Returns false when the selection is
+    // anything less, leaving the label-only path to handle it.
+    _replaceWholeTaskRow: function (text) {
+      var sel = window.getSelection();
+      if (!sel || !sel.rangeCount || sel.isCollapsed) return false;
+
+      var range = sel.getRangeAt(0);
+      var host = range.commonAncestorContainer;
+      var li =
+        host.nodeType === 1 ? host.closest && host.closest("li.leaf-task") : null;
+      if (!li && host.parentNode && host.parentNode.closest) {
+        li = host.parentNode.closest("li.leaf-task");
+      }
+      if (!li && host.nodeType === 1) {
+        // A row-level range (li itself, or its list) — the triple-click shape.
+        var lis = host.querySelectorAll ? host.querySelectorAll("li.leaf-task") : [];
+        if (lis.length === 1) li = lis[0];
+      }
+      if (!li || !this._visualEl.contains(li)) return false;
+
+      var scrub = function (t) {
+        return (t || "").replace(/[\u200B\uFEFF\s\u00a0]/g, "");
+      };
+      if (scrub(range.toString()) !== scrub(li.textContent)) return false;
+
+      // Text equality is not enough: on a lone-word row the label IS all the
+      // text, and a double-clicked word must stay a label replacement. The
+      // row is only "wholly selected" when the selection structurally holds
+      // its chrome — the box, or the marker span the reveal made visible.
+      var box = li.querySelector(".leaf-task-box");
+      var marker = li.querySelector(".leaf-source-marker.leaf-list-marker");
+      var holdsChrome =
+        (box &&
+          (this._rangeContainsNode(range, box) || box.contains(range.startContainer))) ||
+        (marker &&
+          (this._rangeContainsNode(range, marker) || marker.contains(range.startContainer)));
+      if (!holdsChrome) return false;
+
+      var list = li.parentNode;
+      if (!list || !list.parentNode) return false;
+
+      var paragraph = document.createElement("p");
+      var inserted = document.createTextNode(text);
+      paragraph.appendChild(inserted);
+      if (text === "") paragraph.appendChild(document.createElement("br"));
+
+      this._forgetSourceBlock(li);
+
+      if (list.children.length === 1) {
+        list.parentNode.replaceChild(paragraph, list);
+      } else if (!li.previousElementSibling) {
+        list.parentNode.insertBefore(paragraph, list);
+        list.removeChild(li);
+      } else if (!li.nextElementSibling) {
+        list.parentNode.insertBefore(paragraph, list.nextSibling);
+        list.removeChild(li);
+      } else {
+        // Mid-list: the rows below move to a second list after the paragraph.
+        var tail = document.createElement(list.tagName.toLowerCase());
+        while (li.nextElementSibling) tail.appendChild(li.nextElementSibling);
+        list.removeChild(li);
+        list.parentNode.insertBefore(paragraph, list.nextSibling);
+        paragraph.parentNode.insertBefore(tail, paragraph.nextSibling);
+      }
+
+      var caret = document.createRange();
+      caret.setStart(inserted, inserted.length);
+      caret.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(caret);
+
+      this._visualEl.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
     },
 
     // Whether the current selection's range holds a task box — the shape
