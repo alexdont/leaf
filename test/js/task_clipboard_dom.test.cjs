@@ -493,7 +493,39 @@ test("cut on bullet rows removes them and their emptied list", { skip: dom.skip 
 // insertion — so marked rows being unmarked synchronously killed the
 // keystroke: select a word in a short row, type, nothing.
 
-test("the selectionchange listener defers; nothing mutates synchronously", { skip: dom.skip }, async () => {
+test("mid-command, the mirror waits; idle, it runs at once", { skip: dom.skip }, () => {
+  const e = dom.editor(
+    '<ul><li class="leaf-task" data-checked="false"><span class="leaf-task-box" contenteditable="false"></span>word</li></ul>',
+    "hybrid"
+  );
+  const li = e._visualEl.querySelector("li");
+  selectAll(li);
+
+  // An editing command is in flight: the browser is between beforeinput and
+  // input, and a DOM mutation here is what killed the keystroke.
+  e._typingCommandOpen = true;
+  e._scheduleTaskSelectionMirror();
+  assert.equal(
+    li.classList.contains("leaf-row-in-selection"),
+    false,
+    "mid-command, the DOM must be left exactly alone"
+  );
+
+  // The command completes; its input event flushes the queue.
+  e._flushAfterCommand();
+  assert.equal(
+    li.classList.contains("leaf-row-in-selection"),
+    true,
+    "and the deferred work lands immediately after, before any next keystroke"
+  );
+
+  e.cleanup();
+});
+
+test("idle scheduling is synchronous — deferring always re-broke typing order", { skip: dom.skip }, () => {
+  // The first cure deferred everything to the next frame; the marker
+  // auto-format rebuild then landed BETWEEN keystrokes and re-seated the
+  // caret, so fast typing interleaved out of order. Idle work must not wait.
   const e = dom.editor(
     '<ul><li class="leaf-task" data-checked="false"><span class="leaf-task-box" contenteditable="false"></span>word</li></ul>',
     "hybrid"
@@ -504,21 +536,14 @@ test("the selectionchange listener defers; nothing mutates synchronously", { ski
   e._scheduleTaskSelectionMirror();
   assert.equal(
     li.classList.contains("leaf-row-in-selection"),
-    false,
-    "inside the event, the DOM must be left exactly alone"
-  );
-
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  assert.equal(
-    li.classList.contains("leaf-row-in-selection"),
     true,
-    "the reveal lands a frame later, after the editing command is done"
+    "no command in flight, no reason to wait"
   );
 
   e.cleanup();
 });
 
-test("a burst of selection changes coalesces into one deferred run", { skip: dom.skip }, async () => {
+test("a burst mid-command coalesces into one run at the flush", { skip: dom.skip }, () => {
   const e = dom.editor("<ul><li>word</li></ul>", "hybrid");
   let runs = 0;
   const real = e._mirrorTaskSelection.bind(e);
@@ -527,12 +552,14 @@ test("a burst of selection changes coalesces into one deferred run", { skip: dom
     real();
   };
 
+  e._typingCommandOpen = true;
   e._scheduleTaskSelectionMirror();
   e._scheduleTaskSelectionMirror();
   e._scheduleTaskSelectionMirror();
+  assert.equal(runs, 0, "nothing until the command completes");
 
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  assert.equal(runs, 1, "a drag fires selectionchange constantly; one run answers them all");
+  e._flushAfterCommand();
+  assert.equal(runs, 1, "one run answers the whole burst");
 
   e.cleanup();
 });
@@ -569,11 +596,28 @@ test("the listener is the scheduler, not the mirror itself", { skip: dom.skip },
   );
 });
 
-test("the source machinery is deferred off selectionchange too", { skip: dom.skip }, () => {
-  // The same editing-command collision, one listener over: this one is the
-  // source machinery's only driver, and entering/refreshing source mode
-  // rebuilds the block's children — done synchronously mid-command, the
-  // keystroke's insertion finds its target gone and dies.
+test("input is what flushes the command gate", { skip: dom.skip }, () => {
+  // The queue drains on the command's own input event — calling the flush by
+  // hand in tests proves nothing about the wiring that makes it real.
+  const fs = require("fs");
+  const src = fs.readFileSync(require.resolve("../../priv/static/assets/leaf.js"), "utf8");
+  const setup = src.slice(
+    src.indexOf("_setupCommandWindow: function"),
+    src.indexOf("_setupTypingDiagnostics: function")
+  );
+
+  assert.match(setup, /addEventListener\("beforeinput"/, "beforeinput opens the window");
+  assert.match(
+    setup,
+    /addEventListener\("input", function \(\) \{\s*self\._flushAfterCommand\(\);/,
+    "and input closes it, flushing what waited"
+  );
+});
+
+test("the source machinery goes through the command gate too", { skip: dom.skip }, () => {
+  // Same editing-command collision, one listener over: entering/refreshing
+  // source mode rebuilds the block's children, and doing that synchronously
+  // mid-command killed the keystroke's insertion.
   const fs = require("fs");
   const src = fs.readFileSync(require.resolve("../../priv/static/assets/leaf.js"), "utf8");
 
@@ -582,16 +626,11 @@ test("the source machinery is deferred off selectionchange too", { skip: dom.ski
     src.indexOf("_updateSyntaxDecorations:")
   );
 
-  assert.match(listener, /_sourceUpdateScheduled/, "coalesced like the mirror");
-  assert.ok(
-    /requestAnimationFrame\(run\)/.test(listener),
-    "and pushed past the editing command before _updateSourceBlock may run"
-  );
-  assert.ok(
-    listener.indexOf("requestAnimationFrame") <
-      listener.indexOf("self._updateSourceBlock()") ||
-      /var run = function/.test(listener),
-    "the update lives inside the deferred body"
+  assert.match(listener, /_sourceUpdateScheduled/, "coalesced");
+  assert.match(
+    listener,
+    /_afterEditingCommand\(run\)/,
+    "dispatched through the gate: sync when idle, after the command when not"
   );
 });
 

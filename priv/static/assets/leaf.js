@@ -6302,11 +6302,7 @@
           }
         };
 
-        if (typeof requestAnimationFrame === "function") {
-          requestAnimationFrame(run);
-        } else {
-          setTimeout(run, 0);
-        }
+        self._afterEditingCommand(run);
       });
 
     },
@@ -11218,6 +11214,42 @@
           (cursorOffset < scan.blockPrefixLen ||
             (!scan.isTask && sourceText.length <= scan.blockPrefixLen));
         this._sourceBlock.classList.toggle("leaf-marker-active", markerActive);
+
+        // The marker just hid with the caret still inside it — display:none
+        // means the engine parks the visible caret before the span, so the
+        // next keystroke prepends to the row, the serialization loses its
+        // leading marker, and the item breaks out to a paragraph: typing
+        // "- [ ] h" produced "h- [ ] " in a plain <p>. Seat the caret in a
+        // placeholder AFTER the marker instead. Done here, not only in the
+        // rebuild, because a class flip happens without one.
+        if (scan.isTask && !markerActive) {
+          var hiddenMarker = this._sourceBlock.querySelector(".leaf-source-marker");
+          var homeSel = window.getSelection();
+
+          if (
+            hiddenMarker &&
+            homeSel.rangeCount &&
+            hiddenMarker.contains(homeSel.getRangeAt(0).startContainer)
+          ) {
+            var home = hiddenMarker.nextSibling;
+
+            if (!home || home.nodeType !== 3) {
+              home = document.createTextNode("\u200B");
+              this._syntaxMutating = true;
+              try {
+                this._sourceBlock.insertBefore(home, hiddenMarker.nextSibling);
+              } finally {
+                this._syntaxMutating = false;
+              }
+            }
+
+            var homeRange = document.createRange();
+            homeRange.setStart(home, home.nodeValue ? Math.min(1, home.nodeValue.length) : 0);
+            homeRange.collapse(true);
+            homeSel.removeAllRanges();
+            homeSel.addRange(homeRange);
+          }
+        }
         // Marker just deleted (`- ` / `N. ` gone) — the item is no longer a
         // list item (it breaks out to a `<p>` on cursor-leave). Hide the
         // bullet / number NOW so the broken formatting shows immediately,
@@ -12681,6 +12713,53 @@
     // started the edit and abandoned it — and the mutation count says
     // whether script moved the DOM under it. No [leaf-typing] lines at all
     // while typing means the editor does not have focus.
+    // Selection-driven work — source mode following the caret, the row
+    // mirror — must never mutate the DOM in the middle of an editing
+    // command: engines abandon the insertion when script moves the DOM
+    // under them. But a fixed one-frame deferral is too blunt the other
+    // way: the marker auto-format rebuild landed BETWEEN keystrokes and
+    // re-seated the caret, so fast typing interleaved out of order. So the
+    // window is tracked exactly — beforeinput opens it, input closes it —
+    // and deferred work runs synchronously when idle, or immediately after
+    // the command that blocked it.
+    _afterEditingCommand: function (fn) {
+      if (!this._typingCommandOpen) {
+        fn();
+        return;
+      }
+
+      if (!this._afterCommandQueue) this._afterCommandQueue = [];
+      this._afterCommandQueue.push(fn);
+
+      // Backstop for a command that dies without its input event — the
+      // aborted edits this machinery exists to avoid causing.
+      var self = this;
+      setTimeout(function () {
+        self._flushAfterCommand();
+      }, 60);
+    },
+
+    _flushAfterCommand: function () {
+      this._typingCommandOpen = false;
+      var queue = this._afterCommandQueue;
+      if (!queue || !queue.length) return;
+      this._afterCommandQueue = [];
+      for (var i = 0; i < queue.length; i++) queue[i]();
+    },
+
+    _setupCommandWindow: function () {
+      if (!this._visualEl) return;
+      var self = this;
+
+      this._visualEl.addEventListener("beforeinput", function () {
+        self._typingCommandOpen = true;
+      });
+
+      this._visualEl.addEventListener("input", function () {
+        self._flushAfterCommand();
+      });
+    },
+
     _setupTypingDiagnostics: function () {
       if (!this._visualEl) return;
       var self = this;
@@ -12764,6 +12843,7 @@
     _setupTaskLists: function () {
       if (!this._visualEl) return;
 
+      this._setupCommandWindow();
       this._setupTypingDiagnostics();
       this._visualEl.addEventListener("mousedown", this._onTaskMouseDown.bind(this));
 
@@ -12865,16 +12945,11 @@
       this._taskMirrorScheduled = true;
 
       var self = this;
-      var run = function () {
+
+      this._afterEditingCommand(function () {
         self._taskMirrorScheduled = false;
         self._mirrorTaskSelection();
-      };
-
-      if (typeof requestAnimationFrame === "function") {
-        requestAnimationFrame(run);
-      } else {
-        setTimeout(run, 0);
-      }
+      });
     },
 
     // Mark every list row whose text the selection covers entirely, carrying

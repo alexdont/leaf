@@ -687,3 +687,70 @@ test("the mousedown handler routes the gutter to the reveal", { skip }, () => {
     "a click left of the box must call the reveal"
   );
 });
+
+// The trap the typed-marker flow fell into: the final space of "- [ ] "
+// converts the row to a task item and the marker hides — with the caret
+// still inside the now-display:none span. The engine parks the visible
+// caret before the span, the next keystroke prepends to the row, the
+// serialization loses its leading marker, and the item breaks out to a
+// paragraph: typing "- [ ] h" produced "h- [ ] " in a plain <p>.
+test("hiding the marker never leaves the caret inside it", { skip }, () => {
+  const e = hybridEditor(
+    '<ul><li data-leaf-source="li" class="leaf-task" data-checked="false">' +
+      '<span class="leaf-task-box" contenteditable="false"></span>' +
+      '<span class="leaf-source-marker leaf-list-marker">- [ ] </span></li></ul>'
+  );
+  const li = e._visualEl.querySelector("li");
+  e._sourceBlock = li;
+
+  // The caret exactly where completing the marker leaves it: at the end of
+  // the marker span's text.
+  const markerText = li.querySelector(".leaf-source-marker").firstChild;
+  const r = document.createRange();
+  r.setStart(markerText, markerText.length);
+  r.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+
+  // The live trap happens when the rebuild DEDUPES — the class flips, the
+  // marker hides, and no rebuild runs to reseat anything. Prime the dedupe
+  // key so this refresh takes exactly that path.
+  e._refreshSourceBlock();
+  // The rebuild replaced the children; the primed second pass needs the
+  // caret on the LIVE marker text, exactly where completing "- [ ] " puts it.
+  const liveMarker = li.querySelector(".leaf-source-marker").firstChild;
+  const r2 = document.createRange();
+  r2.setStart(liveMarker, liveMarker.length);
+  r2.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(r2);
+  // In the live flow the keystroke-redirect has already settled the dedupe
+  // key, so the decisive refresh REBUILDS NOTHING — the class flip is all
+  // that runs, and the flip is where the caret must be rescued. Let this
+  // pass store its own key, then hit the deduped path with the caret back in
+  // the marker: a rebuild would be a different code path proving nothing.
+  e._refreshSourceBlock();
+
+  const settledMarker = li.querySelector(".leaf-source-marker").firstChild;
+  const r3 = document.createRange();
+  r3.setStart(settledMarker, settledMarker.length);
+  r3.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(r3);
+  e._refreshSourceBlock();
+
+  const caretNode = window.getSelection().getRangeAt(0).startContainer;
+  assert.equal(
+    !!(caretNode.parentNode.closest && caretNode.parentNode.closest(".leaf-source-marker")),
+    false,
+    "the caret must be seated outside the hidden span, where typing is visible"
+  );
+  assert.equal(
+    li.classList.contains("leaf-marker-active"),
+    false,
+    "and the row wears its checkbox, which is what made the span hide"
+  );
+
+  e.cleanup();
+});
