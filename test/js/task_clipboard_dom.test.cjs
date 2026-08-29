@@ -1108,7 +1108,9 @@ test("a whole bullet row goes the way of the checkbox row", { skip: dom.skip }, 
   e.cleanup();
 });
 
-test("a numbered tail keeps its numbers after the split", { skip: dom.skip }, () => {
+test("a divided numbered list restarts at 1", { skip: dom.skip }, () => {
+  // Two separated lists are two lists; rejoining them (the merge pass)
+  // restores the numbering.
   const e = dom.editor(
     "<ol><li>one</li>" + markedLi("2. ", "two") + "<li>three</li></ol>",
     "hybrid"
@@ -1123,7 +1125,7 @@ test("a numbered tail keeps its numbers after the split", { skip: dom.skip }, ()
   assert.equal(e._replaceWholeListRow("R"), true);
   const kids = e._visualEl.children;
   assert.equal([kids[0].tagName, kids[1].tagName, kids[2].tagName].join(","), "OL,P,OL");
-  assert.equal(kids[2].getAttribute("start"), "3", "the row below is still number three");
+  assert.equal(kids[2].getAttribute("start"), null, "the tail restarts at 1");
   assert.equal(kids[2].textContent, "three");
 
   e.cleanup();

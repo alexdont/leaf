@@ -2451,6 +2451,10 @@
     _onVisualInput: function () {
       if (this._mode !== "visual" && this._mode !== "hybrid") return;
       this._dismissLinkPopover();
+      // Lists left touching merge back into one. This is what makes a
+      // divided list rejoin when the divider is deleted: 1-3, text, 1-3
+      // becomes 1-6 again the moment the text between them is gone.
+      this._mergeAdjacentLists();
       if (this._smartTypography) this._maybeSmartTypography();
       // Hybrid mode: re-scan the open source block on every keystroke so
       // the block visually retags itself the moment the user finishes a
@@ -2986,49 +2990,13 @@
           if (liText === "") {
             e.preventDefault();
 
-            // Leaving the list is only a sensible reading of Enter-on-empty
-            // when there is nothing after this item. With further items below,
-            // the same gesture used to delete the blank one and cut the list
-            // in two around it — which is not what someone pressing Enter in
-            // the middle of a list is asking for. There, continue the list
-            // instead: keep the blank item and open a fresh one under it.
-            if (this._nextListSibling(block)) {
-              var midLi = document.createElement("li");
-
-              if (isTaskLi) {
-                midLi.className = "leaf-task";
-                midLi.setAttribute("data-checked", "false");
-                var midBox = document.createElement("span");
-                midBox.className = "leaf-task-box";
-                midBox.setAttribute("contenteditable", "false");
-                midLi.appendChild(midBox);
-              }
-
-              // Both items need a caret home: the new one to be typed into,
-              // and the one being left behind to stay visible now that it is
-              // staying (see _ensureListItemPlaceholders).
-              this._ensureListItemPlaceholder(midLi);
-              this._ensureListItemPlaceholder(block);
-
-              liParent.insertBefore(midLi, block.nextSibling);
-
-              var midRange = document.createRange();
-              var midText = this._firstTextDescendant(midLi);
-
-              if (midText) {
-                midRange.setStart(midText, midText.textContent === "​" ? 1 : 0);
-              } else {
-                midRange.setStart(midLi, 0);
-              }
-
-              midRange.collapse(true);
-              var midSel = window.getSelection();
-              midSel.removeAllRanges();
-              midSel.addRange(midRange);
-              this._visualEl.dispatchEvent(new Event("input", { bubbles: true }));
-              return;
-            }
-
+            // Enter on an empty item leaves the list — at the end of a
+            // list and in the middle of one alike, the way Obsidian reads
+            // it. Mid-list, the items below move into a fresh list under
+            // the exit paragraph, so the list visibly divides in two — and
+            // with nothing forcing the tail's numbering, a divided 1-6
+            // reads 1-3, text, 1-3. Rejoining is the merge pass's job:
+            // delete the divider and the halves become 1-6 again.
             var liGrandparent = liParent && liParent.parentNode;
             if (liGrandparent && liParent) {
               var trailingItems = [];
@@ -8809,6 +8777,54 @@
     // server HTML leaves them, and `_stripInterBlockWhitespace` only runs on
     // synced content) would otherwise read as "something follows" and turn the
     // last item in a list into a middle one.
+    // Adjacent lists of the same kind are one list that something used to
+    // separate. Markdown already reads them that way — two touching <ol>s
+    // round-trip to one — so the DOM merging eagerly just keeps what the
+    // person sees in step with what the document says. Numbering follows
+    // for free: the swallowed list's start is dropped, so 1-3 + 1-3
+    // renders 1-6.
+    _mergeAdjacentLists: function () {
+      if (!this._visualEl || this._syntaxMutating) return false;
+
+      var merged = false;
+      var lists = this._visualEl.querySelectorAll("ol, ul");
+
+      for (var i = 0; i < lists.length; i++) {
+        var list = lists[i];
+        if (!list.parentNode) continue; // already swallowed this pass
+
+        for (;;) {
+          // Whitespace and ZWSP crumbs between blocks do not keep two
+          // lists apart.
+          var between = [];
+          var next = list.nextSibling;
+          while (
+            next &&
+            next.nodeType === Node.TEXT_NODE &&
+            !next.textContent.replace(/[\s\u200B\uFEFF]/g, "")
+          ) {
+            between.push(next);
+            next = next.nextSibling;
+          }
+          if (!next || next.tagName !== list.tagName) break;
+
+          this._syntaxMutating = true;
+          try {
+            for (var b = 0; b < between.length; b++) {
+              between[b].parentNode.removeChild(between[b]);
+            }
+            while (next.firstChild) list.appendChild(next.firstChild);
+            next.parentNode.removeChild(next);
+          } finally {
+            this._syntaxMutating = false;
+          }
+          merged = true;
+        }
+      }
+
+      return merged;
+    },
+
     _nextListSibling: function (li) {
       var sib = li && li.nextSibling;
 
@@ -10202,19 +10218,14 @@
       }
 
       // List item: an empty source-mode `<li>` + Enter exits the list, but
-      // only as the LAST item. Drop the empty item and place a fresh `<p>`
-      // after the list — the keyboard escape from a list, which without this
-      // branch would not exist.
-      //
-      // With items still below, that reading is wrong: the blank row is one
-      // the user is deliberately keeping, and removing it means a list can
-      // never contain an empty line. There the fall-through is exactly right —
-      // its own comment describes it as splitting the empty item "into two
-      // empty `<li>`s", which is the blank row kept plus a new one under it.
+      // as the keyboard escape from a list — at the end of one and in the
+      // middle of one alike, the way Obsidian reads it. Drop the empty item
+      // and place a fresh `<p>` where it stood; items still below move into
+      // a new list of the same kind, so a divided list visibly becomes
+      // list / paragraph / list.
       if (
         isLi &&
         liContentEmpty &&
-        !this._nextListSibling(oldBlock) &&
         parent.tagName &&
         (parent.tagName.toLowerCase() === "ul" ||
           parent.tagName.toLowerCase() === "ol")
@@ -13138,19 +13149,9 @@
         list.removeChild(li);
       } else {
         // Mid-list: the rows below move to a second list after the paragraph.
-        // A numbered tail keeps its numbers — without the start attribute the
-        // rows below would snap back to 1.
-        var tag = list.tagName.toLowerCase();
-        var tail = document.createElement(tag);
-
-        if (tag === "ol") {
-          var startAttr = parseInt(list.getAttribute("start"), 10);
-          var start = isNaN(startAttr) ? 1 : startAttr;
-          tail.setAttribute(
-            "start",
-            Array.prototype.indexOf.call(list.children, li) + start + 1
-          );
-        }
+        // A divided numbered list restarts at 1 — two separated lists are two
+        // lists, and rejoining them (the merge pass) restores the numbering.
+        var tail = document.createElement(list.tagName.toLowerCase());
 
         while (li.nextElementSibling) tail.appendChild(li.nextElementSibling);
         list.removeChild(li);

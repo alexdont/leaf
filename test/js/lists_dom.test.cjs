@@ -28,16 +28,27 @@ const texts = (e) => Array.from(items(e)).map((li) => li.textContent.split(ZWSP)
 // Visual mode
 // --------------------------------------------------------------------------
 
-test("visual: Enter on an empty item mid-list keeps it and adds one", { skip }, () => {
-  const e = editor(`<ul><li>one</li><li>${ZWSP}</li><li>three</li></ul>`);
+test("visual: Enter on an empty item mid-list divides the list", { skip }, () => {
+  // Obsidian's reading: an empty item plus Enter means "I am done with this
+  // list here" wherever it happens. The items below move to a fresh list
+  // under the exit paragraph — and a fresh numbered list restarts at 1,
+  // which is what makes a divided 1-6 read 1-3, text, 1-3.
+  const e = editor(`<ol><li>one</li><li>${ZWSP}</li><li>three</li></ol>`);
   const target = items(e)[1];
 
   e._getCurrentBlock = () => target;
   caretAtEndOf(target);
   pressEnter(e);
 
-  assert.equal(items(e).length, 4, readable(e._visualEl));
-  assert.deepEqual(texts(e), ["one", "", "", "three"]);
+  const kids = e._visualEl.children;
+  assert.equal(
+    [kids[0].tagName, kids[1].tagName, kids[2].tagName].join(","),
+    "OL,P,OL",
+    readable(e._visualEl)
+  );
+  assert.equal(kids[0].textContent, "one");
+  assert.equal(kids[2].textContent, "three");
+  assert.equal(kids[2].getAttribute("start"), null, "the tail restarts at 1");
   e.cleanup();
 });
 
@@ -95,10 +106,17 @@ function hybridEnter(html, index) {
   return { e, handled };
 }
 
-test("hybrid: Enter on an empty item mid-list keeps it and adds one", { skip }, () => {
+test("hybrid: Enter on an empty item mid-list divides the list", { skip }, () => {
   const { e } = hybridEnter(`<ul><li>one</li>${source("- ")}<li>three</li></ul>`, 1);
 
-  assert.equal(items(e).length, 4, readable(e._visualEl));
+  const kids = e._visualEl.children;
+  assert.equal(
+    [kids[0].tagName, kids[1].tagName, kids[2].tagName].join(","),
+    "UL,P,UL",
+    readable(e._visualEl)
+  );
+  assert.equal(kids[0].textContent, "one");
+  assert.equal(kids[2].textContent, "three");
   e.cleanup();
 });
 
@@ -814,5 +832,85 @@ test("Backspace on an empty checkbox row deletes something you can see", { skip 
     "the visible marker must have lost a character — deleting only the placeholder reads as nothing happening"
   );
 
+  e.cleanup();
+});
+
+// --------------------------------------------------------------------------
+// Lists aware of each other
+// --------------------------------------------------------------------------
+//
+// Adjacent lists of the same kind are one list that something used to
+// separate. Delete the divider and the halves rejoin: 1-3, text, 1-3
+// becomes 1-6 again. Markdown already reads touching lists that way; the
+// merge pass keeps what the person sees in step with what the document says.
+
+test("two touching numbered lists become one", { skip }, () => {
+  const e = editor(
+    "<ol><li>one</li><li>two</li><li>three</li></ol><ol><li>four</li><li>five</li><li>six</li></ol>"
+  );
+
+  assert.equal(e._mergeAdjacentLists(), true);
+  const ols = e._visualEl.querySelectorAll("ol");
+  assert.equal(ols.length, 1);
+  assert.equal(items(e).length, 6);
+  assert.equal(items(e)[3].textContent, "four", "order survives the merge");
+  e.cleanup();
+});
+
+test("a paragraph between lists keeps them apart", { skip }, () => {
+  const e = editor("<ol><li>one</li></ol><p>test</p><ol><li>two</li></ol>");
+
+  assert.equal(e._mergeAdjacentLists(), false);
+  assert.equal(e._visualEl.querySelectorAll("ol").length, 2);
+  e.cleanup();
+});
+
+test("a bullet list and a numbered list never merge", { skip }, () => {
+  const e = editor("<ul><li>one</li></ul><ol><li>two</li></ol>");
+
+  assert.equal(e._mergeAdjacentLists(), false);
+  assert.equal(e._visualEl.querySelectorAll("ul, ol").length, 2);
+  e.cleanup();
+});
+
+test("whitespace crumbs between lists do not keep them apart", { skip }, () => {
+  const e = editor("<ol><li>one</li></ol><ol><li>two</li></ol>");
+  e._visualEl.insertBefore(
+    document.createTextNode("\n  ​"),
+    e._visualEl.lastElementChild
+  );
+
+  assert.equal(e._mergeAdjacentLists(), true);
+  assert.equal(e._visualEl.querySelectorAll("ol").length, 1);
+  assert.equal(items(e).length, 2);
+  e.cleanup();
+});
+
+test("three fragments collapse in a single pass", { skip }, () => {
+  const e = editor(
+    "<ol><li>one</li></ol><ol><li>two</li></ol><ol><li>three</li></ol>"
+  );
+
+  assert.equal(e._mergeAdjacentLists(), true);
+  assert.equal(e._visualEl.querySelectorAll("ol").length, 1);
+  assert.equal(items(e).length, 3);
+  e.cleanup();
+});
+
+test("typing is what rejoins a divided list", { skip }, () => {
+  // The pass runs on every visual input, so the moment a deletion leaves
+  // two lists touching, the next input event heals them.
+  const e = editor("<ol><li>one</li></ol><ol><li>two</li></ol>");
+  e._dismissLinkPopover = () => {};
+  e._debouncedPushVisualChange = () => {};
+  e._updateCounts = () => {};
+  e._suggestScan = () => {};
+  e._refreshSourceBlock = () => {};
+  e._maybeAutoFormatList = () => {};
+  e._maybeAutoFormatBlockquote = () => {};
+
+  e._onVisualInput();
+
+  assert.equal(e._visualEl.querySelectorAll("ol").length, 1);
   e.cleanup();
 });
