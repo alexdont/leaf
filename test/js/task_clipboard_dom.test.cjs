@@ -61,7 +61,7 @@ test("copying a whole row carries its checkbox as markdown and html", { skip: do
 
   assert.equal(evt.prevented, true, "the native text-only copy must not run");
   assert.equal(evt.data["text/plain"], "- [x] ship it");
-  assert.match(evt.data["text/html"], /<input type="checkbox" checked> ship it/);
+  assert.match(evt.data["text/html"], /<input type="checkbox" checked(="")?> ship it/);
 
   e.cleanup();
 });
@@ -284,12 +284,12 @@ test("a fully selected row paints its checkbox as selected", { skip: dom.skip },
   selectAll(li);
 
   e._mirrorTaskSelection();
-  assert.equal(li.classList.contains("leaf-task-in-selection"), true);
+  assert.equal(li.classList.contains("leaf-row-in-selection"), true);
 
   // Collapse the selection: the paint comes off.
   window.getSelection().removeAllRanges();
   e._mirrorTaskSelection();
-  assert.equal(li.classList.contains("leaf-task-in-selection"), false);
+  assert.equal(li.classList.contains("leaf-row-in-selection"), false);
 
   e.cleanup();
 });
@@ -309,7 +309,7 @@ test("half a row does not paint the box", { skip: dom.skip }, () => {
   sel.addRange(range);
 
   e._mirrorTaskSelection();
-  assert.equal(li.classList.contains("leaf-task-in-selection"), false);
+  assert.equal(li.classList.contains("leaf-row-in-selection"), false);
 
   e.cleanup();
 });
@@ -359,17 +359,126 @@ test("a covered source-mode row reveals its real marker text", { skip: dom.skip 
   e.cleanup();
 });
 
-test("the css reveals '- [ ] ' on covered rows instead of tinting the box", { skip: dom.skip }, () => {
+test("the css reveals the row's marker under the selection", { skip: dom.skip }, () => {
   const fs = require("fs");
   const src = fs.readFileSync(require.resolve("../../priv/static/assets/leaf.js"), "utf8");
 
-  assert.match(src, /leaf-task-in-selection:not\(\[data-leaf-source\]\)::before/,
-    "pseudo marker on plain covered rows");
-  assert.match(src, /content: '- \[ \] '/);
-  assert.match(src, /content: '- \[x\] '/, "checked rows reveal [x]");
   assert.match(
     src,
-    /leaf-task-in-selection:not\(\[data-leaf-source\]\) > \.leaf-task-box \{",\s*\n\s*"\s*display: none;/,
+    /leaf-row-in-selection:not\(\[data-leaf-source\]\)::before/,
+    "pseudo marker on covered rows"
+  );
+  assert.match(src, /content: attr\(data-leaf-selmarker\)/, "whatever marker the mirror computed");
+  assert.match(
+    src,
+    /leaf-row-in-selection:not\(\[data-leaf-source\]\) > \.leaf-task-box \{",\s*\n\s*"\s*display: none;/,
     "the box steps aside while the marker shows"
   );
+});
+
+// ---------------------------------------------------------------------------
+// Plain bullets and numbered rows get the same treatment
+// ---------------------------------------------------------------------------
+
+test("a fully selected bullet row reveals '- '", { skip: dom.skip }, () => {
+  const e = dom.editor("<ul><li>hello row</li></ul>", "hybrid");
+  const li = e._visualEl.querySelector("li");
+  selectAll(li);
+
+  e._mirrorTaskSelection();
+
+  assert.equal(li.classList.contains("leaf-row-in-selection"), true);
+  assert.equal(li.getAttribute("data-leaf-selmarker"), "- ");
+
+  e.cleanup();
+});
+
+test("a numbered row reveals its own number, start included", { skip: dom.skip }, () => {
+  const e = dom.editor('<ol start="7"><li>seven</li><li>eight</li></ol>', "hybrid");
+  const second = e._visualEl.querySelectorAll("li")[1];
+  selectAll(second);
+
+  e._mirrorTaskSelection();
+
+  assert.equal(second.getAttribute("data-leaf-selmarker"), "8. ",
+    "the number the row actually wears, not a generic 1.");
+
+  e.cleanup();
+});
+
+test("a checked task in a numbered list reveals 'N. [x] '", { skip: dom.skip }, () => {
+  // The case the css-only approach could not do at all: the number is not
+  // knowable to a static content rule.
+  const e = dom.editor(
+    '<ol start="3"><li class="leaf-task" data-checked="true"><span class="leaf-task-box" contenteditable="false"></span>done</li></ol>',
+    "hybrid"
+  );
+  const li = e._visualEl.querySelector("li");
+  selectAll(li);
+
+  e._mirrorTaskSelection();
+
+  assert.equal(li.getAttribute("data-leaf-selmarker"), "3. [x] ");
+
+  e.cleanup();
+});
+
+test("copying bullet rows carries their markers", { skip: dom.skip }, () => {
+  const e = dom.editor("<ul><li>one</li><li>two</li></ul>", "hybrid");
+  selectAll(e._visualEl.querySelector("ul"));
+
+  const evt = clipboardEvent("copy");
+  e._onCopyOrCut(evt);
+
+  assert.equal(evt.data["text/plain"], "- one\n- two");
+  assert.match(evt.data["text/html"], /<ul><li>one<\/li><li>two<\/li><\/ul>/);
+
+  e.cleanup();
+});
+
+test("copying numbered rows keeps their numbering", { skip: dom.skip }, () => {
+  const e = dom.editor('<ol start="3"><li>x</li><li>y</li></ol>', "hybrid");
+  selectAll(e._visualEl.querySelector("ol"));
+
+  const evt = clipboardEvent("copy");
+  e._onCopyOrCut(evt);
+
+  assert.equal(evt.data["text/plain"], "3. x\n4. y",
+    "the numbers the rows wear, so pasting elsewhere reads the same");
+  assert.match(evt.data["text/html"], /<ol start="3">/);
+
+  e.cleanup();
+});
+
+test("a nested list copies indented under its parent", { skip: dom.skip }, () => {
+  const e = dom.editor(
+    "<ul><li>parent<ul><li>child</li></ul></li></ul>",
+    "hybrid"
+  );
+  selectAll(e._visualEl.querySelector("ul"));
+
+  const evt = clipboardEvent("copy");
+  e._onCopyOrCut(evt);
+
+  assert.equal(
+    evt.data["text/plain"],
+    "- parent\n  - child",
+    "the serializer's own two-space indent, so it pastes back as it copied out"
+  );
+
+  e.cleanup();
+});
+
+test("cut on bullet rows removes them and their emptied list", { skip: dom.skip }, () => {
+  const e = dom.editor("<ul><li>going</li></ul><p>staying</p>", "hybrid");
+  selectAll(e._visualEl.querySelector("ul"));
+
+  const evt = clipboardEvent("cut");
+  e._onCopyOrCut(evt);
+
+  assert.equal(evt.data["text/plain"], "- going");
+  assert.equal(e._visualEl.querySelector("ul"), null);
+  assert.ok(e._visualEl.querySelector("p"));
+
+  e.cleanup();
 });

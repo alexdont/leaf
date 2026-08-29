@@ -324,32 +324,27 @@
     "  position: relative; cursor: pointer; opacity: 0.65; box-sizing: border-box;",
     "}",
     // A row wholly inside the selection reveals its source, the way
-    // Obsidian does: the checkbox steps aside and the literal "- [ ] "
-    // appears, painted in the selection colours, so the sweep visibly takes
-    // the marker and not just the label. The marker here is pseudo-content
-    // — rebuilding the row into real source text mid-drag would destroy the
-    // very selection being made — but the clipboard writes the same
-    // "- [ ] " the eye sees, so the appearance keeps the promise.
-    "ul > li.leaf-task.leaf-task-in-selection:not([data-leaf-source]) > .leaf-task-box {",
+    // Obsidian does: the bullet / number / checkbox steps aside and the
+    // literal "- " / "3. " / "- [x] " appears, painted in the selection
+    // colours, so the sweep visibly takes the marker and not just the
+    // label. The marker text rides in data-leaf-selmarker, computed by the
+    // selection mirror — rebuilding the row into real source text mid-drag
+    // would destroy the very selection being made. The clipboard writes the
+    // same marker the eye sees, so the appearance keeps the promise.
+    ".content-editor-visual li.leaf-row-in-selection:not([data-leaf-source]) {",
+    "  list-style: none;",
+    "}",
+    ".content-editor-visual li.leaf-row-in-selection:not([data-leaf-source]) > .leaf-task-box {",
     "  display: none;",
     "}",
-    "ul > li.leaf-task.leaf-task-in-selection:not([data-leaf-source])::before {",
-    "  content: '- [ ] ';",
+    ".content-editor-visual li.leaf-row-in-selection:not([data-leaf-source])::before {",
+    "  content: attr(data-leaf-selmarker);",
     "  white-space: pre;",
     "  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;",
     "  font-size: 0.9em;",
     "  background-color: rgba(59, 130, 246, 0.35);",
     "  background-color: Highlight;",
     "  color: HighlightText;",
-    "}",
-    "ul > li.leaf-task.leaf-task-in-selection[data-checked='true']:not([data-leaf-source])::before {",
-    "  content: '- [x] ';",
-    "}",
-    // Task rows outside a plain <ul> (a numbered checklist, say) cannot fake
-    // their marker with static content, so their box tints instead.
-    ".content-editor-visual li.leaf-task.leaf-task-in-selection .leaf-task-box {",
-    "  background-color: rgba(59, 130, 246, 0.35);",
-    "  background-color: Highlight;",
     "}",
     ".content-editor-visual li.leaf-task[data-checked='true'] .leaf-task-box {",
     "  background: currentColor; opacity: 0.85;",
@@ -3225,20 +3220,22 @@
       var range = sel.getRangeAt(0);
       if (!this._visualEl.contains(range.commonAncestorContainer)) return;
 
-      var covered = this._coveredTaskItems(range);
+      var covered = this._coveredListItems(range);
       if (!covered.length) return;
 
       // Whole rows and nothing else: the selection's own text must be the
-      // rows' labels and no more, or this is a mixed selection native copy
-      // understands better.
-      // Compared with ALL whitespace removed, and against the rows' full
-      // text rather than their labels: a row mid-edit carries its "- [ ] "
-      // marker as literal span text, which is in the selection but not the
-      // label — that is representation, not extra content.
+      // rows' text and no more, or this is a mixed selection native copy
+      // understands better. Compared with ALL whitespace removed, against
+      // the TOP rows' full text (a nested row's text is inside its
+      // parent's); a row mid-edit also carries its marker as span text,
+      // which is representation, not extra content.
       var scrub = function (text) {
         return (text || "").replace(/[\u200B\uFEFF\s\u00a0]/g, "");
       };
       var rowText = covered
+        .filter(function (item) {
+          return item.top;
+        })
         .map(function (item) {
           return item.li.textContent;
         })
@@ -3247,34 +3244,17 @@
 
       var markdown = covered
         .map(function (item) {
-          return (item.checked ? "- [x] " : "- [ ] ") + item.label;
+          return item.indent + item.marker + item.label;
         })
         .join("\n");
 
-      var html =
-        "<ul>" +
-        covered
-          .map(function (item) {
-            return (
-              '<li><input type="checkbox"' +
-              (item.checked ? " checked" : "") +
-              "> " +
-              item.label
-                .replace(/&/g, "&amp;")
-                .replace(/</g, "&lt;")
-                .replace(/>/g, "&gt;") +
-              "</li>"
-            );
-          })
-          .join("") +
-        "</ul>";
-
       e.preventDefault();
       clipboardData.setData("text/plain", markdown);
-      clipboardData.setData("text/html", html);
+      clipboardData.setData("text/html", this._coveredItemsHtml(covered));
 
       if (e.type === "cut" && !this._readonly) {
         for (var i = 0; i < covered.length; i++) {
+          if (!covered[i].top) continue;
           var li = covered[i].li;
           var list = li.parentNode;
           if (!list) continue;
@@ -3289,10 +3269,124 @@
       }
     },
 
-    // The task items whose visible text the range covers entirely, in
-    // document order, with their state and label read off the DOM.
-    _coveredTaskItems: function (range) {
-      var items = this._visualEl.querySelectorAll("li.leaf-task");
+    // The covered rows as html for the clipboard: their real list structure,
+    // cloned, with the editor's furniture swapped for interchange — each
+    // task box becomes input[type=checkbox], which is what our own paste
+    // (and GitHub's renderer) rebuilds a working checkbox from, and
+    // source-marker spans go entirely.
+    _coveredItemsHtml: function (covered) {
+      var container = document.createElement("div");
+      var currentList = null;
+      var currentSource = null;
+
+      for (var i = 0; i < covered.length; i++) {
+        var item = covered[i];
+        if (!item.top) continue;
+
+        var list = item.li.parentNode;
+        if (list !== currentSource) {
+          currentSource = list;
+          currentList = document.createElement(list.tagName.toLowerCase());
+          if (currentList.tagName.toLowerCase() === "ol") {
+            currentList.setAttribute("start", parseInt(item.marker, 10) || 1);
+          }
+          container.appendChild(currentList);
+        }
+
+        var clone = item.li.cloneNode(true);
+
+        var markers = clone.querySelectorAll(".leaf-source-marker");
+        for (var m = 0; m < markers.length; m++) {
+          markers[m].parentNode.removeChild(markers[m]);
+        }
+
+        // Each box reads its own row's state — a covered parent can carry
+        // covered children with states of their own — BEFORE the editor
+        // attributes are stripped.
+        var boxes = clone.querySelectorAll(".leaf-task-box");
+        for (var b = 0; b < boxes.length; b++) {
+          var box = boxes[b];
+          var row = box.parentNode;
+          while (row && row.tagName && row.tagName.toLowerCase() !== "li") {
+            row = row.parentNode;
+          }
+
+          var input = document.createElement("input");
+          input.setAttribute("type", "checkbox");
+          if (row && row.getAttribute("data-checked") === "true") {
+            input.setAttribute("checked", "");
+          }
+
+          box.parentNode.replaceChild(input, box);
+          input.parentNode.insertBefore(
+            document.createTextNode(" "),
+            input.nextSibling
+          );
+        }
+
+        var rows = [clone].concat(
+          Array.prototype.slice.call(clone.querySelectorAll("li"))
+        );
+        for (var a = 0; a < rows.length; a++) {
+          rows[a].removeAttribute("data-leaf-source");
+          rows[a].removeAttribute("class");
+          rows[a].removeAttribute("data-checked");
+        }
+
+        currentList.appendChild(clone);
+      }
+
+      return container.innerHTML.replace(/[\u200B\uFEFF]/g, "");
+    },
+
+    // The literal marker a row would show in source form: "- ", "3. ",
+    // "3. [x] ". One computation for the selection reveal and the clipboard,
+    // so what looks selected and what copies never disagree.
+    _listItemMarker: function (li) {
+      var list = li.parentNode;
+      var tag = list && list.tagName ? list.tagName.toLowerCase() : "";
+      var marker;
+
+      if (tag === "ol") {
+        var startAttr = parseInt(list.getAttribute("start"), 10);
+        var start = isNaN(startAttr) ? 1 : startAttr;
+        marker = Array.prototype.indexOf.call(list.children, li) + start + ". ";
+      } else {
+        marker = "- ";
+      }
+
+      if (li.classList && li.classList.contains("leaf-task")) {
+        marker += li.getAttribute("data-checked") === "true" ? "[x] " : "[ ] ";
+      }
+
+      return marker;
+    },
+
+    // How deep a row sits, as the serializer's indent: two spaces per ul
+    // level, three per ol, matching convertList exactly — clipboard markdown
+    // that disagrees with the editor's own serializer would paste back
+    // differently than it copied out.
+    _listItemIndent: function (li) {
+      var indent = "";
+      var list = li.parentNode;
+
+      while (list && list !== this._visualEl) {
+        var host = list.parentNode;
+        if (host && host.tagName && host.tagName.toLowerCase() === "li") {
+          indent += list.tagName.toLowerCase() === "ol" ? "   " : "  ";
+          list = host.parentNode;
+        } else {
+          break;
+        }
+      }
+
+      return indent;
+    },
+
+    // The list rows whose visible text the range covers entirely, in
+    // document order, with marker, label and depth read off the DOM.
+    _coveredListItems: function (range) {
+      var items = this._visualEl.querySelectorAll("li");
       var covered = [];
 
       for (var i = 0; i < items.length; i++) {
@@ -3315,18 +3409,35 @@
         }
         if (!inRange) continue;
 
-        // The label is the row's text minus its chrome: the box has none,
-        // but a row currently in source mode carries its "- [ ] " marker as
-        // literal span text.
+        // The label is the row's OWN text: minus its chrome (the box holds
+        // none, but a row mid-edit carries its marker as literal span text)
+        // and minus any nested list, whose rows speak for themselves.
         var clone = li.cloneNode(true);
-        var chrome = clone.querySelectorAll(".leaf-task-box, .leaf-source-marker");
+        var chrome = clone.querySelectorAll(
+          ".leaf-task-box, .leaf-source-marker, ul, ol"
+        );
         for (var c = 0; c < chrome.length; c++) {
           chrome[c].parentNode.removeChild(chrome[c]);
         }
 
+        // A row whose ancestor row is also covered rides along inside it —
+        // the clipboard html and cut act only on the top of each covered
+        // subtree.
+        var top = true;
+        for (var t = 0; t < covered.length; t++) {
+          if (covered[t].li.contains(li)) {
+            top = false;
+            break;
+          }
+        }
+
         covered.push({
           li: li,
+          top: top,
+          isTask: li.classList.contains("leaf-task"),
           checked: li.getAttribute("data-checked") === "true",
+          marker: this._listItemMarker(li),
+          indent: this._listItemIndent(li),
           label: clone.textContent
             .replace(/[\u200B\uFEFF]/g, "")
             .replace(/\u00a0/g, " ")
@@ -12628,12 +12739,13 @@
       sel.addRange(r);
     },
 
-    // Mark every task row whose text the selection covers entirely, so CSS
-    // can paint its checkbox with the selection colour.
+    // Mark every list row whose text the selection covers entirely, carrying
+    // the literal marker it would show in source form, so CSS can reveal
+    // "- " / "3. " / "- [x] " under the sweep the way Obsidian does.
     _mirrorTaskSelection: function () {
       if (!this._visualEl) return;
 
-      var marked = this._visualEl.querySelectorAll("li.leaf-task-in-selection");
+      var marked = this._visualEl.querySelectorAll("li.leaf-row-in-selection");
       var covered = [];
       var sel = window.getSelection();
 
@@ -12645,12 +12757,13 @@
       ) {
         var range = sel.getRangeAt(0);
         if (this._visualEl.contains(range.commonAncestorContainer)) {
-          covered = this._coveredTaskItems(range);
+          covered = this._coveredListItems(range);
         }
       }
 
       for (var i = 0; i < marked.length; i++) {
-        marked[i].classList.remove("leaf-task-in-selection");
+        marked[i].classList.remove("leaf-row-in-selection");
+        marked[i].removeAttribute("data-leaf-selmarker");
         // A source-mode row had its real marker revealed below; hand it
         // back. The caret-driven refresh re-reveals it if the caret is on
         // the marker — during a live selection that refresh is frozen, so
@@ -12660,13 +12773,17 @@
         }
       }
       for (var j = 0; j < covered.length; j++) {
-        covered[j].li.classList.add("leaf-task-in-selection");
-        // A row already in source form carries its real "- [ ] " as hidden
-        // span text. A class flip shows it — no rebuild, so the selection
-        // survives — and since that text sits inside the selected range, the
-        // native highlight paints it: the genuine Obsidian article.
-        if (covered[j].li.hasAttribute("data-leaf-source")) {
-          covered[j].li.classList.add("leaf-marker-active");
+        var row = covered[j].li;
+        row.classList.add("leaf-row-in-selection");
+
+        if (row.hasAttribute("data-leaf-source")) {
+          // A row already in source form carries its real marker as hidden
+          // span text. A class flip shows it — no rebuild, so the selection
+          // survives — and since that text sits inside the selected range,
+          // the native highlight paints it: the genuine Obsidian article.
+          row.classList.add("leaf-marker-active");
+        } else {
+          row.setAttribute("data-leaf-selmarker", covered[j].marker);
         }
       }
     },
