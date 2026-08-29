@@ -7005,13 +7005,30 @@
     // flow for one that does not exist yet.
     _onWikiLinkMouseDown: function (e) {
       if (!this._wikiLinks) return;
-      if (e.detail > 1 || e.shiftKey || e.altKey) return;
-      if (!(this._readonly || this._wikiLinksFollow === "click")) return;
 
       var span = e.target && e.target.closest
         ? e.target.closest("[data-leaf-wikilink]")
         : null;
-      if (!span || !this._visualEl.contains(span)) return;
+      if (!span || !this._visualEl.contains(span)) {
+        this._wikiLinkPress = null;
+        return;
+      }
+
+      // Captured before the caret moves. In hybrid mode, when the press is
+      // allowed to seat the caret (the :modifier gesture), the
+      // selectionchange that follows swaps the block to its source form and
+      // takes the span with it — so by the time click fires, the span the
+      // click handler finds is detached and the follow silently dies. The
+      // click handler falls back to this capture, which makes the follow
+      // survive the swap in every follow mode.
+      this._wikiLinkPress = {
+        target: span.getAttribute("data-leaf-wikilink"),
+        heading: span.getAttribute("data-leaf-wikilink-heading"),
+        href: span.getAttribute("data-leaf-wikilink-href")
+      };
+
+      if (e.detail > 1 || e.shiftKey || e.altKey) return;
+      if (!(this._readonly || this._wikiLinksFollow === "click")) return;
 
       e.preventDefault();
     },
@@ -7022,8 +7039,13 @@
       var span = e.target && e.target.closest
         ? e.target.closest("[data-leaf-wikilink]")
         : null;
+      if (span && !this._visualEl.contains(span)) span = null;
 
-      if (!span || !this._visualEl.contains(span)) return;
+      // One press, one click: the capture never outlives its gesture.
+      var press = this._wikiLinkPress;
+      this._wikiLinkPress = null;
+
+      if (!span && !press) return;
 
       // Which gesture follows a link is the host's call, declared as
       // `follow: :click | :modifier`.
@@ -7049,11 +7071,18 @@
       if (e.detail > 1) return; // a double-click means editing, not following
 
       e.preventDefault();
+      var link = span
+        ? {
+            target: span.getAttribute("data-leaf-wikilink"),
+            heading: span.getAttribute("data-leaf-wikilink-heading"),
+            href: span.getAttribute("data-leaf-wikilink-href")
+          }
+        : press;
       this.pushEventTo(this.el, "link_clicked", {
         editor_id: this._editorId,
-        target: span.getAttribute("data-leaf-wikilink"),
-        heading: span.getAttribute("data-leaf-wikilink-heading"),
-        href: span.getAttribute("data-leaf-wikilink-href"),
+        target: link.target,
+        heading: link.heading,
+        href: link.href,
         modifier: withModifier
       });
     },

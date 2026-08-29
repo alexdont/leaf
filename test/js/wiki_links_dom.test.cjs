@@ -391,3 +391,84 @@ test("the shipped default is the live-preview gesture", { skip }, () => {
   assert.ok(wired && wired.length >= 2, "both dataset reads present");
   wired.forEach((line) => assert.ok(line.includes('"click"'), line));
 });
+
+// --------------------------------------------------------------------------
+// The hybrid swap race
+// --------------------------------------------------------------------------
+//
+// In hybrid mode a press that seats the caret (the :modifier gesture)
+// triggers the selectionchange source swap, which detaches the span before
+// the click arrives. The mousedown capture is what lets the follow survive:
+// one press, one click, acting on what was under the pointer when it went
+// down.
+
+function pressFirstLink(e, mods) {
+  const span = e._visualEl.querySelector("[data-leaf-wikilink]");
+  const event = new window.MouseEvent("mousedown", {
+    bubbles: true,
+    cancelable: true,
+    detail: 1,
+    ...mods,
+  });
+  Object.defineProperty(event, "target", { value: span });
+  e._onWikiLinkMouseDown(event);
+  return span;
+}
+
+function clickDetached(e, mods) {
+  // The swap replaced the block: the click's target is the source-form
+  // text, and the span is gone from the document.
+  const event = new window.MouseEvent("click", { bubbles: true, cancelable: true, ...mods });
+  Object.defineProperty(event, "target", { value: e._visualEl.firstElementChild });
+  e._onWikiLinkClick(event);
+  return e.pushed.filter((p) => p.event === "link_clicked");
+}
+
+test("modifier mode: the follow survives the source swap", { skip }, () => {
+  const e = wikiEditor(LINKS, { follow: "modifier" });
+  const span = pressFirstLink(e, { ctrlKey: true });
+  span.remove();
+
+  const clicks = clickDetached(e, { ctrlKey: true });
+  assert.equal(clicks.length, 1);
+  assert.equal(clicks[0].payload.target, "Ideas");
+  e.cleanup();
+});
+
+test("click mode: a detached span cannot lose the follow either", { skip }, () => {
+  const e = wikiEditor(LINKS);
+  const span = pressFirstLink(e, {});
+  span.remove();
+
+  assert.equal(clickDetached(e, {}).length, 1);
+  e.cleanup();
+});
+
+test("the capture never outlives its gesture", { skip }, () => {
+  const e = wikiEditor(LINKS, { follow: "modifier" });
+  const span = pressFirstLink(e, { ctrlKey: true });
+  span.remove();
+
+  clickDetached(e, { ctrlKey: true });
+  assert.equal(clickDetached(e, { ctrlKey: true }).length, 1, "first click follows");
+  assert.equal(
+    e.pushed.filter((p) => p.event === "link_clicked").length,
+    1,
+    "a second click with no press of its own follows nothing"
+  );
+  e.cleanup();
+});
+
+test("a press somewhere else clears a stale capture", { skip }, () => {
+  const e = wikiEditor(LINKS, { follow: "modifier" });
+  const span = pressFirstLink(e, { ctrlKey: true });
+
+  // Mouse down on plain text instead of following through on the link.
+  const event = new window.MouseEvent("mousedown", { bubbles: true, cancelable: true, detail: 1 });
+  Object.defineProperty(event, "target", { value: e._visualEl.firstElementChild });
+  e._onWikiLinkMouseDown(event);
+
+  span.remove();
+  assert.equal(clickDetached(e, { ctrlKey: true }).length, 0);
+  e.cleanup();
+});
