@@ -6260,27 +6260,48 @@
         });
       }
 
+      // DEFERRED, never synchronous, for the same reason the selection
+      // mirror is: typing over a selection is one editing command — delete,
+      // then insert — with a selectionchange in the middle. This listener is
+      // the source machinery's only driver, and entering or refreshing
+      // source mode REBUILDS the block's children; done mid-command, the
+      // insertion finds its target gone and dies. Double-click the only word
+      // of a checkbox row and type: the first click had put the row into
+      // source form, the delete phase changed its text, the refresh rebuilt
+      // it, and the keystroke never landed.
       document.addEventListener("selectionchange", function () {
-        if (
-          (self._mode === "visual" || self._mode === "hybrid") &&
-          self._visualEl
-        ) {
-          var sel = window.getSelection();
+        if (self._sourceUpdateScheduled) return;
+        self._sourceUpdateScheduled = true;
+
+        var run = function () {
+          self._sourceUpdateScheduled = false;
           if (
-            sel.rangeCount > 0 &&
-            self._visualEl.contains(sel.anchorNode)
+            (self._mode === "visual" || self._mode === "hybrid") &&
+            self._visualEl
           ) {
-            self._updateToolbarState();
-            self._updateSourceBlock();
-          } else if (document.activeElement !== self._visualEl) {
-            // Cursor genuinely left the editor — re-render any open source
-            // block so the user sees the rendered form. If focus is still
-            // on the editor (e.g., right after a toolbar click), leave the
-            // source block alone so it survives until focus actually moves.
+            var sel = window.getSelection();
+            if (
+              sel.rangeCount > 0 &&
+              self._visualEl.contains(sel.anchorNode)
+            ) {
+              self._updateToolbarState();
+              self._updateSourceBlock();
+            } else if (document.activeElement !== self._visualEl) {
+              // Cursor genuinely left the editor — re-render any open source
+              // block so the user sees the rendered form. If focus is still
+              // on the editor (e.g., right after a toolbar click), leave the
+              // source block alone so it survives until focus actually moves.
+              self._exitAllSourceMode();
+            }
+          } else {
             self._exitAllSourceMode();
           }
+        };
+
+        if (typeof requestAnimationFrame === "function") {
+          requestAnimationFrame(run);
         } else {
-          self._exitAllSourceMode();
+          setTimeout(run, 0);
         }
       });
 

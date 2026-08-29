@@ -568,3 +568,29 @@ test("the listener is the scheduler, not the mirror itself", { skip: dom.skip },
     "wiring the mirror in directly is the bug back again"
   );
 });
+
+test("the source machinery is deferred off selectionchange too", { skip: dom.skip }, () => {
+  // The same editing-command collision, one listener over: this one is the
+  // source machinery's only driver, and entering/refreshing source mode
+  // rebuilds the block's children — done synchronously mid-command, the
+  // keystroke's insertion finds its target gone and dies.
+  const fs = require("fs");
+  const src = fs.readFileSync(require.resolve("../../priv/static/assets/leaf.js"), "utf8");
+
+  const listener = src.slice(
+    src.indexOf("// DEFERRED, never synchronous, for the same reason the selection"),
+    src.indexOf("_updateSyntaxDecorations:")
+  );
+
+  assert.match(listener, /_sourceUpdateScheduled/, "coalesced like the mirror");
+  assert.ok(
+    /requestAnimationFrame\(run\)/.test(listener),
+    "and pushed past the editing command before _updateSourceBlock may run"
+  );
+  assert.ok(
+    listener.indexOf("requestAnimationFrame") <
+      listener.indexOf("self._updateSourceBlock()") ||
+      /var run = function/.test(listener),
+    "the update lives inside the deferred body"
+  );
+});
