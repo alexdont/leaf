@@ -323,9 +323,30 @@
     "  margin-right: 0.45em; border: 1.5px solid currentColor; border-radius: 0.25em;",
     "  position: relative; cursor: pointer; opacity: 0.65; box-sizing: border-box;",
     "}",
-    // A row wholly inside the selection paints its checkbox in the
-    // selection colour too. The box holds no text, so the native highlight
-    // skips it and a selected row read as "just the text".
+    // A row wholly inside the selection reveals its source, the way
+    // Obsidian does: the checkbox steps aside and the literal "- [ ] "
+    // appears, painted in the selection colours, so the sweep visibly takes
+    // the marker and not just the label. The marker here is pseudo-content
+    // — rebuilding the row into real source text mid-drag would destroy the
+    // very selection being made — but the clipboard writes the same
+    // "- [ ] " the eye sees, so the appearance keeps the promise.
+    "ul > li.leaf-task.leaf-task-in-selection:not([data-leaf-source]) > .leaf-task-box {",
+    "  display: none;",
+    "}",
+    "ul > li.leaf-task.leaf-task-in-selection:not([data-leaf-source])::before {",
+    "  content: '- [ ] ';",
+    "  white-space: pre;",
+    "  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;",
+    "  font-size: 0.9em;",
+    "  background-color: rgba(59, 130, 246, 0.35);",
+    "  background-color: Highlight;",
+    "  color: HighlightText;",
+    "}",
+    "ul > li.leaf-task.leaf-task-in-selection[data-checked='true']:not([data-leaf-source])::before {",
+    "  content: '- [x] ';",
+    "}",
+    // Task rows outside a plain <ul> (a numbered checklist, say) cannot fake
+    // their marker with static content, so their box tints instead.
     ".content-editor-visual li.leaf-task.leaf-task-in-selection .leaf-task-box {",
     "  background-color: rgba(59, 130, 246, 0.35);",
     "  background-color: Highlight;",
@@ -12630,9 +12651,23 @@
 
       for (var i = 0; i < marked.length; i++) {
         marked[i].classList.remove("leaf-task-in-selection");
+        // A source-mode row had its real marker revealed below; hand it
+        // back. The caret-driven refresh re-reveals it if the caret is on
+        // the marker — during a live selection that refresh is frozen, so
+        // this flip is ours to undo.
+        if (marked[i].hasAttribute("data-leaf-source")) {
+          marked[i].classList.remove("leaf-marker-active");
+        }
       }
       for (var j = 0; j < covered.length; j++) {
         covered[j].li.classList.add("leaf-task-in-selection");
+        // A row already in source form carries its real "- [ ] " as hidden
+        // span text. A class flip shows it — no rebuild, so the selection
+        // survives — and since that text sits inside the selected range, the
+        // native highlight paints it: the genuine Obsidian article.
+        if (covered[j].li.hasAttribute("data-leaf-source")) {
+          covered[j].li.classList.add("leaf-marker-active");
+        }
       }
     },
 

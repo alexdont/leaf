@@ -326,3 +326,50 @@ test("the listeners are wired in setup and removed in teardown", { skip: dom.ski
     /document\.removeEventListener\(\s*"selectionchange",\s*this\._onTaskSelectionChange\s*\)/
   );
 });
+
+// ---------------------------------------------------------------------------
+// The selection shows the source, like Obsidian
+// ---------------------------------------------------------------------------
+
+test("a covered source-mode row reveals its real marker text", { skip: dom.skip }, () => {
+  const e = dom.editor(
+    '<ul><li class="leaf-task" data-checked="false" data-leaf-source="li">' +
+      '<span class="leaf-task-box" contenteditable="false"></span>' +
+      '<span class="leaf-source-marker leaf-list-marker">- [ ] </span>hello row</li></ul>',
+    "hybrid"
+  );
+  const li = e._visualEl.querySelector("li");
+  selectAll(li);
+
+  e._mirrorTaskSelection();
+  assert.equal(
+    li.classList.contains("leaf-marker-active"),
+    true,
+    "the hidden `- [ ] ` span becomes visible — real text, natively highlighted"
+  );
+
+  window.getSelection().removeAllRanges();
+  e._mirrorTaskSelection();
+  assert.equal(
+    li.classList.contains("leaf-marker-active"),
+    false,
+    "and is handed back when the selection goes"
+  );
+
+  e.cleanup();
+});
+
+test("the css reveals '- [ ] ' on covered rows instead of tinting the box", { skip: dom.skip }, () => {
+  const fs = require("fs");
+  const src = fs.readFileSync(require.resolve("../../priv/static/assets/leaf.js"), "utf8");
+
+  assert.match(src, /leaf-task-in-selection:not\(\[data-leaf-source\]\)::before/,
+    "pseudo marker on plain covered rows");
+  assert.match(src, /content: '- \[ \] '/);
+  assert.match(src, /content: '- \[x\] '/, "checked rows reveal [x]");
+  assert.match(
+    src,
+    /leaf-task-in-selection:not\(\[data-leaf-source\]\) > \.leaf-task-box \{",\s*\n\s*"\s*display: none;/,
+    "the box steps aside while the marker shows"
+  );
+});
