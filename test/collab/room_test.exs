@@ -99,6 +99,44 @@ defmodule Leaf.Collab.RoomTest do
     end
   end
 
+  # The monitor covers a session whose process dies. It cannot cover a
+  # LiveView that outlives its stay — one that switches documents without
+  # remounting keeps its pid alive, so without a goodbye the person lingers
+  # as a ghost caret in the document they left.
+  describe "leaving deliberately" do
+    test "the caret is gone for everyone else", %{room: room} do
+      Room.join(room, "A", self())
+      Room.join(room, "B", self())
+      Room.put_cursor(room, "A", 3)
+      Room.put_cursor(room, "B", 5)
+
+      assert [%{id: "A"}] = Room.cursors(room, "B")
+
+      assert :ok = Room.leave(room, "A")
+
+      assert [] = Room.cursors(room, "B"),
+             "the person who left must not linger as a ghost"
+    end
+
+    test "leaving twice, or a room never joined, is a no-op", %{room: room} do
+      Room.join(room, "A", self())
+
+      assert :ok = Room.leave(room, "A")
+      assert :ok = Room.leave(room, "A")
+      assert :ok = Room.leave(room, "never-joined")
+    end
+
+    test "a session can come back", %{room: room} do
+      Room.join(room, "A", self())
+      Room.leave(room, "A")
+
+      Room.join(room, "A", self())
+      Room.put_cursor(room, "A", 7)
+
+      assert [%{id: "A", offset: 7}] = Room.cursors(room, nil)
+    end
+  end
+
   describe "three people typing at once" do
     test "every edit lands where its author meant it to", %{room: room} do
       # None of them has seen the others: all three were written against the

@@ -1,8 +1,9 @@
 defmodule Leaf.Collab.Room do
   @moduledoc """
-  The shared document behind the Leaf collaboration testbed.
+  The process that holds a shared document: one room per document, applying
+  every session's operations in one place and broadcasting what it applied.
 
-  This exists because the first version of the testbed kept the operation log
+  This shape exists because the first version of its testbed kept the log
   in each LiveView's own assigns, which quietly made the page unable to show
   the thing it was built to show. A LiveView is torn down whenever its socket
   drops — routine on this host, where the socket often falls back to longpoll
@@ -15,10 +16,14 @@ defmodule Leaf.Collab.Room do
   or rejoins after a drop, has to be able to catch up. A page that only ever
   works for sessions present since the first keystroke is not collaborating.
 
-  Still no CRDT, on purpose. Operations are applied in arrival order and
-  `base_length` mismatches are recorded rather than resolved — surfacing
-  divergence is the point, since that is what a real merge layer would have to
-  handle.
+  Still no CRDT, on purpose — but not a bystander either. An arriving
+  operation is rebased over everything that crossed it on the wire
+  (`rebase_over/2`), so two people typing in different places both land.
+  What rebasing cannot honestly place — overlapping edits, or an editor
+  further behind than the history reaches — is refused rather than applied
+  at a wrong offset, and the refused session is settled up from the room's
+  copy of the document. Convergence without merge semantics: somebody's
+  keystroke can lose, but the documents never quietly disagree.
   """
   use GenServer
 
@@ -128,6 +133,21 @@ defmodule Leaf.Collab.Room do
   # process by that name — a trap this fell into twice.
   def join(room, session_id, pid, identity \\ %{}),
     do: GenServer.call(room, {:join, session_id, pid, identity})
+
+  @doc """
+  Take a session out of the room deliberately.
+
+  The monitor covers a session whose process dies — a closed tab, a dropped
+  socket. It cannot cover a LiveView that outlives its stay: one that switches
+  documents without remounting keeps its pid alive, so without saying goodbye
+  the person lingers here as a ghost caret for as long as the tab stays open.
+  This is the goodbye. Idempotent: leaving a room twice, or one never joined,
+  is a no-op.
+
+  The monitor itself stays until the process actually dies; a `:DOWN` for a
+  session already gone removes nothing and costs nothing.
+  """
+  def leave(room, session_id), do: GenServer.call(room, {:leave, session_id})
 
   @doc """
   Move a session's caret and selection.
@@ -363,6 +383,15 @@ defmodule Leaf.Collab.Room do
 
   def handle_call(:reports, _from, state) do
     {:reply, Map.get(state, :reports, %{}), state}
+  end
+
+  def handle_call({:leave, session_id}, _from, state) do
+    {:reply, :ok,
+     %{
+       state
+       | people: Map.delete(state.people, session_id),
+         reports: Map.delete(Map.get(state, :reports, %{}), session_id)
+     }}
   end
 
   def handle_call({:cursors, except}, _from, state) do

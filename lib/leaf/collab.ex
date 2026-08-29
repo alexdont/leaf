@@ -29,7 +29,9 @@ defmodule Leaf.Collab do
       />
 
   That is the whole integration. `join/2` attaches a `handle_info` hook, so the
-  host writes no message handling of its own.
+  host writes no message handling of its own. A LiveView that switches
+  documents without remounting calls `leave/1` before joining the next room —
+  see `leave/1`.
 
   ## What the hook consumes
 
@@ -57,7 +59,9 @@ defmodule Leaf.Collab do
   none of this.
   """
   import Phoenix.Component, only: [assign: 3]
-  import Phoenix.LiveView, only: [attach_hook: 4, connected?: 1, send_update: 2]
+
+  import Phoenix.LiveView,
+    only: [attach_hook: 4, detach_hook: 3, connected?: 1, send_update: 2]
 
   alias Leaf.Collab.Log
   alias Leaf.Collab.Room
@@ -115,6 +119,51 @@ defmodule Leaf.Collab do
       }
     })
     |> attach_hook(:leaf_collab, :handle_info, &handle_message/2)
+  end
+
+  @doc """
+  Leave the document, undoing what `join/2` did.
+
+  For a LiveView that outlives its stay in a room — one that switches
+  documents without remounting, the way an editor with a sidebar keeps the
+  sidebar alive. Closing the tab needs no call: the room monitors the
+  process. But a live process that merely moves on is invisible to the
+  monitor, so without this the person lingers as a ghost caret in the
+  document they left, and the next `join/2` raises on the hook it cannot
+  attach twice.
+
+  Removes this session from the room so its caret disappears for everyone
+  else, unsubscribes, detaches the hook, and clears `@leaf_collab` — after
+  which `join/2` works again with whatever room comes next:
+
+      def handle_params(%{"id" => id}, _uri, socket) do
+        {:noreply,
+         socket
+         |> Leaf.Collab.leave()
+         |> Leaf.Collab.join(room: room_for(id), editor_id: "note-editor")}
+      end
+
+  Idempotent: leaving without having joined is a no-op, so the pipeline
+  above needs no first-mount special case.
+  """
+  def leave(socket) do
+    case socket.assigns[:leaf_collab] do
+      nil ->
+        socket
+
+      state ->
+        if connected?(socket) do
+          Room.leave(state.room, state.session_id)
+
+          # The peers re-pull their cursor lists; ours is not among them now.
+          Phoenix.PubSub.broadcast_from(state.pubsub, self(), state.topic, :leaf_collab_cursors)
+          Phoenix.PubSub.unsubscribe(state.pubsub, state.topic)
+        end
+
+        socket
+        |> detach_hook(:leaf_collab, :handle_info)
+        |> assign(:leaf_collab, nil)
+    end
   end
 
   @doc "Everyone in the document, for a host that wants to list them."
