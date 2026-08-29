@@ -9860,7 +9860,18 @@
       var newSource;
       var newCursor;
       if (backspace) {
-        if (cursorOffset <= 0) {
+        // Step past placeholders to the nearest visible character. Deleting
+        // only a ZWSP changes nothing the user can see, and the rebuild
+        // seats a fresh one — Backspace pressed forever, checkbox immortal.
+        var visibleCut = cursorOffset;
+        while (
+          visibleCut > 0 &&
+          /[\u200B\uFEFF]/.test(sourceText.charAt(visibleCut - 1))
+        ) {
+          visibleCut--;
+        }
+
+        if (visibleCut <= 0) {
           // Backspace at the very start of the editor's only block
           // would have Chrome delete the `<p>` itself, leaving the
           // contenteditable with no block wrapper — the drag handle
@@ -9878,9 +9889,8 @@
           return false;
         }
         newSource =
-          sourceText.slice(0, cursorOffset - 1) +
-          sourceText.slice(cursorOffset);
-        newCursor = cursorOffset - 1;
+          sourceText.slice(0, visibleCut - 1) + sourceText.slice(cursorOffset);
+        newCursor = visibleCut - 1;
       } else {
         if (cursorOffset >= sourceText.length) {
           // Delete at the end of a source-mode block. Chrome's default
@@ -10127,7 +10137,11 @@
         }
         var liContentRest = liNormFull
           .replace(/^(- |\d+\. )/, "")
-          .replace(/^\[([ xX]?)\] /, "");
+          .replace(/^\[([ xX]?)\] /, "")
+          // The caret-home placeholder is scaffolding, not content. Counted,
+          // it made every "empty" task row read as occupied: Enter split
+          // instead of exiting, minting a fresh item each press.
+          .replace(/[\u200B\uFEFF]/g, "");
         liContentEmpty = liContentRest.length === 0;
       }
 

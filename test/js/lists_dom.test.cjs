@@ -754,3 +754,65 @@ test("hiding the marker never leaves the caret inside it", { skip }, () => {
 
   e.cleanup();
 });
+
+// ---------------------------------------------------------------------------
+// The caret-home placeholder is scaffolding, not content
+// ---------------------------------------------------------------------------
+//
+// Counted as content, it made every empty checkbox row read as occupied:
+// Enter split instead of exiting — a fresh item minted per press, a list
+// nobody could leave — and Backspace deleted only the invisible placeholder,
+// which the rebuild replanted: pressed forever, checkbox immortal.
+
+function emptyTaskSourceRow() {
+  const e = hybridEditor(
+    '<ul><li data-leaf-source="li" class="leaf-task" data-checked="false">' +
+      '<span class="leaf-task-box" contenteditable="false"></span>' +
+      '<span class="leaf-source-marker leaf-list-marker">- [ ] </span>​</li></ul>' +
+      "<p>after</p>"
+  );
+  const li = e._visualEl.querySelector("li");
+  e._sourceBlock = li;
+  // The shared harness stubs this to () => false; these tests are about it.
+  delete e._maybeHandleSourceDelete;
+
+  // Caret where the flip rescue seats it: in the placeholder after the marker.
+  const home = li.lastChild;
+  const r = document.createRange();
+  r.setStart(home, home.length);
+  r.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+
+  return { e, li };
+}
+
+test("Enter on an empty checkbox row exits the list, placeholder or not", { skip }, () => {
+  const { e } = emptyTaskSourceRow();
+
+  assert.equal(e._maybeHandleSourceEnter(), true, "the Enter belongs to the exit path");
+  assert.equal(
+    e._visualEl.querySelector("ul"),
+    null,
+    "the emptied list is gone — not a second item minted"
+  );
+
+  e.cleanup();
+});
+
+test("Backspace on an empty checkbox row deletes something you can see", { skip }, () => {
+  const { e, li } = emptyTaskSourceRow();
+
+  assert.equal(e._maybeHandleSourceDelete(true), true);
+
+  const text = (e._visualEl.querySelector("li")?.textContent || "")
+    .replace(/ /g, " ");
+  assert.notEqual(
+    text.replace(/[​﻿]/g, ""),
+    "- [ ] ",
+    "the visible marker must have lost a character — deleting only the placeholder reads as nothing happening"
+  );
+
+  e.cleanup();
+});
