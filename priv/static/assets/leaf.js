@@ -2073,6 +2073,10 @@
         document.removeEventListener("mouseup", this._onTaskMouseUpBound);
         this._onTaskMouseUpBound = null;
       }
+      if (this._typingDiagObserver) {
+        this._typingDiagObserver.disconnect();
+        this._typingDiagObserver = null;
+      }
       if (this._awarenessTimer) {
         clearTimeout(this._awarenessTimer);
         this._awarenessTimer = null;
@@ -12668,9 +12672,99 @@
 
     // -- Task lists (GFM checkboxes) --
 
+    // Typing diagnostics, armed from the console with
+    // `window.LEAF_DEBUG_TYPING = true`. Near-zero cost until armed.
+    //
+    // The signal is the trio: a keydown with no beforeinput after it means
+    // the command never started (something prevented it, or focus/selection
+    // was not where it looked); a beforeinput with no input means the engine
+    // started the edit and abandoned it — and the mutation count says
+    // whether script moved the DOM under it. No [leaf-typing] lines at all
+    // while typing means the editor does not have focus.
+    _setupTypingDiagnostics: function () {
+      if (!this._visualEl) return;
+      var self = this;
+
+      var log = function (label, details) {
+        if (!window.LEAF_DEBUG_TYPING) return;
+        try {
+          console.log("[leaf-typing] " + label + " | " + details);
+        } catch (err) {
+          /* consoles can be strange places */
+        }
+      };
+
+      var name = function (n) {
+        if (!n) return "?";
+        if (n.nodeType === 3) {
+          return "#text(" + JSON.stringify((n.nodeValue || "").slice(0, 24)) + ")";
+        }
+        var cls = n.className ? "." + String(n.className).split(" ").join(".") : "";
+        return (n.tagName || n.nodeName || "?") + cls;
+      };
+
+      var describeSelection = function () {
+        var sel = window.getSelection();
+        if (!sel || !sel.rangeCount) return "no selection";
+        var r = sel.getRangeAt(0);
+        var head = sel.isCollapsed ? "caret " : "range ";
+        var out = head + name(r.startContainer) + "@" + r.startOffset;
+        if (!sel.isCollapsed) out += " -> " + name(r.endContainer) + "@" + r.endOffset;
+        return out;
+      };
+
+      this._visualEl.addEventListener("keydown", function (e) {
+        log(
+          "keydown '" + e.key + "'",
+          describeSelection() + " | focus=" + name(document.activeElement)
+        );
+      });
+
+      this._visualEl.addEventListener("beforeinput", function (e) {
+        if (self._typingDiagObserver) self._typingDiagObserver.takeRecords();
+        self._typingCommandOpen = true;
+        log(
+          "beforeinput " + e.inputType,
+          describeSelection() + (e.defaultPrevented ? " | ALREADY PREVENTED" : "")
+        );
+
+        // A beforeinput that never reaches its input is the abort we are
+        // hunting. Flagged a beat later so the pairing is visible even when
+        // the engine dies silently in between.
+        setTimeout(function () {
+          if (self._typingCommandOpen) {
+            self._typingCommandOpen = false;
+            log("NO INPUT FOLLOWED", "the engine abandoned the edit");
+          }
+        }, 60);
+      });
+
+      this._visualEl.addEventListener("input", function (e) {
+        var records = self._typingDiagObserver
+          ? self._typingDiagObserver.takeRecords()
+          : [];
+        self._typingCommandOpen = false;
+        log(
+          "input " + (e.inputType || "?"),
+          describeSelection() + " | mutations=" + records.length
+        );
+      });
+
+      if (typeof MutationObserver === "function") {
+        this._typingDiagObserver = new MutationObserver(function () {});
+        this._typingDiagObserver.observe(this._visualEl, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          characterData: true
+        });
+      }
+    },
+
     _setupTaskLists: function () {
       if (!this._visualEl) return;
 
+      this._setupTypingDiagnostics();
       this._visualEl.addEventListener("mousedown", this._onTaskMouseDown.bind(this));
 
       // The gestures resolve on mouseup, and a drag can end anywhere — off

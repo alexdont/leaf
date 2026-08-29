@@ -594,3 +594,12 @@ test("the source machinery is deferred off selectionchange too", { skip: dom.ski
     "the update lives inside the deferred body"
   );
 });
+
+test("typing diagnostics exist, stay silent unarmed, and are torn down", { skip: dom.skip }, () => {
+  const fs = require("fs");
+  const src = fs.readFileSync(require.resolve("../../priv/static/assets/leaf.js"), "utf8");
+
+  assert.match(src, /LEAF_DEBUG_TYPING/, "armed from the console, not shipped on");
+  assert.match(src, /NO INPUT FOLLOWED/, "the abort signal is the whole point");
+  assert.match(src, /_typingDiagObserver\.disconnect\(\)/, "observers do not outlive the editor");
+});
