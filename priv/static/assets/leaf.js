@@ -12790,10 +12790,32 @@
       if (!this._visualEl) return;
       var self = this;
 
+      // data-debug-typing arms the diagnostics without the console AND
+      // mirrors the trace into a panel on the page — asking a reporter to
+      // open devtools mid-bug loses the moment; a panel they can read and
+      // paste from does not.
+      if (this.el && this.el.dataset && this.el.dataset.debugTyping === "true") {
+        window.LEAF_DEBUG_TYPING = true;
+        this._typingPanel = document.createElement("pre");
+        this._typingPanel.setAttribute("data-leaf-typing-panel", "");
+        this._typingPanel.style.cssText =
+          "position:fixed;bottom:0;right:0;max-width:46rem;max-height:14rem;" +
+          "overflow:auto;background:#111;color:#9fe870;font-size:11px;" +
+          "padding:6px 8px;z-index:9999;opacity:0.92;margin:0;";
+        this._typingPanel.textContent =
+          "[leaf] typing trace — reproduce, then copy this box\n";
+        document.body.appendChild(this._typingPanel);
+      }
+
       var log = function (label, details) {
         if (!window.LEAF_DEBUG_TYPING) return;
         try {
-          console.log("[leaf-typing] " + label + " | " + details);
+          var line = "[leaf-typing] " + label + " | " + details;
+          console.log(line);
+          if (self._typingPanel) {
+            self._typingPanel.textContent += line + "\n";
+            self._typingPanel.scrollTop = self._typingPanel.scrollHeight;
+          }
         } catch (err) {
           /* consoles can be strange places */
         }
@@ -12819,9 +12841,27 @@
       };
 
       this._visualEl.addEventListener("keydown", function (e) {
+        var boxFact = "";
+        try {
+          var s2 = window.getSelection();
+          if (s2 && s2.rangeCount && !s2.isCollapsed) {
+            var r2 = s2.getRangeAt(0);
+            var box2 = self._visualEl.querySelector(".leaf-task-box");
+            if (box2) {
+              var br2 = document.createRange();
+              br2.selectNode(box2);
+              boxFact =
+                " | boxInRange=" +
+                (r2.compareBoundaryPoints(Range.START_TO_START, br2) <= 0 &&
+                  r2.compareBoundaryPoints(Range.END_TO_START, br2) < 0);
+            }
+          }
+        } catch (err2) {
+          boxFact = " | boxInRange=?";
+        }
         log(
           "keydown '" + e.key + "'",
-          describeSelection() + " | focus=" + name(document.activeElement)
+          describeSelection() + boxFact + " | focus=" + name(document.activeElement)
         );
       });
 
@@ -12902,7 +12942,12 @@
         var selDesc = !sel || !sel.rangeCount
           ? "none"
           : (sel.isCollapsed ? "caret" : "range:" + JSON.stringify(String(sel).slice(0, 30)));
-        console.log("[leaf-mouse] " + label + " | sel=" + selDesc + (extra ? " | " + extra : ""));
+        var line = "[leaf-mouse] " + label + " | sel=" + selDesc + (extra ? " | " + extra : "");
+        console.log(line);
+        if (this._typingPanel) {
+          this._typingPanel.textContent += line + "\n";
+          this._typingPanel.scrollTop = this._typingPanel.scrollHeight;
+        }
       } catch (err) {
         /* consoles */
       }

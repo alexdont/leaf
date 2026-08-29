@@ -473,6 +473,10 @@ defmodule Leaf do
   # Both off by default; a host that only wants the markdown sees exactly the
   # traffic it always did.
   attr(:collaboration, :any, default: nil)
+  # Diagnostics for dead keystrokes: arms the typing/mouse trace and mirrors
+  # it into an on-page panel, so a reporter can paste what happened without
+  # opening a console. A debugging aid, not a shipping switch.
+  attr(:debug_typing, :boolean, default: false)
   attr(:gettext_backend, :any, default: nil)
   attr(:upload_handler, :any, default: nil)
   attr(:sync_input_name, :string, default: nil)
@@ -550,6 +554,7 @@ defmodule Leaf do
      |> assign_new(:suggestions, fn -> [] end)
      |> assign_new(:wiki_links, fn -> nil end)
      |> assign_new(:collaboration, fn -> nil end)
+     |> assign_new(:debug_typing, fn -> false end)
      |> assign_new(:gettext_backend, fn -> nil end)
      |> assign_new(:readonly, fn -> false end)
      |> assign_new(:upload_handler, fn -> nil end)
@@ -830,6 +835,7 @@ defmodule Leaf do
       data-collab-operations={to_string(collab_operations?(@collaboration))}
       data-collab-awareness={to_string(collab_awareness?(@collaboration))}
       data-collab-debug={to_string(collab_debug?(@collaboration))}
+      data-debug-typing={to_string(@debug_typing == true)}
       data-collab-revision={collab_revision(@collaboration)}
       data-wikilinks={to_string(wiki_links_enabled?(@wiki_links))}
       data-wikilinks-resolve={to_string(wiki_links_resolve?(@wiki_links))}
