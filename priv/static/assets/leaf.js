@@ -12883,7 +12883,21 @@
     // a drag-selection that starts in the gutter dies before it begins. The
     // gutter and stranded-caret gestures wait for mouseup and only fire when
     // no drag happened.
+    _taskLog: function (label, extra) {
+      if (!window.LEAF_DEBUG_TYPING) return;
+      try {
+        var sel = window.getSelection();
+        var selDesc = !sel || !sel.rangeCount
+          ? "none"
+          : (sel.isCollapsed ? "caret" : "range:" + JSON.stringify(String(sel).slice(0, 30)));
+        console.log("[leaf-mouse] " + label + " | sel=" + selDesc + (extra ? " | " + extra : ""));
+      } catch (err) {
+        /* consoles */
+      }
+    },
+
     _onTaskMouseDown: function (e) {
+      this._taskLog("mousedown detail=" + e.detail, "target=" + (e.target.className || e.target.nodeName));
       if (this._readonly) return;
       var li = e.target.closest && e.target.closest("li.leaf-task");
       if (!li) return;
@@ -12908,6 +12922,7 @@
     _onTaskMouseUp: function (e) {
       var gesture = this._taskGesture;
       this._taskGesture = null;
+      this._taskLog("mouseup detail=" + e.detail, "gesture=" + (gesture ? "yes(detail=" + gesture.detail + ")" : "no"));
       if (!gesture || this._readonly) return;
 
       var li = gesture.li;
@@ -12923,7 +12938,10 @@
       // caret nobody could see. Keyboard-made selections replaced fine,
       // mouse-made ones died — and only on the first word, the one inside
       // the box's stranding zone.
-      if (gesture.detail > 1 || e.detail > 1) return;
+      if (gesture.detail > 1 || e.detail > 1) {
+        this._taskLog("gesture: stand down (multi-click)");
+        return;
+      }
 
       // Any real movement, or any selection, means this was a drag — the
       // person was selecting, and selecting must win.
@@ -12936,6 +12954,7 @@
       // behind the checkbox everywhere else.
       var boxRect = box.getBoundingClientRect();
       if (boxRect.width > 0 && e.clientX < boxRect.left) {
+        this._taskLog("gesture: gutter reveal");
         this._visualEl.focus({ preventScroll: true });
         this._revealTaskMarker(li);
         return;
@@ -12951,6 +12970,7 @@
         (pos.node === li && pos.offset === 0);
       if (!stranded) return;
 
+      this._taskLog("gesture: STRANDED CORRECTION — collapsing to after the box");
       this._visualEl.focus({ preventScroll: true });
       var r = document.createRange();
       var after = box.nextSibling;
@@ -12981,6 +13001,7 @@
     // "- " / "3. " / "- [x] " under the sweep the way Obsidian does.
     _mirrorTaskSelection: function () {
       if (!this._visualEl) return;
+      this._taskLog("mirror run");
 
       var marked = this._visualEl.querySelectorAll("li.leaf-row-in-selection");
       var covered = [];
