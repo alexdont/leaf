@@ -51,7 +51,16 @@ defmodule Leaf.Collab.Room do
   Start a room for one document.
 
   One per document, started and supervised by the host — a vault would start
-  one per note, on demand, and stop it when everybody has left.
+  one per note, on demand.
+
+  By default a room runs until stopped: it keeps the operation log warm, so a
+  session that drops and comes straight back — routine on longpoll — rejoins
+  where it was instead of resyncing. The cost is that browsing a large vault
+  leaves a process per visited note. A host that would rather have rooms tidy
+  themselves away passes `:idle_after`, and the room stops itself — flushing
+  first — when it has been empty that long. Pair it with `restart: :transient`
+  (or `:temporary`) in the child spec: under `:permanent`, the supervisor
+  resurrects every room the moment it stops.
 
   Options:
 
@@ -69,9 +78,13 @@ defmodule Leaf.Collab.Room do
       milliseconds. Defaults to 2 seconds.
     * `:flush_at_most_every` — how long writing that never pauses may go
       unwritten. Defaults to 15 seconds.
+    * `:idle_after` — how long a room may stand empty before stopping itself,
+      in milliseconds. Defaults to `:infinity`: staying up is the default,
+      see above.
 
-  Stop it rather than killing it: the last thing a room does is write down what
-  it was holding.
+  Stop it rather than killing it — `stop/1`, or anything that delivers a
+  graceful shutdown: the last thing a room does is write down what it was
+  holding.
   """
   def start_link(opts) do
     GenServer.start_link(
@@ -90,7 +103,8 @@ defmodule Leaf.Collab.Room do
         # where it is being written to, and because a test should be able to
         # watch the timers work rather than sleep through them.
         flush_after: Keyword.get(opts, :flush_after, @flush_after),
-        flush_at_most_every: Keyword.get(opts, :flush_at_most_every, @flush_at_most_every)
+        flush_at_most_every: Keyword.get(opts, :flush_at_most_every, @flush_at_most_every),
+        idle_after: Keyword.get(opts, :idle_after, :infinity)
       },
       name: Keyword.get(opts, :name, __MODULE__)
     )
@@ -133,6 +147,16 @@ defmodule Leaf.Collab.Room do
   # process by that name — a trap this fell into twice.
   def join(room, session_id, pid, identity \\ %{}),
     do: GenServer.call(room, {:join, session_id, pid, identity})
+
+  @doc """
+  Stop the room gracefully.
+
+  The last thing it does is write down what it was holding, so this is the
+  way to take a room down by hand — as opposed to killing it, which loses
+  whatever had not flushed yet. With `:idle_after` set the room does this to
+  itself when it has stood empty long enough.
+  """
+  def stop(room), do: GenServer.stop(room)
 
   @doc """
   Take a session out of the room deliberately.
@@ -225,6 +249,7 @@ defmodule Leaf.Collab.Room do
         initial_content: opts.initial_content,
         flush_after: Map.get(opts, :flush_after, @flush_after),
         flush_at_most_every: Map.get(opts, :flush_at_most_every, @flush_at_most_every),
+        idle_after: Map.get(opts, :idle_after, :infinity),
         dirty: false,
         deadline: nil
       })
@@ -323,7 +348,9 @@ defmodule Leaf.Collab.Room do
         pubsub: state.pubsub,
         initial_content: state.initial_content,
         flush_after: state.flush_after,
-        flush_at_most_every: state.flush_at_most_every
+        flush_at_most_every: state.flush_at_most_every,
+        idle_after: state.idle_after,
+        idle_timer: state.idle_timer
     }
 
     {:reply,
@@ -337,6 +364,7 @@ defmodule Leaf.Collab.Room do
 
   def handle_call({:join, session_id, pid, identity}, _from, state) do
     Process.monitor(pid)
+    state = cancel_idle(state)
 
     person = %{
       session: session_id,
@@ -373,7 +401,19 @@ defmodule Leaf.Collab.Room do
   end
 
   def handle_call(:flush_now, _from, state) do
-    {:reply, :ok, flush(state)}
+    # The honest answer, not a hardcoded :ok — this is what makes
+    # save-before-navigate mean something. A conflict can never resolve on
+    # its own (see flush/1); a store error retries on the next change.
+    new_state = flush(state)
+
+    reply =
+      cond do
+        new_state.conflict -> {:error, :conflict}
+        new_state.dirty -> {:error, :store}
+        true -> :ok
+      end
+
+    {:reply, reply, new_state}
   end
 
   def handle_call({:report, session_id, info}, _from, state) do
@@ -387,11 +427,11 @@ defmodule Leaf.Collab.Room do
 
   def handle_call({:leave, session_id}, _from, state) do
     {:reply, :ok,
-     %{
+     maybe_idle(%{
        state
        | people: Map.delete(state.people, session_id),
          reports: Map.delete(Map.get(state, :reports, %{}), session_id)
-     }}
+     })}
   end
 
   def handle_call({:cursors, except}, _from, state) do
@@ -425,7 +465,17 @@ defmodule Leaf.Collab.Room do
     people = Map.drop(state.people, gone)
     reports = Map.drop(Map.get(state, :reports, %{}), gone)
 
-    {:noreply, %{state | people: people, reports: reports}}
+    {:noreply, maybe_idle(%{state | people: people, reports: reports})}
+  end
+
+  def handle_info(:idle_stop, state) do
+    # Race-safe rather than trusting the cancel: a join that raced this
+    # message keeps the room alive.
+    if map_size(state.people) == 0 do
+      {:stop, :normal, %{state | idle_timer: nil}}
+    else
+      {:noreply, %{state | idle_timer: nil}}
+    end
   end
 
   def handle_info(_message, state), do: {:noreply, state}
@@ -435,7 +485,28 @@ defmodule Leaf.Collab.Room do
   # last moment anything can be.
   @impl true
   def terminate(_reason, state) do
-    flush(state)
+    final = flush(state)
+
+    # Going down holding unwritten work is the moment loss actually happens,
+    # and it must not happen silently. The conflict case can never have
+    # retried its way out; the store case just ran out of retries.
+    cond do
+      final.conflict ->
+        Logger.warning(
+          "[collab] room for #{final.document_id} stopped discarding writing " <>
+            "the store refused as a conflict — the file changed outside the session"
+        )
+
+      final.dirty ->
+        Logger.warning(
+          "[collab] room for #{final.document_id} stopped with unwritten changes — " <>
+            "the store was unavailable to the end"
+        )
+
+      true ->
+        :ok
+    end
+
     :ok
   end
 
@@ -478,17 +549,53 @@ defmodule Leaf.Collab.Room do
 
     case result do
       :ok ->
+        # On the mend from a conflict is worth a word too, or the banner a
+        # host raised on {:leaf_conflict, …} could never come down.
+        if state.conflict do
+          tell(state, {:leaf_conflict_cleared, %{document_id: state.document_id}})
+        end
+
         %{state | dirty: false, deadline: nil, timer: nil, conflict: false}
 
       {:error, :conflict} ->
         # Somebody edited the document outside this session. Both copies are
         # somebody's work, and this one is not more entitled to exist, so it
         # stays in memory and stops trying to overwrite theirs.
+        #
+        # But quietly refusing was its own way of losing the work: the flag
+        # went on the state, nothing read it, and the room eventually went
+        # down discarding the only copy. Everyone on the topic is told — once
+        # per conflict, not once per retry — so a host can show a banner and
+        # a person can act while the writing is still in memory.
+        if not state.conflict do
+          tell(state, {:leaf_conflict, %{document_id: state.document_id}})
+        end
+
         %{state | deadline: nil, timer: nil, conflict: true}
 
       {:error, _reason} ->
         # Left dirty on purpose: the next change will try again.
         %{state | deadline: nil, timer: nil}
+    end
+  end
+
+  defp tell(%{pubsub: nil}, _message), do: :ok
+  defp tell(state, message), do: Phoenix.PubSub.broadcast(state.pubsub, state.topic, message)
+
+  defp cancel_idle(%{idle_timer: nil} = state), do: state
+
+  defp cancel_idle(state) do
+    Process.cancel_timer(state.idle_timer)
+    %{state | idle_timer: nil}
+  end
+
+  defp maybe_idle(%{idle_after: :infinity} = state), do: state
+
+  defp maybe_idle(state) do
+    if map_size(state.people) == 0 and state.idle_timer == nil do
+      %{state | idle_timer: Process.send_after(self(), :idle_stop, state.idle_after)}
+    else
+      state
     end
   end
 
@@ -633,6 +740,8 @@ defmodule Leaf.Collab.Room do
       initial_content: "",
       flush_after: @flush_after,
       flush_at_most_every: @flush_at_most_every,
+      idle_after: :infinity,
+      idle_timer: nil,
       dirty: false,
       deadline: nil,
       timer: nil,

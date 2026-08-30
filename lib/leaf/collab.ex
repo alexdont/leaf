@@ -36,8 +36,9 @@ defmodule Leaf.Collab do
   ## What the hook consumes
 
   The hook handles — and stops — `{:leaf_operation, …}`, `{:leaf_awareness, …}`,
-  `{:leaf_ready, …}`, `{:leaf_resync, …}`, `{:leaf_debug_state, …}` and
-  `{:leaf_changed, …}`. A collaborating LiveView therefore does **not** receive
+  `{:leaf_ready, …}`, `{:leaf_resync, …}`, `{:leaf_debug_state, …}`,
+  `{:leaf_changed, …}`, and the room's `{:leaf_conflict, …}` /
+  `{:leaf_conflict_cleared, …}`. A collaborating LiveView therefore does **not** receive
   `{:leaf_changed, …}`: read the document from `@leaf_collab.content`, which is
   kept current on every edit, local or remote. Anything the hook does not
   recognise passes through to the host's own `handle_info` clauses untouched.
@@ -111,6 +112,12 @@ defmodule Leaf.Collab do
       # start: a host showing a banner off it must be able to read it before
       # anything has ever gone wrong.
       diverged: false,
+      # Whether the store is refusing to write because the document changed
+      # outside the session — vim, git, another process. The room broadcasts
+      # the transition both ways; a host renders a banner off this and a
+      # person acts while the writing is still in memory. Same rule as
+      # `diverged`: readable before anything has gone wrong.
+      conflict: false,
       collaboration: %{
         operations: true,
         awareness: Keyword.get(opts, :awareness, true),
@@ -337,6 +344,18 @@ defmodule Leaf.Collab do
     else
       {:halt, put(socket, %{content: markdown})}
     end
+  end
+
+  # The store refused a flush because the document changed outside the
+  # session, or a later flush finally landed. Surfaced as an assign and
+  # nothing more: what to do about a conflict — re-read the file, offer a
+  # merge, warn and wait — is the host's call, about the host's storage.
+  defp handle_message({:leaf_conflict, %{document_id: _}}, socket) do
+    {:halt, put(socket, %{conflict: true})}
+  end
+
+  defp handle_message({:leaf_conflict_cleared, %{document_id: _}}, socket) do
+    {:halt, put(socket, %{conflict: false})}
   end
 
   defp handle_message({:leaf_debug_state, report}, socket) do

@@ -177,6 +177,141 @@ defmodule Leaf.Collab.StoreTest do
     end
   end
 
+  # The store contract already stopped a conflict overwriting somebody's
+  # work. What was missing was that nobody was told: the flag went on the
+  # room's state, nothing read it, and the room eventually went down
+  # discarding the only copy of what was typed.
+  describe "a refused flush is not silent" do
+    defp conflicted(root, id, room) do
+      Room.apply_operation(room, "A", op(0, 1, "@"))
+      Room.flush_now(room)
+
+      # vim, git, another process — the designed-for event.
+      File.write!(Path.join(root, "#{id}.md"), "theirs, written elsewhere")
+
+      Room.apply_operation(room, "A", op(0, 0, "!"))
+    end
+
+    test "flush_now says so instead of :ok", %{root: root, id: id} do
+      room = start_room(id)
+      conflicted(root, id, room)
+
+      assert {:error, :conflict} = Room.flush_now(room)
+    end
+
+    test "everyone on the topic hears, once per conflict", %{root: root, id: id} do
+      room = start_room(id)
+      info = Room.info(room)
+      Phoenix.PubSub.subscribe(info.pubsub, info.topic)
+
+      conflicted(root, id, room)
+      Room.flush_now(room)
+      assert_receive {:leaf_conflict, %{document_id: ^id}}
+
+      # A retry that fails the same way is not news.
+      Room.apply_operation(room, "A", op(0, 0, "?"))
+      Room.flush_now(room)
+      refute_receive {:leaf_conflict, _}, 50
+    end
+
+    test "the all-clear is broadcast when a later flush lands", %{root: root, id: id} do
+      room = start_room(id)
+      info = Room.info(room)
+      Phoenix.PubSub.subscribe(info.pubsub, info.topic)
+
+      conflicted(root, id, room)
+      Room.flush_now(room)
+      assert_receive {:leaf_conflict, _}
+
+      # Somebody resolves it by hand: the file is put back to what the
+      # session last wrote, so the store's recorded hash matches again.
+      File.write!(Path.join(root, "#{id}.md"), "@ Note\n\nsomething already written")
+
+      assert :ok = Room.flush_now(room)
+      assert_receive {:leaf_conflict_cleared, %{document_id: ^id}}
+    end
+
+    test "going down with refused writing is logged, not mute", %{root: root, id: id} do
+      room = start_room(id)
+      conflicted(root, id, room)
+      pid = Process.whereis(room)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          GenServer.stop(pid)
+        end)
+
+      assert log =~ "conflict"
+      assert log =~ id
+
+      assert File.read!(Path.join(root, "#{id}.md")) == "theirs, written elsewhere",
+             "their work is still what the refusal protected"
+    end
+  end
+
+  # A room used to run for the life of the node: browsing a large vault left
+  # a process per visited note, each holding the full text and its log.
+  describe "a room that tidies itself away" do
+    test "stops — writing first — once it has stood empty long enough", %{root: root, id: id} do
+      room = start_room(id, idle_after: 30)
+      pid = Process.whereis(room)
+      ref = Process.monitor(pid)
+
+      Room.join(room, "A", self())
+      Room.apply_operation(room, "A", op(0, 1, "@"))
+      Room.leave(room, "A")
+
+      assert_receive {:DOWN, ^ref, :process, ^pid, reason} when reason in [:normal, :shutdown],
+                     500
+
+      assert File.read!(Path.join(root, "#{id}.md")) =~ "@ Note",
+             "the last thing it did was write down what it was holding"
+    end
+
+    test "somebody coming back during the linger keeps it alive", %{id: id} do
+      room = start_room(id, idle_after: 60)
+
+      Room.join(room, "A", self())
+      Room.leave(room, "A")
+      Room.join(room, "A", self())
+
+      Process.sleep(150)
+      assert Process.whereis(room), "the return cancelled the stop"
+    end
+
+    test "a dropped session counts as leaving", %{id: id} do
+      room = start_room(id, idle_after: 30)
+      pid = Process.whereis(room)
+      ref = Process.monitor(pid)
+
+      session = spawn(fn -> Process.sleep(:infinity) end)
+      Room.join(room, "A", session)
+      Process.exit(session, :kill)
+
+      assert_receive {:DOWN, ^ref, :process, ^pid, reason} when reason in [:normal, :shutdown],
+                     500
+    end
+
+    test "without idle_after, staying up is still the default", %{id: id} do
+      room = start_room(id)
+
+      Room.join(room, "A", self())
+      Room.leave(room, "A")
+
+      Process.sleep(100)
+      assert Process.whereis(room), "a room keeps its log warm unless told otherwise"
+    end
+
+    test "stop/1 is the graceful way down by hand", %{root: root, id: id} do
+      room = start_room(id)
+      Room.apply_operation(room, "A", op(0, 1, "@"))
+
+      Room.stop(room)
+
+      assert File.read!(Path.join(root, "#{id}.md")) =~ "@ Note"
+    end
+  end
+
   # A reset is a change like any other. One that never reached the store would
   # be resurrected from it: the next hydrate would bring the pre-reset
   # document straight back.

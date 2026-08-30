@@ -73,6 +73,29 @@ same way.
   `modifier: boolean` so a host can mean something extra by Ctrl-click.
   The old behaviour remains as `follow: :modifier`.
 
+- **A refused flush is no longer silent.** The store contract already
+  stopped a conflicting flush from overwriting work edited outside the
+  session — vim, git, another process — but nobody was told: the flag went
+  on the room's state, nothing read it, and the room eventually went down
+  discarding the only copy of what was typed. Now the room broadcasts
+  `{:leaf_conflict, %{document_id:}}` once per conflict (and
+  `{:leaf_conflict_cleared, …}` when a later flush lands), the
+  `Leaf.Collab` hook surfaces it as `@leaf_collab.conflict` for a banner,
+  `Room.flush_now/1` returns `{:error, :conflict}` / `{:error, :store}`
+  instead of a hardcoded `:ok` — making save-before-navigate honest — and
+  a room going down holding refused or unwritten work logs a warning
+  naming the document.
+
+- **Rooms can stop.** A room used to run for the life of the node, so
+  browsing a large vault left a process per visited note. `Room.stop/1`
+  is the graceful way down by hand (it flushes first), and a host that
+  wants rooms to tidy themselves away passes `idle_after:` — the room
+  stops itself, writing first, once it has stood empty that long, with a
+  return during the linger cancelling the stop. Staying up remains the
+  default (it keeps the operation log warm for a reconnect), and
+  `start_link/1`'s docs now say which behaviour you have — they used to
+  describe the host's duty in words that read as the room's behaviour.
+
 - **`Leaf.Collab.leave/1`** undoes what `join/2` did, for a LiveView that
   switches documents without remounting: the session leaves the room (its
   caret disappears for everyone now, not at tab close), the topic is
