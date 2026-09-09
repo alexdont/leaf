@@ -7014,6 +7014,13 @@
         return;
       }
 
+      // Inside the OPEN source block the token is being edited: the press
+      // must seat the caret (revealing the raw form), never follow the link.
+      if (span.closest && span.closest("[data-leaf-source]")) {
+        this._wikiLinkPress = null;
+        return;
+      }
+
       // Captured before the caret moves. In hybrid mode, when the press is
       // allowed to seat the caret (the :modifier gesture), the
       // selectionchange that follows swaps the block to its source form and
@@ -7040,6 +7047,12 @@
         ? e.target.closest("[data-leaf-wikilink]")
         : null;
       if (span && !this._visualEl.contains(span)) span = null;
+      // Same source-block exemption as the press: an edited token never
+      // follows on click.
+      if (span && span.closest && span.closest("[data-leaf-source]")) {
+        this._wikiLinkPress = null;
+        return;
+      }
 
       // One press, one click: the capture never outlives its gesture.
       var press = this._wikiLinkPress;
@@ -10733,6 +10746,64 @@
             continue;
           }
 
+          // Wiki link — `[[Target|Alias]]` shows only the alias while
+          // inactive: `[[`, the target and the `|` sit in marker spans the
+          // CSS hides, the alias is plain text, and the whole thing lives
+          // in the same `.leaf-wikilink` span visual mode uses (so target
+          // resolution decorates it, and the serializer's wikilink branch
+          // emits `data-leaf-wikilink-raw` verbatim). Caret inside →
+          // `.leaf-source-active` reveals every marker for raw editing.
+          if (p.type === "wikilink") {
+            var wAbsStart = segOffset + match.start;
+            var wAbsEnd = segOffset + match.end;
+            var wActive =
+              ancestorActive ||
+              (caretOffset >= wAbsStart && caretOffset <= wAbsEnd);
+            var wSpan = document.createElement("span");
+            wSpan.className = "leaf-wikilink";
+            wSpan.setAttribute("data-leaf-wikilink", match.wikiTarget);
+            if (match.wikiHeading) {
+              wSpan.setAttribute("data-leaf-wikilink-heading", match.wikiHeading);
+            }
+            wSpan.setAttribute("data-leaf-wikilink-raw", match.raw);
+            if (wActive) wSpan.classList.add("leaf-source-active");
+
+            appendMarker(
+              wSpan,
+              segText.slice(match.start, match.start + 2),
+              segOffset + match.start
+            );
+            if (match.wikiAlias) {
+              var wAliasStart = match.end - 2 - match.wikiAlias.length;
+              appendMarker(
+                wSpan,
+                segText.slice(match.start + 2, wAliasStart),
+                segOffset + match.start + 2
+              );
+              appendPlain(
+                wSpan,
+                segText.slice(wAliasStart, match.end - 2),
+                segOffset + wAliasStart
+              );
+            } else {
+              appendPlain(
+                wSpan,
+                segText.slice(match.start + 2, match.end - 2),
+                segOffset + match.start + 2
+              );
+            }
+            appendMarker(
+              wSpan,
+              segText.slice(match.end - 2, match.end),
+              segOffset + match.end - 2
+            );
+
+            host.appendChild(wSpan);
+            self._scheduleWikiLinkResolve();
+            pos = match.end;
+            continue;
+          }
+
           var wrapper;
           var bodyHost;
           if (p.type === "link") {
@@ -11565,6 +11636,31 @@
     _scanInlineMatches: function (text) {
       var candidates = [];
       var patterns = this._autoFormatPatterns;
+      // Wiki links first. In hybrid source mode a `[[Target|Alias]]` token
+      // renders as its alias chip (the `[[`, target and `|` hidden in
+      // marker spans) unless the caret is inside it — the same reveal
+      // grammar `**bold**` follows. Without this the whole raw token —
+      // easily 50+ chars when the target is an id — exploded into view the
+      // moment the block entered source mode.
+      if (this._wikiLinks && text.indexOf("[[") !== -1) {
+        var wre = /\[\[([^\[\]|#]+?)(?:#([^\[\]|]+?))?(?:\|([^\[\]]+?))?\]\]/g;
+        var wm;
+        while ((wm = wre.exec(text)) !== null) {
+          candidates.push({
+            start: wm.index,
+            end: wm.index + wm[0].length,
+            delim: "[[",
+            openLen: 2,
+            closeLen: 2,
+            pattern: { type: "wikilink" },
+            body: wm[1],
+            wikiTarget: wm[1],
+            wikiHeading: wm[2] || "",
+            wikiAlias: wm[3] || "",
+            raw: wm[0]
+          });
+        }
+      }
       for (var i = 0; i < patterns.length; i++) {
         var p = patterns[i];
         if (p.type === "link") {
@@ -11763,6 +11859,13 @@
           // label. Walking it would put the label into the source and lose the
           // link — the same trap as in `convertNode`. Emit what it carries.
           if (c.classList && c.classList.contains("leaf-wikilink")) {
+            // A caret inside the chip (a click on a source-mode alias) maps
+            // to the token's START — the next rebuild then renders the token
+            // active with the caret at its front, instead of losing the
+            // caret to the end of the block.
+            if (c === cursorNode || (c.contains && c.contains(cursorNode))) {
+              noteCursor(source.length);
+            }
             source += c.getAttribute("data-leaf-wikilink-raw") || c.textContent;
             prevWasBr = false;
             continue;

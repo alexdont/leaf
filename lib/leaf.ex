@@ -3591,6 +3591,7 @@ defmodule Leaf do
     .content-editor-visual [data-leaf-source] s .leaf-source-marker,
     .content-editor-visual [data-leaf-source] code .leaf-source-marker,
     .content-editor-visual [data-leaf-source] a .leaf-source-marker,
+    .content-editor-visual [data-leaf-source] .leaf-wikilink .leaf-source-marker,
     .content-editor-visual [data-leaf-source] .leaf-spoiler .leaf-source-marker {
       display: none;
     }

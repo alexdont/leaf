@@ -472,3 +472,110 @@ test("a press somewhere else clears a stale capture", { skip }, () => {
   assert.equal(clickDetached(e, { ctrlKey: true }).length, 0);
   e.cleanup();
 });
+
+// --------------------------------------------------------------------------
+// Hybrid source mode: alias chips
+// --------------------------------------------------------------------------
+
+// A `[[Target|Alias]]` in a source-mode block renders as its alias with the
+// `[[`, target and `|` hidden in marker spans — the same reveal grammar
+// `**bold**` follows — instead of exploding the raw token (50+ chars when
+// the target is an id) into the line the moment the block opens.
+
+function sourceFragment(e, text, caretOffset) {
+  const parent = document.createElement("p");
+  parent.setAttribute("data-leaf-source", "p");
+  e._buildSourceFragment(parent, text, e._scanSource(text), caretOffset);
+  return parent;
+}
+
+test("an inactive source-mode token renders as an alias chip", { skip }, () => {
+  const e = wikiEditor();
+  const text = "see [[post:abc|My Post]] here";
+  const parent = sourceFragment(e, text, 0);
+
+  const span = parent.querySelector(".leaf-wikilink");
+  assert.ok(span, "chip span exists");
+  assert.equal(span.getAttribute("data-leaf-wikilink"), "post:abc");
+  assert.equal(span.getAttribute("data-leaf-wikilink-raw"), "[[post:abc|My Post]]");
+  assert.ok(!span.classList.contains("leaf-source-active"), "inactive away from caret");
+
+  // The alias is the only non-marker text; the plumbing sits in markers.
+  const markers = Array.from(span.querySelectorAll(".leaf-source-marker"));
+  assert.deepEqual(markers.map((m) => m.textContent), ["[[", "post:abc|", "]]"]);
+  assert.equal(span.textContent, "[[post:abc|My Post]]", "full source stays in the DOM");
+  e.cleanup();
+});
+
+test("the caret inside the token reveals it", { skip }, () => {
+  const e = wikiEditor();
+  const text = "see [[post:abc|My Post]] here";
+  const inside = text.indexOf("My Post") + 2;
+  const span = sourceFragment(e, text, inside).querySelector(".leaf-wikilink");
+
+  assert.ok(span.classList.contains("leaf-source-active"));
+  e.cleanup();
+});
+
+test("a target with no alias chips down to the target", { skip }, () => {
+  const e = wikiEditor();
+  const span = sourceFragment(e, "[[Ideas]]", 0).querySelector(".leaf-wikilink");
+
+  const markers = Array.from(span.querySelectorAll(".leaf-source-marker"));
+  assert.deepEqual(markers.map((m) => m.textContent), ["[[", "]]"]);
+  assert.equal(span.textContent, "[[Ideas]]");
+  e.cleanup();
+});
+
+test("a source-mode chip serializes back to its raw token", { skip }, () => {
+  const e = wikiEditor();
+  const text = "see [[post:abc|My Post]] here";
+  const parent = sourceFragment(e, text, 0);
+
+  const trace = e._serializeBlockInline(parent, null, 0);
+  assert.equal(trace.source, text);
+  e.cleanup();
+});
+
+test("a caret inside the chip maps to the token start", { skip }, () => {
+  const e = wikiEditor();
+  const text = "see [[post:abc|My Post]] here";
+  const parent = sourceFragment(e, text, 0);
+  const span = parent.querySelector(".leaf-wikilink");
+  const aliasNode = Array.from(span.childNodes).find(
+    (n) => n.nodeType === window.Node.TEXT_NODE
+  );
+
+  const trace = e._serializeBlockInline(parent, aliasNode, 3);
+  assert.equal(trace.cursorOffset, text.indexOf("[["));
+  e.cleanup();
+});
+
+test("a chip inside the open source block never follows", { skip }, () => {
+  const e = wikiEditor();
+  const text = "see [[post:abc|My Post]] here";
+  e._visualEl.innerHTML = "";
+  const parent = sourceFragment(e, text, 0);
+  e._visualEl.appendChild(parent);
+  const span = parent.querySelector(".leaf-wikilink");
+
+  const down = new window.MouseEvent("mousedown", {
+    bubbles: true,
+    cancelable: true,
+    detail: 1
+  });
+  Object.defineProperty(down, "target", { value: span });
+  e._onWikiLinkMouseDown(down);
+  assert.equal(e._wikiLinkPress, null, "no capture inside the source block");
+  assert.ok(!down.defaultPrevented, "the caret is allowed to seat");
+
+  const click = new window.MouseEvent("click", { bubbles: true, cancelable: true });
+  Object.defineProperty(click, "target", { value: span });
+  e._onWikiLinkClick(click);
+  assert.equal(
+    e.pushed.filter((p) => p.event === "link_clicked").length,
+    0,
+    "no follow for a token being edited"
+  );
+  e.cleanup();
+});
