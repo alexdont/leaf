@@ -10608,6 +10608,18 @@
       scan,
       caretOffset
     ) {
+      // Chrome writes a typed trailing space as NBSP, and the serializer
+      // preserves it so this rebuild can't eat the space under the caret.
+      // But the moment typing continues past it the NBSP is INTERIOR — and
+      // an NBSP is precisely the space a browser refuses to wrap at, so a
+      // line of them grew past the box edge (horizontal scrollbar, breaks
+      // landing on the few real spaces) until a mode switch or blur
+      // re-rendered the block. Interior NBSPs become regular spaces here —
+      // same length, so every scan offset and the caret offset stay valid —
+      // and the trailing run is re-pinned as NBSP at the bottom of this
+      // function, which is the one place Chrome genuinely needs it.
+      sourceText = sourceText.replace(/\u00a0(?![\u0020\u00a0]*$)/g, "\u0020");
+
       var caretTarget = null;
       var self = this;
 

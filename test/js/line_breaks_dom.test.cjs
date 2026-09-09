@@ -153,3 +153,51 @@ test("a soft break in stored markdown is not rewritten on the way back", { skip:
 
   e.cleanup();
 });
+
+// --------------------------------------------------------------------------
+// Soft wrapping vs. Chrome's NBSPs
+// --------------------------------------------------------------------------
+
+// Chrome writes a typed trailing space as NBSP; the serializer preserves it
+// (the rebuild must not eat the space under the caret) — but once typing
+// continues past it the NBSP is interior, and an interior NBSP is exactly
+// the space a browser refuses to wrap at. Left in place, a typed line
+// accumulated one unbreakable space per word and grew past the box edge
+// until blur / a mode switch re-rendered the block. The source-fragment
+// rebuild therefore normalizes interior NBSPs to regular spaces and keeps
+// only the trailing run pinned.
+
+test("interior NBSPs become wrappable spaces on rebuild", { skip: dom.skip }, () => {
+  const e = dom.editor("<p>x</p>", "hybrid");
+  // Every space Chrome NBSP'd, including the trailing one.
+  const text = "one\u00a0two\u00a0three\u00a0";
+
+  const parent = document.createElement("p");
+  parent.setAttribute("data-leaf-source", "p");
+  e._buildSourceFragment(parent, text, e._scanSource(text), 0);
+
+  assert.strictEqual(
+    parent.textContent,
+    "one two three\u00a0",
+    "interior NBSPs normalized, trailing run pinned"
+  );
+  e.cleanup();
+});
+
+test("the caret offset survives the NBSP normalization", { skip: dom.skip }, () => {
+  const e = dom.editor("<p>x</p>", "hybrid");
+  const text = "one\u00a0two\u00a0three";
+  const caretAt = text.indexOf("three") + 2;
+
+  const parent = document.createElement("p");
+  parent.setAttribute("data-leaf-source", "p");
+  const caret = e._buildSourceFragment(parent, text, e._scanSource(text), caretAt);
+
+  assert.ok(caret, "caret target found");
+  assert.strictEqual(
+    caret.node.textContent.slice(0, caret.offset),
+    "one two th",
+    "same character position, now with a wrappable space"
+  );
+  e.cleanup();
+});
