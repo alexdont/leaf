@@ -30,7 +30,7 @@
   // its own asset pipeline gets a copy that silently stays behind after
   // `mix deps.update leaf`, and a stale bundle looks exactly like a
   // current one until something it doesn't implement quietly no-ops.
-  window.LeafHooks.version = "0.6.1";
+  window.LeafHooks.version = "0.7.0";
 
   // =========================================================================
   // Reveal hidden spoilers on click (works for any .leaf-spoiler on the page,
@@ -290,6 +290,18 @@
     ".content-editor-visual .leaf-wikilink[data-leaf-wikilink-exists='false'] {",
     "  color: color-mix(in oklab, var(--color-base-content, #1f2937) 45%, transparent);",
     "  text-decoration-style: dashed;",
+    "}",
+    // Source-mode chips: the `[[`, target and `|` sit in marker spans that
+    // hide while the token is inactive, so the chip shows only its alias.
+    // `:not(.leaf-source-active)` rather than a bare hide + reveal pair:
+    // the reveal rule lives in the server-emitted stylesheet and this one
+    // in the injected sheet, so a specificity tie would resolve by sheet
+    // order — fragile. (Lives HERE, not in the server CSS, on purpose:
+    // the server-rendered markup must not contain the class name, or every
+    // "brackets stay literal" refute in wiki_links_test trips on the
+    // stylesheet instead of actual decoration.)
+    ".content-editor-visual [data-leaf-source] .leaf-wikilink:not(.leaf-source-active) .leaf-source-marker {",
+    "  display: none;",
     "}",
 
     ".content-editor-visual .leaf-hashtag {",
