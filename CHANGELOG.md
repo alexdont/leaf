@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.7.0
+
+Two hybrid-mode typing fixes and a voice for the collaboration layer's
+one unrecoverable error.
+
+### Added
+
+- **Wiki links chip down in hybrid source mode.** Opening a source block
+  used to reveal every `[[Target|Alias]]` as raw text — tolerable for
+  `[[Ideas]]`, but a target carrying an id (a downstream host's
+  `[[post:UUID|Title]]` mentions run 50+ chars) swamped the line the
+  moment the caret entered the block. Source-mode tokens now render the
+  same alias chip visual mode shows, with the `[[`, target and `|` in
+  hidden marker spans; the caret inside the token reveals the raw form
+  for editing — the reveal grammar `**bold**` already follows. A caret
+  landing inside a chip maps to the token start, and chips inside the
+  open source block never follow on click — the press seats the caret.
+
+- **A conflicted flush is announced, and rooms can stop.** The room
+  broadcasts `{:leaf_conflict, …}` once per conflict and
+  `{:leaf_conflict_cleared, …}` when a later flush lands; the Collab
+  hook surfaces it as `@leaf_collab.conflict`, `flush_now/1` returns the
+  honest answer instead of a hardcoded `:ok`, and `terminate` logs what
+  it discards. Rooms gained an idle timeout and a public stop.
+
+### Fixed
+
+- **Long lines wrap again while typing in hybrid mode.** Chrome writes a
+  typed trailing space as NBSP and the per-keystroke rebuild preserved
+  it forever — once typing continued past it the NBSP sat interior, and
+  an interior NBSP is exactly the space a browser refuses to wrap at. A
+  typed line collected one unbreakable space per word, grew a horizontal
+  scrollbar, and broke at whichever rare real space survived, until blur
+  or a mode switch re-rendered the block. The rebuild now normalizes
+  interior NBSPs to regular spaces and re-pins only the trailing run —
+  the one place Chrome genuinely needs an NBSP.
+
 ## 0.6.1
 
 The checkbox-and-lists review release: everything here came out of one
