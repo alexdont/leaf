@@ -13099,12 +13099,95 @@
     },
 
     _toggleHeading: function (tag) {
+      // Hybrid: the active block's truth is its SOURCE TEXT. formatBlock
+      // restyled the DOM while the text still read as a paragraph —
+      // pretty until the next exit re-rendered the block from its text
+      // and silently undid the click (typing "## " by hand worked; the
+      // toolbar button didn't). Toggle the prefix in the text instead,
+      // which is exactly the path typing takes.
+      if (
+        this._mode === "hybrid" &&
+        this._sourceBlock &&
+        this._sourceBlock.isConnected &&
+        this._getCurrentBlock() === this._sourceBlock
+      ) {
+        this._toggleSourceHeadingPrefix(tag);
+        return;
+      }
+
       var block = this._getCurrentBlock();
       if (block && block.tagName && block.tagName.toLowerCase() === tag) {
         document.execCommand("formatBlock", false, "p");
       } else {
         document.execCommand("formatBlock", false, tag);
       }
+    },
+
+    // Rewrite the active source block's heading prefix: `## ` on for the
+    // requested level, off when it already has that level, swapped when it
+    // has another. The rebuild then restyles the block live, the same way
+    // it does when the marker is typed.
+    _toggleSourceHeadingPrefix: function (tag) {
+      var block = this._sourceBlock;
+      var sel = window.getSelection();
+      var cursorOffset = 0;
+      if (
+        sel.rangeCount &&
+        block.contains(sel.getRangeAt(0).startContainer)
+      ) {
+        cursorOffset = this._textOffsetInBlock(
+          block,
+          sel.getRangeAt(0).startContainer,
+          sel.getRangeAt(0).startOffset
+        );
+      }
+
+      var sourceText = (block.textContent || "")
+        .replace(/\u00a0/g, " ")
+        .replace(/[\u200B\uFEFF]/g, "");
+      var existing = sourceText.match(/^(#{1,6})(?!#)[ \t]/);
+      var level = parseInt(tag.slice(1), 10) || 1;
+      var body = existing ? sourceText.slice(existing[0].length) : sourceText;
+      var prefix =
+        existing && existing[1].length === level
+          ? ""
+          : "######".slice(0, level) + " ";
+      var newSource = prefix + body;
+
+      var newCursor = Math.max(
+        prefix.length,
+        Math.min(
+          cursorOffset + (newSource.length - sourceText.length),
+          newSource.length
+        )
+      );
+
+      this._syntaxMutating = true;
+      try {
+        while (block.firstChild) block.removeChild(block.firstChild);
+        if (newSource.length === 0) {
+          block.innerHTML = "<br>";
+        } else {
+          block.appendChild(document.createTextNode(newSource));
+        }
+        var range = document.createRange();
+        if (block.firstChild && block.firstChild.nodeType === Node.TEXT_NODE) {
+          range.setStart(block.firstChild, newCursor);
+        } else {
+          range.setStart(block, 0);
+        }
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      } finally {
+        this._syntaxMutating = false;
+      }
+
+      this._lastSourceStateKey = null;
+      this._activeMatchKey = null;
+      this._refreshSourceBlock();
+      this._debouncedPushVisualChange();
+      this._updateCounts();
     },
 
     _toggleBlockquote: function () {
