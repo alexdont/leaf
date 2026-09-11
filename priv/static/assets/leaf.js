@@ -12018,6 +12018,19 @@
       var text = sourceText.replace(/\u00a0/g, " ");
       var tagName = "p";
 
+      // A block that is exactly one preserved custom tag exits to its
+      // atomic chip \u2014 the same pretty form a full reload produces \u2014 instead
+      // of sitting as raw text until someone refreshes the page. The
+      // toolbar's insert_markdown path already built the chip at insert
+      // time; a HAND-TYPED <Hero ... /> deserves the same the moment the
+      // cursor leaves the line.
+      var chipHtml = this._maybeAtomicChip(text);
+      if (chipHtml) {
+        var chipHost = document.createElement("p");
+        chipHost.innerHTML = chipHtml;
+        return chipHost;
+      }
+
       // Heading: leading `#`s (1-6, no 7th) followed by a required space
       // or tab. Kept in lockstep with `_scanSource` so the live-edit
       // display and the rendered form agree. `##h` exits to `<p>##h</p>`,
