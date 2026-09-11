@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.8.0
+
+Atomic chips grow up — typed tags chip live, chips can be selected,
+deleted and stepped past — and three editing papercuts around them go
+away.
+
+### Added
+
+- **A hand-typed preserved tag chips the moment the cursor leaves the
+  line.** The toolbar's insert path already built the atomic chip at
+  insert time, but a `<Hero ... />` typed by hand sat as raw text until
+  a full page reload re-rendered the document. The exit render now
+  consults the same chip builder, so typing a component and clicking
+  away produces the pretty block immediately.
+
+- **Atomic chips are click-selectable.** A single click puts a ring on
+  the chip and hands it the keyboard: Backspace/Delete removes it (a
+  lone chip's host collapses to an empty caretable paragraph — deleting
+  a component no longer requires the markdown tab), Enter opens a
+  paragraph after its block, ArrowRight/Down steps to the next block
+  (creating one when the chip ends the document), ArrowLeft/Up steps
+  back symmetrically, Escape deselects. Any other key drops the
+  selection instead of letting typing silently replace a component.
+  Clicking a lone chip's host paragraph counts as clicking the chip,
+  clicking the editor's padding below the last block opens a fresh
+  paragraph there, and double-click still opens the source editor.
+
+- **Word deletion in hybrid source blocks.** Ctrl+Backspace /
+  Ctrl+Delete (Option on mac) did nothing: Chrome's native word-delete
+  runs its selection through hidden marker spans and non-editable
+  chrome and silently refuses the edit. The word variants now go
+  through the same source-string surgery single-char deletes use, with
+  editor-standard semantics — the whitespace touching the caret, then
+  one run of word characters or one run of symbols.
+
+### Fixed
+
+- **A wiki link can be typed in a row that already holds a link.** The
+  link pattern's text part allowed `[`, so typing `[[` earlier in a row
+  containing `[text](url)` matched from the typed bracket through the
+  existing link's `](url)` — one bogus link swallowing the row, whose
+  `<a>` wrapper also suppressed the `[[` suggestion popup. The text
+  part rejects `[` now, anchoring the match at the last bracket before
+  its close — the reading MDEx has of the same row.
+
+- **The toolbar heading button survives leaving the line in hybrid
+  mode.** It ran formatBlock, which restyles the DOM while the active
+  block's truth — its source text — still read as a paragraph; the next
+  exit re-rendered from text and silently undid the click. The button
+  now toggles the `##` marker in the source, exactly the path typing
+  takes.
+
 ## 0.7.0
 
 Two hybrid-mode typing fixes and a voice for the collaboration layer's

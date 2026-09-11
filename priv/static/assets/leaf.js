@@ -30,7 +30,7 @@
   // its own asset pipeline gets a copy that silently stays behind after
   // `mix deps.update leaf`, and a stale bundle looks exactly like a
   // current one until something it doesn't implement quietly no-ops.
-  window.LeafHooks.version = "0.7.0";
+  window.LeafHooks.version = "0.8.0";
 
   // =========================================================================
   // Reveal hidden spoilers on click (works for any .leaf-spoiler on the page,
