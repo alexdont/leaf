@@ -159,6 +159,13 @@
     "  border: 1px dashed color-mix(in oklab, var(--color-base-content, #1f2937) 22%, transparent);",
     "  background: color-mix(in oklab, var(--color-base-content, #1f2937) 3.5%, transparent);",
     "}",
+    // Click-selected: the ring says the keyboard now talks to the chip —
+    // Backspace deletes it, Enter opens a paragraph after it, arrows
+    // step the caret out.
+    ".content-editor-visual .leaf-atomic-selected {",
+    "  outline: 2px solid var(--color-primary, #3b82f6);",
+    "  outline-offset: 2px;",
+    "}",
 
     // Inline: the size of a word, because it interrupts a sentence.
     ".content-editor-visual .leaf-atomic-inline {",
@@ -2174,6 +2181,11 @@
         this._visualEl.removeEventListener("dblclick", this._onAtomicDblClick);
         this._onAtomicDblClick = null;
       }
+      if (this._onAtomicClick && this._visualEl) {
+        this._visualEl.removeEventListener("click", this._onAtomicClick);
+        this._onAtomicClick = null;
+      }
+      this._selectedAtomic = null;
       if (this._onAtomicMediaError && this._visualEl) {
         this._visualEl.removeEventListener(
           "error",
@@ -2505,6 +2517,10 @@
 
       // Before anything else: undo/redo must win over every shortcut below.
       if (this._historyKeydown(e)) return;
+
+      // A click-selected atomic chip owns the keys that act on it —
+      // delete, step out, open a line after — before any other handler.
+      if (this._atomicSelectionKeydown(e)) return;
 
       // Wrapping a selection has to come before the handlers that treat a
       // printable key as replacing it.
@@ -5468,6 +5484,177 @@
       };
 
       this._visualEl.addEventListener("dblclick", this._onAtomicDblClick);
+
+      // Single click SELECTS a chip: visible ring, and the keyboard now
+      // acts on the chip (see _atomicSelectionKeydown). A chip is
+      // contenteditable=false, so without this the only way to delete one
+      // was the markdown tab, and a chip ending the document was a wall
+      // the caret couldn't step past. Clicking a lone chip's host
+      // paragraph counts as clicking the chip (the host has no text to
+      // seat a caret in anyway); clicking the editor's own padding below
+      // the last block opens a fresh paragraph there.
+      this._onAtomicClick = function (e) {
+        var chip = e.target && e.target.closest && e.target.closest(".leaf-atomic");
+        if (chip && !self._visualEl.contains(chip)) chip = null;
+
+        if (!chip && e.target && e.target !== self._visualEl && e.target.closest) {
+          var host = e.target.closest("p");
+          if (
+            host &&
+            self._visualEl.contains(host) &&
+            host.childElementCount === 1 &&
+            host.firstElementChild.classList &&
+            host.firstElementChild.classList.contains("leaf-atomic") &&
+            (host.textContent || "").trim() ===
+              (host.firstElementChild.textContent || "").trim()
+          ) {
+            chip = host.firstElementChild;
+          }
+        }
+
+        if (!chip && e.target === self._visualEl) {
+          self._maybeOpenParagraphBelow(e);
+        }
+
+        self._selectAtomicChip(chip);
+      };
+      this._visualEl.addEventListener("click", this._onAtomicClick);
+    },
+
+    _selectAtomicChip: function (chip) {
+      if (this._selectedAtomic && this._selectedAtomic !== chip) {
+        this._selectedAtomic.classList.remove("leaf-atomic-selected");
+      }
+      this._selectedAtomic = chip || null;
+      if (!chip) return;
+
+      chip.classList.add("leaf-atomic-selected");
+      // Park the DOM selection ON the chip so the keyboard talks to it,
+      // not to wherever the caret happened to be.
+      var range = document.createRange();
+      range.selectNode(chip);
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    },
+
+    // Clicking the editor's padding below the last block: the writer is
+    // saying "there is text after this" — give them a paragraph. Reuses a
+    // trailing empty one rather than stacking new ones per click.
+    _maybeOpenParagraphBelow: function (e) {
+      var last = this._visualEl.lastElementChild;
+      if (!last) return;
+      if (e.clientY <= last.getBoundingClientRect().bottom) return;
+
+      if (
+        last.tagName &&
+        last.tagName.toLowerCase() === "p" &&
+        !last.querySelector(".leaf-atomic") &&
+        (last.textContent || "").replace(/[\u200B\uFEFF]/g, "").trim() === ""
+      ) {
+        this._placeCaretIn(last);
+        return;
+      }
+
+      var p = document.createElement("p");
+      p.innerHTML = "<br>";
+      this._visualEl.appendChild(p);
+      this._placeCaretIn(p);
+      this._debouncedPushVisualChange();
+    },
+
+    // Keys while a chip is selected. Returns true when the key was
+    // handled; anything unhandled drops the selection first so typing
+    // never silently replaces a component.
+    _atomicSelectionKeydown: function (e) {
+      var chip = this._selectedAtomic;
+      if (!chip) return false;
+      if (!chip.isConnected) {
+        this._selectedAtomic = null;
+        return false;
+      }
+
+      var host =
+        (chip.closest && chip.closest("p, li, h1, h2, h3, h4, h5, h6")) ||
+        chip.parentNode;
+
+      if (e.key === "Backspace" || e.key === "Delete") {
+        e.preventDefault();
+        this._historyCaptureNow("atomic-delete");
+        this._selectAtomicChip(null);
+        chip.remove();
+        if (host && this._visualEl.contains(host)) {
+          if (
+            !host.firstElementChild &&
+            (host.textContent || "").replace(/[\u200B\uFEFF]/g, "").trim() === ""
+          ) {
+            host.innerHTML = "<br>";
+          }
+          this._placeCaretIn(host);
+        }
+        this._debouncedPushVisualChange();
+        this._updateCounts();
+        return true;
+      }
+
+      if (e.key === "Enter") {
+        e.preventDefault();
+        this._selectAtomicChip(null);
+        var after = document.createElement("p");
+        after.innerHTML = "<br>";
+        host.parentNode.insertBefore(after, host.nextSibling);
+        this._placeCaretIn(after);
+        this._debouncedPushVisualChange();
+        return true;
+      }
+
+      if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        e.preventDefault();
+        this._selectAtomicChip(null);
+        var next = host.nextElementSibling;
+        if (!next) {
+          next = document.createElement("p");
+          next.innerHTML = "<br>";
+          host.parentNode.appendChild(next);
+          this._debouncedPushVisualChange();
+        }
+        var startRange = document.createRange();
+        startRange.selectNodeContents(next);
+        startRange.collapse(true);
+        var startSel = window.getSelection();
+        startSel.removeAllRanges();
+        startSel.addRange(startRange);
+        return true;
+      }
+
+      if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        e.preventDefault();
+        this._selectAtomicChip(null);
+        var prev = host.previousElementSibling;
+        if (!prev) {
+          prev = document.createElement("p");
+          prev.innerHTML = "<br>";
+          host.parentNode.insertBefore(prev, host);
+          this._debouncedPushVisualChange();
+        }
+        this._placeCaretIn(prev);
+        return true;
+      }
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        this._selectAtomicChip(null);
+        return true;
+      }
+
+      // Modifier chords pass through untouched (undo already ran above).
+      // Any other key drops the selection and seats the caret after the
+      // chip's block, so typing lands somewhere visible instead of
+      // replacing the component.
+      if (e.ctrlKey || e.metaKey || e.altKey) return false;
+      this._selectAtomicChip(null);
+      if (host && this._visualEl.contains(host)) this._placeCaretIn(host);
+      return false;
     },
 
     _openAtomicEditor: function (chip) {
