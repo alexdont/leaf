@@ -579,3 +579,41 @@ test("a chip inside the open source block never follows", { skip }, () => {
   );
   e.cleanup();
 });
+
+// --------------------------------------------------------------------------
+// A wiki link in the making next to an existing markdown link
+// --------------------------------------------------------------------------
+
+// The link pattern's text part must reject `[`, or typing `[[` earlier in a
+// row that already holds `[text](url)` matches from the typed bracket
+// through the existing link's `](url)` — one bogus link swallowing the row,
+// whose <a> wrapper puts the caret in link context and suppresses the `[[`
+// suggestion popup on top of it.
+
+test("the link match starts at the last bracket before its close", { skip }, () => {
+  const e = wikiEditor();
+  const matches = e._scanInlineMatches("[[qu [text](link.com)");
+  const link = matches.find((m) => m.pattern.type === "link");
+
+  assert.ok(link, "the existing link still matches");
+  assert.equal(link.start, "[[qu ".length);
+  assert.equal(link.body, "text");
+  e.cleanup();
+});
+
+test("a wiki link in the making does not swallow an existing link", { skip }, () => {
+  const e = wikiEditor();
+  const text = "[[qu [text](link.com) after";
+  const parent = document.createElement("p");
+  parent.setAttribute("data-leaf-source", "p");
+  e._buildSourceFragment(parent, text, e._scanSource(text), 2);
+
+  const anchors = parent.querySelectorAll("a");
+  assert.equal(anchors.length, 1, "exactly the existing link");
+  assert.ok(
+    !anchors[0].textContent.includes("[[qu"),
+    "the typed brackets stay outside the anchor"
+  );
+  assert.ok(parent.textContent.startsWith("[[qu "), "the prefix survives as plain text");
+  e.cleanup();
+});

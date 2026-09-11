@@ -6767,8 +6767,19 @@
         // this pattern; the dedicated link branches in
         // `_scanInlineMatches`, `_buildSourceFragment`, and
         // `_buildFormattedFragment` populate `<a href="...">` instead.
-        regexAt: /\[([^\]\n]+?)\]\(([^)\s\n]+)\)$/,
-        regexAny: /\[([^\]\n]+?)\]\(([^)\s\n]+)\)/,
+        //
+        // The text part rejects `[` so the match starts at the LAST `[`
+        // before its `]`. With `[` allowed, typing `[[` (a wiki link in
+        // the making) earlier in a row that already held `[text](url)`
+        // matched from the typed bracket through the existing link's
+        // `](url)` — one bogus link swallowing the row, whose `<a>`
+        // wrapper then put the caret in link context and suppressed the
+        // `[[` suggestion popup on top of it. The cost is balanced
+        // brackets inside link text (`[a [b] c](url)`) rendering as
+        // source until the cursor leaves — the same trade every other
+        // inline pattern makes.
+        regexAt: /\[([^\[\]\n]+?)\]\(([^)\s\n]+)\)$/,
+        regexAny: /\[([^\[\]\n]+?)\]\(([^)\s\n]+)\)/,
         type: "link",
       },
     ],
