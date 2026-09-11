@@ -2547,14 +2547,26 @@
       // though the user expected to delete a normal text char like a
       // space. Source-string deletion is predictable: take one char
       // off either side of the cursor's text-offset, rebuild.
+      // Word deletion — Ctrl+Backspace/Delete (Win/Linux), Option on mac.
+      // Chrome's native word-delete inside a source block runs its
+      // selection through hidden marker spans and non-editable chrome and
+      // silently refuses the edit (the "keydown with no beforeinput"
+      // abort the typing tracer logs), so the word variant goes through
+      // the same source-string surgery the single-char path uses.
+      var wordDelete =
+        (e.key === "Backspace" || e.key === "Delete") &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        e.ctrlKey !== e.altKey;
+
       if (
         this._mode === "hybrid" &&
-        !mod &&
+        (!mod || wordDelete) &&
         (e.key === "Backspace" || e.key === "Delete") &&
         this._sourceBlock &&
         this._sourceBlock.isConnected
       ) {
-        if (this._maybeHandleSourceDelete(e.key === "Backspace")) {
+        if (this._maybeHandleSourceDelete(e.key === "Backspace", wordDelete)) {
           e.preventDefault();
           return;
         }
@@ -9973,7 +9985,48 @@
     // the new source. Returns true if it consumed the keystroke.
     // Non-collapsed selections fall through so the browser's default
     // selection delete still works (covers most click+drag delete).
-    _maybeHandleSourceDelete: function (backspace) {
+    // The span a word-delete removes from `text` at `offset`, as
+    // [start, end). Editor-standard semantics: skip the whitespace touching
+    // the caret, then take the run of word characters OR the run of symbols
+    // — whichever the first non-space character belongs to. ZWSP/FEFF
+    // placeholders count as skippable space so a checkbox's caret anchor
+    // can't make the word immortal.
+    _wordDeleteSpan: function (text, offset, backward) {
+      var space = /[\s\u00a0\u200B\uFEFF]/;
+      var wordChar = /[\p{L}\p{N}_]/u;
+
+      if (backward) {
+        var start = offset;
+        while (start > 0 && space.test(text.charAt(start - 1))) start--;
+        if (start > 0) {
+          var backIsWord = wordChar.test(text.charAt(start - 1));
+          while (
+            start > 0 &&
+            !space.test(text.charAt(start - 1)) &&
+            wordChar.test(text.charAt(start - 1)) === backIsWord
+          ) {
+            start--;
+          }
+        }
+        return [start, offset];
+      }
+
+      var end = offset;
+      while (end < text.length && space.test(text.charAt(end))) end++;
+      if (end < text.length) {
+        var fwdIsWord = wordChar.test(text.charAt(end));
+        while (
+          end < text.length &&
+          !space.test(text.charAt(end)) &&
+          wordChar.test(text.charAt(end)) === fwdIsWord
+        ) {
+          end++;
+        }
+      }
+      return [offset, end];
+    },
+
+    _maybeHandleSourceDelete: function (backspace, word) {
       var sel = window.getSelection();
       if (!sel.rangeCount) return false;
       var range = sel.getRangeAt(0);
@@ -10025,9 +10078,17 @@
           }
           return false;
         }
-        newSource =
-          sourceText.slice(0, visibleCut - 1) + sourceText.slice(cursorOffset);
-        newCursor = visibleCut - 1;
+        if (word) {
+          var backSpan = this._wordDeleteSpan(sourceText, visibleCut, true);
+          newSource =
+            sourceText.slice(0, backSpan[0]) + sourceText.slice(cursorOffset);
+          newCursor = backSpan[0];
+        } else {
+          newSource =
+            sourceText.slice(0, visibleCut - 1) +
+            sourceText.slice(cursorOffset);
+          newCursor = visibleCut - 1;
+        }
       } else {
         if (cursorOffset >= sourceText.length) {
           // Delete at the end of a source-mode block. Chrome's default
@@ -10104,9 +10165,15 @@
           }
           return false;
         }
-        newSource =
-          sourceText.slice(0, cursorOffset) +
-          sourceText.slice(cursorOffset + 1);
+        if (word) {
+          var fwdSpan = this._wordDeleteSpan(sourceText, cursorOffset, false);
+          newSource =
+            sourceText.slice(0, cursorOffset) + sourceText.slice(fwdSpan[1]);
+        } else {
+          newSource =
+            sourceText.slice(0, cursorOffset) +
+            sourceText.slice(cursorOffset + 1);
+        }
         newCursor = cursorOffset;
       }
 
