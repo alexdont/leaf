@@ -1716,7 +1716,7 @@ defmodule Leaf do
               class={["btn btn-xs px-2", (@mode == :markdown && "btn-active") || "btn-ghost"]}
               title={t("Markdown mode")}
             >
-              <svg viewBox="0 0 208 128" fill="currentColor" class="w-4 h-3">
+              <svg viewBox="26 26 168 76" fill="currentColor" class="w-5 h-2.5">
                 <path d="M30 98V30h20l20 25 20-25h20v68H90V59L70 84 50 59v39zm125 0l-30-33h20V30h20v35h20z" />
               </svg>
             </button>
@@ -3123,6 +3123,34 @@ defmodule Leaf do
        editor stylesheet. Without this the toolbar is briefly jagged. */
     [data-visual-toolbar] svg { display: block; }
     [data-visual-toolbar] button { line-height: 1; }
+    /* The letter buttons (H B I S </>) are text, not icons. At the 11px
+       size of a `btn-xs` label they read smaller than the 14px icons beside
+       them (undo, lists, link…), so they take the icons' size and sit
+       centered in the same box. */
+    [data-visual-toolbar] button[data-toolbar-action="bold"],
+    [data-visual-toolbar] button[data-toolbar-action="italic"],
+    [data-visual-toolbar] button[data-toolbar-action="strike"],
+    [data-visual-toolbar] button[data-heading-trigger] {
+      font-size: 13px;
+      justify-content: center;
+      align-items: center;
+    }
+    [data-visual-toolbar] button[data-mode-tab="html"] {
+      font-size: 12px;
+      justify-content: center;
+      align-items: center;
+    }
+    /* The overflow dots and the Markdown mark are drawn small inside their
+       box; sized up so their ink matches the 14px icons. */
+    [data-visual-toolbar] [data-inline-more-trigger] svg,
+    [data-visual-toolbar] [data-insert-more-trigger] svg {
+      width: 18px;
+      height: 18px;
+    }
+    [data-visual-toolbar] button[data-mode-tab="markdown"] svg {
+      width: 20px;
+      height: 9px;
+    }
     [data-mobile-toolbar] svg { display: block; }
     [data-mobile-toolbar] button { line-height: 1; }
     [data-visual-toolbar] [data-heading-dropdown],

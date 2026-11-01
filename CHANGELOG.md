@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Changed
+
+- **Toolbar glyphs match the icons.** The letter buttons (H, B, I, S, `</>`)
+  were 11px text beside 14px icons, and the overflow dots and the Markdown
+  mark were drawn small in their boxes. They are now sized so every control
+  reads the same size as the undo/redo icons, centered in its button.
+
 ### Fixed
 
 - **Pasted lines go in at the caret, like typed ones.** Triple-clicking a
