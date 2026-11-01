@@ -1335,28 +1335,38 @@
     return container.innerHTML;
   }
 
-  // A copied LINE is the line's content, not a paragraph. Copy one line (or
-  // triple-click it) and the clipboard holds `<p>text</p>`; inserted as HTML
-  // that opens a new paragraph every paste, where pasting text should keep
-  // adding to the line the caret is on. When the whole payload is one plain
-  // <p> or <div> with no block inside, its children are inserted instead.
-  // Anything with more structure — two paragraphs, a heading, a list, a copy
-  // that really carries a line break (a second, empty paragraph) — keeps it.
+  // Pasted lines go in at the caret, like typed ones. Copy a line (or several)
+  // and the clipboard holds `<p>text</p>` blocks; handed to insertHTML whole,
+  // the browser decides how they merge with the paragraph the caret is in,
+  // and it decides differently per browser, per block type and per trailing
+  // empty paragraph: a new paragraph on every paste, a stray <br>, an empty
+  // line left behind. When the payload is nothing but plain paragraphs (<p>
+  // or <div>, no block inside), `pastedLines` returns each one's content and
+  // `_insertPastedLines` types them in: the first at the caret, then one
+  // paragraph break per further line, so `[text][empty]` is "text" plus the
+  // Enter that was copied with it and nothing else. Anything with more
+  // structure — a heading, a list, a table — returns null and is inserted as
+  // one piece.
   var PASTE_BLOCK_SELECTOR =
     "p, div, h1, h2, h3, h4, h5, h6, ul, ol, li, table, blockquote, pre, hr, details";
 
-  function unwrapSingleLine(container) {
+  function pastedLines(container) {
     var nodes = Array.prototype.filter.call(container.childNodes, function (n) {
       return !(n.nodeType === Node.TEXT_NODE && !/\S/.test(n.textContent));
     });
-    if (nodes.length !== 1) return;
+    if (!nodes.length) return null;
 
-    var only = nodes[0];
-    if (only.nodeType !== Node.ELEMENT_NODE) return;
-    if (only.tagName !== "P" && only.tagName !== "DIV") return;
-    if (only.querySelector(PASTE_BLOCK_SELECTOR)) return;
+    var lines = [];
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      if (n.nodeType !== Node.ELEMENT_NODE) return null;
+      if (n.tagName !== "P" && n.tagName !== "DIV") return null;
+      if (n.querySelector(PASTE_BLOCK_SELECTOR)) return null;
 
-    container.innerHTML = only.innerHTML;
+      var empty = !/\S/.test(n.textContent) && !n.querySelector("img");
+      lines.push(empty ? "" : n.innerHTML);
+    }
+    return lines;
   }
 
   // =========================================================================
@@ -3551,7 +3561,11 @@
         // checkbox can arrive in.
         this._adoptPastedCheckboxes(container);
 
-        unwrapSingleLine(container);
+        var lines = pastedLines(container);
+        if (lines) {
+          this._insertPastedLines(lines);
+          return;
+        }
 
         if (this._denyLinks) {
           container.querySelectorAll("a").forEach(function (anchor) {
@@ -3611,6 +3625,14 @@
           );
         }
         return;
+      }
+    },
+
+    // See `pastedLines`. An empty string is an empty line.
+    _insertPastedLines: function (lines) {
+      for (var i = 0; i < lines.length; i++) {
+        if (i > 0) document.execCommand("insertParagraph", false);
+        if (lines[i]) document.execCommand("insertHTML", false, lines[i]);
       }
     },
 

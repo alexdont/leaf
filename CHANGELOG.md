@@ -4,14 +4,17 @@
 
 ### Fixed
 
-- **Pasting a copied line keeps it on the line.** Triple-clicking a line
-  and copying it puts `<p>text</p>` plus Chrome's trailing
+- **Pasted lines go in at the caret, like typed ones.** Triple-clicking a
+  line and copying it puts `<p>text</p>` plus Chrome's trailing
   `<br class="Apple-interchange-newline">` on the clipboard, and every
-  paste opened a new paragraph and left a stray `<br>`. A payload that is
-  one plain paragraph (or div) now pastes as its content, so repeated
-  pastes add to the same line; the interchange `<br>` is dropped. A copy
-  that really carries a line break (the Enter after the line is selected
-  too), several paragraphs, headings and lists still paste as blocks.
+  paste opened a new paragraph and left a stray `<br>`; a copy ending in
+  an empty paragraph (the line and its Enter) left empty lines behind
+  that the next paste did not fill. A payload of plain paragraphs now
+  pastes its first line at the caret and adds one paragraph break per
+  further line, so repeated pastes of one line stay on the line and
+  `[text][empty]` fills the empty line and leaves exactly one below.
+  The interchange `<br>` is dropped. Headings, lists and tables still
+  paste as blocks.
 
 ## 0.8.0
 

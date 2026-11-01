@@ -71,27 +71,73 @@ test("a div-wrapped line (other apps) pastes inline too", { skip: dom.skip }, ()
   e.cleanup();
 });
 
-test("a copy that carries a real line break still opens a line", { skip: dom.skip }, () => {
+test("a copy that carries a real line break pastes the line, then breaks", { skip: dom.skip }, () => {
   const e = dom.editor("<p>x</p>", "hybrid");
   const { inserted } = paste(e, {
     "text/html": "<p>hello</p><p><br></p>",
     "text/plain": "hello\n",
   });
 
-  assert.equal(inserted.length, 1);
-  assert.match(inserted[0][1], /<p>hello<\/p><p><br><\/p>/);
+  // The text goes in at the caret and ONE break follows it: the caret ends on
+  // the new empty line, the way typing "hello" and pressing Enter would.
+  assert.deepEqual(inserted, [
+    ["insertHTML", "hello"],
+    ["insertParagraph", undefined],
+  ]);
 
   e.cleanup();
 });
 
-test("several paragraphs keep their blocks", { skip: dom.skip }, () => {
+test("several paragraphs paste at the caret with a break between", { skip: dom.skip }, () => {
   const e = dom.editor("<p>x</p>", "hybrid");
   const { inserted } = paste(e, {
-    "text/html": "<p>one</p><p>two</p>",
-    "text/plain": "one\n\ntwo",
+    "text/html": "<p>one</p><p>two</p><p>three</p>",
+    "text/plain": "one\n\ntwo\n\nthree",
   });
 
-  assert.equal(inserted[0][1], "<p>one</p><p>two</p>");
+  assert.deepEqual(inserted, [
+    ["insertHTML", "one"],
+    ["insertParagraph", undefined],
+    ["insertHTML", "two"],
+    ["insertParagraph", undefined],
+    ["insertHTML", "three"],
+  ]);
+
+  e.cleanup();
+});
+
+test("empty paragraphs in the middle are kept as empty lines", { skip: dom.skip }, () => {
+  const e = dom.editor("<p>x</p>", "hybrid");
+  const { inserted } = paste(e, { "text/html": "<p>a</p><p><br></p><p>b</p>" });
+
+  assert.deepEqual(inserted, [
+    ["insertHTML", "a"],
+    ["insertParagraph", undefined],
+    ["insertParagraph", undefined],
+    ["insertHTML", "b"],
+  ]);
+
+  e.cleanup();
+});
+
+test("paragraphs with formatting keep it", { skip: dom.skip }, () => {
+  const e = dom.editor("<p>x</p>", "hybrid");
+  const { inserted } = paste(e, { "text/html": '<p><em>a</em></p><p>b <a href="/u">c</a></p>' });
+
+  assert.deepEqual(inserted, [
+    ["insertHTML", "<em>a</em>"],
+    ["insertParagraph", undefined],
+    ["insertHTML", 'b <a href="/u">c</a>'],
+  ]);
+
+  e.cleanup();
+});
+
+test("paragraphs mixed with a heading are inserted whole", { skip: dom.skip }, () => {
+  const e = dom.editor("<p>x</p>", "hybrid");
+  const { inserted } = paste(e, { "text/html": "<h2>t</h2><p>a</p><p>b</p>" });
+
+  assert.deepEqual(inserted, [["insertHTML", "<h2>t</h2><p>a</p><p>b</p>"]]);
 
   e.cleanup();
 });
