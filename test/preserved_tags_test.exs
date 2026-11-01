@@ -16,6 +16,9 @@ defmodule Leaf.PreservedTagsTest do
     opts
     |> Keyword.put_new(:id, "editor-1")
     |> then(&render_component(Leaf, &1))
+    # The inline stylesheet names every class the chips use; assertions are
+    # about the markup, so it is left out.
+    |> String.replace(~r|<style.*?</style>|s, "")
   end
 
   describe "atomic block preview" do
@@ -571,6 +574,32 @@ defmodule Leaf.PreservedTagsTest do
 
       [["leaf-command:ed", payload]] = socket.private.live_temp.push_events
       assert payload.chip =~ ~s|<span class="leaf-kind-headline">Headline text</span>|
+    end
+  end
+
+  describe "preview stylesheet" do
+    test "ships with the markup, not only with the JS bundle" do
+      raw =
+        render_component(Leaf,
+          id: "e",
+          content: ~s|<CTA>Go</CTA>|,
+          preserve_tags: ["CTA"],
+          tag_previews: %{"CTA" => :button}
+        )
+
+      [style] = Regex.run(~r|<style.*?</style>|s, raw)
+
+      for selector <- [
+            ".leaf-kind-button",
+            ".leaf-kind-split",
+            ".leaf-kind-headline",
+            ".leaf-kind-frame",
+            ".leaf-kind-audio",
+            ".leaf-atomic-thumb",
+            ".leaf-atomic-h"
+          ] do
+        assert style =~ selector
+      end
     end
   end
 end

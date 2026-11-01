@@ -36,6 +36,11 @@
 
 ### Fixed
 
+- **New previews drawn with no styling in a tab holding an older script.** The
+  preview CSS lived in the JS bundle, which the browser caches apart from
+  the page, so markup from a newer server was drawn bare ("HeadlineDouble-click
+  to editHeadline text…"). The CSS for preserved-tag previews now ships
+  with the markup, in the editor's inline stylesheet.
 - **A button that inserts a block could do nothing.** With the caret next
   to another block chip, or outside the editor, the browser refuses
   `insertHTML` and the host's toolbar button appeared dead. The block now
