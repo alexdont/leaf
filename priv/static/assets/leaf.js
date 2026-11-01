@@ -17218,6 +17218,39 @@
 
     // -- Commands from parent --
 
+    // Put a finished chip in as its own block: after the block the caret is
+    // in, else at the end, with an empty paragraph after it when nothing
+    // follows so there is somewhere to type.
+    _insertChipBlock: function (chip) {
+      var root = this._visualEl;
+      var holder = document.createElement("p");
+      holder.innerHTML = chip;
+
+      var block = null;
+      var sel = window.getSelection();
+      if (sel && sel.rangeCount && sel.anchorNode && root.contains(sel.anchorNode)) {
+        block = sel.anchorNode;
+        while (block && block.parentNode !== root) block = block.parentNode;
+      }
+
+      root.insertBefore(holder, block ? block.nextSibling : null);
+
+      var next = holder.nextElementSibling;
+      if (!next) {
+        next = document.createElement("p");
+        next.appendChild(document.createElement("br"));
+        root.appendChild(next);
+      }
+
+      var range = document.createRange();
+      range.setStart(next, 0);
+      range.collapse(true);
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    },
+
     _handleCommand: function (payload) {
       switch (payload.action) {
         case "insert_image":
@@ -17324,8 +17357,13 @@
             this._visualEl.focus();
             var chip = payload.chip || this._maybeAtomicChip(text);
             if (chip) {
-              // A preserved custom tag — drop it in as a finished chip.
-              document.execCommand("insertHTML", false, chip);
+              // A preserved custom tag — drop it in as a finished chip. The
+              // browser refuses when the caret is next to another chip or
+              // outside the editor, and a button that does nothing reads as
+              // broken: the block goes after the caret's block instead.
+              if (!document.execCommand("insertHTML", false, chip)) {
+                this._insertChipBlock(chip);
+              }
             } else {
               document.execCommand("insertText", false, text);
               if (this._mode === "hybrid") this._refreshSourceBlock();

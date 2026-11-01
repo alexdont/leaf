@@ -27,6 +27,11 @@
 
 ### Fixed
 
+- **A button that inserts a block could do nothing.** With the caret next
+  to another block chip, or outside the editor, the browser refuses
+  `insertHTML` and the host's toolbar button appeared dead. The block now
+  lands after the caret's block (or at the end), with a paragraph after it
+  to keep typing in.
 - **A preserved tag inside another was lost.** `<Gallery>` wrapping
   `<Image/>` tags: the inner tags were swapped out first, the Gallery's own
   source then no longer matched, and its tags were handed to the markdown
