@@ -752,7 +752,7 @@ defmodule Leaf do
     payload =
       case inserted_chip(text, socket) do
         nil -> payload
-        chip -> Map.put(payload, :chip, chip)
+        extra -> Map.merge(payload, extra)
       end
 
     {:ok, push_event(socket, "leaf-command:#{socket.assigns.id}", payload)}
@@ -3941,6 +3941,10 @@ defmodule Leaf do
 
   defp normalize_link_target(_), do: %{href: nil, exists: false, title: nil}
 
+  # `%{chip:, raw:, layout:}` for a text that is exactly one preserved tag,
+  # else nil. The layout follows how the host wrote it: a tag with a line
+  # break before or after is a block of its own (`"<Headline>…</Headline>\n\n"`);
+  # one without (`"<Note>the phrase</Note>"`) goes in at the caret.
   defp inserted_chip(text, socket) do
     preserve = preserve_tags(socket)
     trimmed = String.trim(text)
@@ -3951,8 +3955,18 @@ defmodule Leaf do
       {protected, store} = extract_preserved_tags(trimmed, preserve)
 
       case {String.trim(protected), Map.to_list(store)} do
-        {token, [{token, raw}]} -> preserved_chip(raw, :block, render_opts(socket))
-        _ -> nil
+        {token, [{token, raw}]} ->
+          block? = String.starts_with?(text, "\n") or String.ends_with?(text, "\n")
+          layout = if block?, do: :block, else: :inline
+
+          %{
+            chip: preserved_chip(raw, layout, render_opts(socket)),
+            raw: raw,
+            layout: Atom.to_string(layout)
+          }
+
+        _ ->
+          nil
       end
     end
   end

@@ -17189,22 +17189,51 @@
 
     // -- Commands from parent --
 
-    // Put a finished chip in as its own block: after the block the caret is
-    // in, else at the end, with an empty paragraph after it when nothing
-    // follows so there is somewhere to type.
+    // Inserting a preserved tag from the host (a toolbar button). Never
+    // `execCommand("insertHTML")`: where the caret is decides what the browser
+    // makes of it, and in the editor the answer was wrong most of the time.
+    // Inside an active hybrid line (which is showing its markdown source) or
+    // an empty line the chip's markup was serialised as its VISIBLE TEXT, and
+    // "HeadlineDouble-click to editHeadline text…" was saved as the post;
+    // mid-line it split the paragraph; next to another chip it did nothing.
+    // So the chip's position is decided here, from the block the caret is in.
+
+    // The top-level block (a direct child of the editor) holding `node`.
+    _topBlockOf: function (node) {
+      var root = this._visualEl;
+      if (!node || !root.contains(node) || node === root) return null;
+      while (node && node.parentNode !== root) node = node.parentNode;
+      return node || null;
+    },
+
+    _isBlankBlock: function (block) {
+      if (!block || block.nodeType !== Node.ELEMENT_NODE) return false;
+      if (block.tagName !== "P" && block.tagName !== "DIV") return false;
+      if (block.querySelector("img, hr, table, .leaf-atomic, [data-leaf-raw]")) return false;
+      return !/[^\s\u200B\uFEFF\u00a0]/.test(block.textContent || "");
+    },
+
+    _caretBlock: function () {
+      var sel = window.getSelection();
+      if (!sel || !sel.rangeCount || !sel.anchorNode) return null;
+      return this._topBlockOf(sel.anchorNode);
+    },
+
+    // A block-level component: its own block, after the line the caret is on
+    // (in place of it when that line is empty), with a line after it to keep
+    // typing in.
     _insertChipBlock: function (chip) {
       var root = this._visualEl;
       var holder = document.createElement("p");
       holder.innerHTML = chip;
 
-      var block = null;
-      var sel = window.getSelection();
-      if (sel && sel.rangeCount && sel.anchorNode && root.contains(sel.anchorNode)) {
-        block = sel.anchorNode;
-        while (block && block.parentNode !== root) block = block.parentNode;
+      var block = this._caretBlock();
+      if (block && this._isBlankBlock(block)) {
+        this._forgetSourceBlock(block);
+        root.replaceChild(holder, block);
+      } else {
+        root.insertBefore(holder, block ? block.nextSibling : null);
       }
-
-      root.insertBefore(holder, block ? block.nextSibling : null);
 
       var next = holder.nextElementSibling;
       if (!next) {
@@ -17216,10 +17245,53 @@
       var range = document.createRange();
       range.setStart(next, 0);
       range.collapse(true);
+      var sel = window.getSelection();
       if (sel) {
         sel.removeAllRanges();
         sel.addRange(range);
       }
+    },
+
+    // An inline component (a note on a phrase): at the caret, in place of the
+    // selection. On a line that is showing its source, the source is what
+    // gets the tag — the line turns it into a chip when the caret leaves.
+    _insertInlineChip: function (chip, raw) {
+      var sel = window.getSelection();
+      var inEditor = sel && sel.rangeCount && this._visualEl.contains(sel.anchorNode);
+      var block = inEditor ? this._caretBlock() : null;
+
+      if (!block) {
+        this._insertChipBlock(chip);
+        return;
+      }
+
+      if (block.hasAttribute("data-leaf-source") || block === this._sourceBlock) {
+        if (!document.execCommand("insertText", false, raw)) {
+          var range = sel.getRangeAt(0);
+          range.deleteContents();
+          var text = document.createTextNode(raw);
+          range.insertNode(text);
+          range.setStartAfter(text);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+        if (this._mode === "hybrid") this._refreshSourceBlock();
+        return;
+      }
+
+      var r = sel.getRangeAt(0);
+      r.deleteContents();
+      var holder = document.createElement("template");
+      holder.innerHTML = chip;
+      var node = holder.content.firstChild;
+      if (!node) return;
+      r.insertNode(node);
+      var after = document.createRange();
+      after.setStartAfter(node);
+      after.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(after);
     },
 
     _handleCommand: function (payload) {
@@ -17328,11 +17400,10 @@
             this._visualEl.focus();
             var chip = payload.chip || this._maybeAtomicChip(text);
             if (chip) {
-              // A preserved custom tag — drop it in as a finished chip. The
-              // browser refuses when the caret is next to another chip or
-              // outside the editor, and a button that does nothing reads as
-              // broken: the block goes after the caret's block instead.
-              if (!document.execCommand("insertHTML", false, chip)) {
+              // A preserved custom tag — drop it in as a finished chip.
+              if (payload.layout === "inline") {
+                this._insertInlineChip(chip, payload.raw || text.trim());
+              } else {
                 this._insertChipBlock(chip);
               }
             } else {

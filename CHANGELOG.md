@@ -41,6 +41,17 @@
   the page, so markup from a newer server was drawn bare ("HeadlineDouble-click
   to editHeadline text…"). The CSS for preserved-tag previews now ships
   with the markup, in the editor's inline stylesheet.
+- **A component button saved its own preview as text.** Inserted through the
+  browser's `insertHTML`, a chip's result depended on where the caret was:
+  inside a line showing its source, or an empty line, it was serialised as its
+  visible text ("HeadlineDouble-click to editHeadline text…" ended up in the
+  post); mid-line it split the paragraph; next to another chip it did
+  nothing. Leaf now places it itself: a block component goes after the
+  caret's line (in place of it when that line is empty or only whitespace),
+  followed by a line to keep typing in; an inline one (a note on a phrase)
+  goes in at the caret, replacing the selection, or as source text on a line
+  that is showing its source. The server says which by how the host wrote the
+  text: a line break before or after means a block.
 - **A button that inserts a block could do nothing.** With the caret next
   to another block chip, or outside the editor, the browser refuses
   `insertHTML` and the host's toolbar button appeared dead. The block now
