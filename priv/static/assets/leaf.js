@@ -1297,6 +1297,15 @@
     var container = document.createElement("div");
     container.innerHTML = html;
 
+    // Chrome ends a copied line with a <br class="Apple-interchange-newline">
+    // that stands for the line's own break. Pasted, it is a stray empty line.
+    // Removed before the classes below are stripped, which would hide it.
+    container
+      .querySelectorAll("br.Apple-interchange-newline")
+      .forEach(function (el) {
+        el.remove();
+      });
+
     container.querySelectorAll("[style]").forEach(function (el) {
       el.removeAttribute("style");
     });
@@ -1324,6 +1333,30 @@
     });
 
     return container.innerHTML;
+  }
+
+  // A copied LINE is the line's content, not a paragraph. Copy one line (or
+  // triple-click it) and the clipboard holds `<p>text</p>`; inserted as HTML
+  // that opens a new paragraph every paste, where pasting text should keep
+  // adding to the line the caret is on. When the whole payload is one plain
+  // <p> or <div> with no block inside, its children are inserted instead.
+  // Anything with more structure — two paragraphs, a heading, a list, a copy
+  // that really carries a line break (a second, empty paragraph) — keeps it.
+  var PASTE_BLOCK_SELECTOR =
+    "p, div, h1, h2, h3, h4, h5, h6, ul, ol, li, table, blockquote, pre, hr, details";
+
+  function unwrapSingleLine(container) {
+    var nodes = Array.prototype.filter.call(container.childNodes, function (n) {
+      return !(n.nodeType === Node.TEXT_NODE && !/\S/.test(n.textContent));
+    });
+    if (nodes.length !== 1) return;
+
+    var only = nodes[0];
+    if (only.nodeType !== Node.ELEMENT_NODE) return;
+    if (only.tagName !== "P" && only.tagName !== "DIV") return;
+    if (only.querySelector(PASTE_BLOCK_SELECTOR)) return;
+
+    container.innerHTML = only.innerHTML;
   }
 
   // =========================================================================
@@ -3517,6 +3550,8 @@
         // cleaner has already stripped classes, so this is the only form a
         // checkbox can arrive in.
         this._adoptPastedCheckboxes(container);
+
+        unwrapSingleLine(container);
 
         if (this._denyLinks) {
           container.querySelectorAll("a").forEach(function (anchor) {

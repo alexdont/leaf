@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Pasting a copied line keeps it on the line.** Triple-clicking a line
+  and copying it puts `<p>text</p>` plus Chrome's trailing
+  `<br class="Apple-interchange-newline">` on the clipboard, and every
+  paste opened a new paragraph and left a stray `<br>`. A payload that is
+  one plain paragraph (or div) now pastes as its content, so repeated
+  pastes add to the same line; the interchange `<br>` is dropped. A copy
+  that really carries a line break (the Enter after the line is selected
+  too), several paragraphs, headings and lists still paste as blocks.
+
 ## 0.8.0
 
 Atomic chips grow up — typed tags chip live, chips can be selected,
