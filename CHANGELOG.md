@@ -1,5 +1,84 @@
 # Changelog
 
+## 0.9.0 — 2026-11-01
+
+### Added
+
+- **`tag_previews` — preserved tags drawn like the components they are.**
+  `tag_previews={%{"Showcase" => :split, "Headline" => :headline, …}}`. A
+  generic box (nameplate, title, a faint line of attributes) tells a writer
+  little about a `<Showcase>` or an `<Embed>`. Five kinds: `:headline` (the
+  text, set large), `:split` (a picture beside its text on the side the
+  `side` attribute names, with a placeholder when there is no picture),
+  `:button` (a CTA with its destination), `:frame` (an embedded page's
+  title, address and height) and `:audio` (a player bar). Tags with no
+  entry keep the generic box.
+- **`media_url` — the host says which picture a preserved tag is.** A
+  function `(tag_name, attrs) -> url | nil`. Leaf cannot tell that a
+  `file_uuid` is an image or turn it into a URL, so `<Image file_uuid=…/>`
+  previewed as a line of text. With it, the tag draws its picture as the
+  banner, and a tag's nested tags draw as thumbnails. Asked again when a
+  tag is inserted from the host, so a freshly inserted block looks like
+  the one that loads with the document.
+- **A tag inserted with `send_update(…, action: :insert_markdown)` arrives
+  as the finished chip** drawn by the server, instead of the browser's
+  approximation (no rendered children, no pictures).
+- **Tags inside tags are shown.** `<Gallery><Image …/>…</Gallery>` previews
+  as a row of thumbnails (or small labelled chiplets without `media_url`)
+  instead of an empty box.
+
+### Changed
+
+- **Toolbar glyphs match the icons.** The letter buttons (H, B, I, S, `</>`)
+  were 11px text beside 14px icons, and the overflow dots and the Markdown
+  mark were drawn small in their boxes. They are now sized so every control
+  reads the same size as the undo/redo icons, centered in its button.
+
+### Fixed
+
+- **New previews drawn with no styling in a tab holding an older script.** The
+  preview CSS lived in the JS bundle, which the browser caches apart from
+  the page, so markup from a newer server was drawn bare ("HeadlineDouble-click
+  to editHeadline text…"). The CSS for preserved-tag previews now ships
+  with the markup, in the editor's inline stylesheet.
+- **A component button saved its own preview as text.** Inserted through the
+  browser's `insertHTML`, a chip's result depended on where the caret was:
+  inside a line showing its source, or an empty line, it was serialised as its
+  visible text ("HeadlineDouble-click to editHeadline text…" ended up in the
+  post); mid-line it split the paragraph; next to another chip it did
+  nothing. Leaf now places it itself: a block component goes after the
+  caret's line (in place of it when that line is empty or only whitespace),
+  followed by a line to keep typing in; an inline one (a note on a phrase)
+  goes in at the caret, replacing the selection, or as source text on a line
+  that is showing its source. The server says which by how the host wrote the
+  text: a line break before or after means a block.
+- **A button that inserts a block could do nothing.** With the caret next
+  to another block chip, or outside the editor, the browser refuses
+  `insertHTML` and the host's toolbar button appeared dead. The block now
+  lands after the caret's block (or at the end), with a paragraph after it
+  to keep typing in.
+- **A preserved tag inside another was lost.** `<Gallery>` wrapping
+  `<Image/>` tags: the inner tags were swapped out first, the Gallery's own
+  source then no longer matched, and its tags were handed to the markdown
+  parser, which swallowed them. Only the outermost tag is extracted now; a
+  nested tag is part of its parent's source and round-trips with it.
+- **A heading, list or quote in a tag's body broke the chip apart.** The
+  chip is phrasing content inside a `<p>`; a block element closed the `<p>`
+  and threw the nameplate and attribute line out below the box, with the
+  body spilling into the document as loose paragraphs. Block children are
+  drawn as inline elements, one per line.
+- **Pasted lines go in at the caret, like typed ones.** Triple-clicking a
+  line and copying it puts `<p>text</p>` plus Chrome's trailing
+  `<br class="Apple-interchange-newline">` on the clipboard, and every
+  paste opened a new paragraph and left a stray `<br>`; a copy ending in
+  an empty paragraph (the line and its Enter) left empty lines behind
+  that the next paste did not fill. A payload of plain paragraphs now
+  pastes its first line at the caret and adds one paragraph break per
+  further line, so repeated pastes of one line stay on the line and
+  `[text][empty]` fills the empty line and leaves exactly one below.
+  The interchange `<br>` is dropped. Headings, lists and tables still
+  paste as blocks.
+
 ## 0.8.0
 
 Atomic chips grow up — typed tags chip live, chips can be selected,

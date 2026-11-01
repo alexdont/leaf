@@ -30,7 +30,7 @@
   // its own asset pipeline gets a copy that silently stays behind after
   // `mix deps.update leaf`, and a stale bundle looks exactly like a
   // current one until something it doesn't implement quietly no-ops.
-  window.LeafHooks.version = "0.8.0";
+  window.LeafHooks.version = "0.9.0";
 
   // =========================================================================
   // Reveal hidden spoilers on click (works for any .leaf-spoiler on the page,
@@ -1297,6 +1297,15 @@
     var container = document.createElement("div");
     container.innerHTML = html;
 
+    // Chrome ends a copied line with a <br class="Apple-interchange-newline">
+    // that stands for the line's own break. Pasted, it is a stray empty line.
+    // Removed before the classes below are stripped, which would hide it.
+    container
+      .querySelectorAll("br.Apple-interchange-newline")
+      .forEach(function (el) {
+        el.remove();
+      });
+
     container.querySelectorAll("[style]").forEach(function (el) {
       el.removeAttribute("style");
     });
@@ -1324,6 +1333,40 @@
     });
 
     return container.innerHTML;
+  }
+
+  // Pasted lines go in at the caret, like typed ones. Copy a line (or several)
+  // and the clipboard holds `<p>text</p>` blocks; handed to insertHTML whole,
+  // the browser decides how they merge with the paragraph the caret is in,
+  // and it decides differently per browser, per block type and per trailing
+  // empty paragraph: a new paragraph on every paste, a stray <br>, an empty
+  // line left behind. When the payload is nothing but plain paragraphs (<p>
+  // or <div>, no block inside), `pastedLines` returns each one's content and
+  // `_insertPastedLines` types them in: the first at the caret, then one
+  // paragraph break per further line, so `[text][empty]` is "text" plus the
+  // Enter that was copied with it and nothing else. Anything with more
+  // structure — a heading, a list, a table — returns null and is inserted as
+  // one piece.
+  var PASTE_BLOCK_SELECTOR =
+    "p, div, h1, h2, h3, h4, h5, h6, ul, ol, li, table, blockquote, pre, hr, details";
+
+  function pastedLines(container) {
+    var nodes = Array.prototype.filter.call(container.childNodes, function (n) {
+      return !(n.nodeType === Node.TEXT_NODE && !/\S/.test(n.textContent));
+    });
+    if (!nodes.length) return null;
+
+    var lines = [];
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      if (n.nodeType !== Node.ELEMENT_NODE) return null;
+      if (n.tagName !== "P" && n.tagName !== "DIV") return null;
+      if (n.querySelector(PASTE_BLOCK_SELECTOR)) return null;
+
+      var empty = !/\S/.test(n.textContent) && !n.querySelector("img");
+      lines.push(empty ? "" : n.innerHTML);
+    }
+    return lines;
   }
 
   // =========================================================================
@@ -3518,6 +3561,12 @@
         // checkbox can arrive in.
         this._adoptPastedCheckboxes(container);
 
+        var lines = pastedLines(container);
+        if (lines) {
+          this._insertPastedLines(lines);
+          return;
+        }
+
         if (this._denyLinks) {
           container.querySelectorAll("a").forEach(function (anchor) {
             var parent = anchor.parentNode;
@@ -3576,6 +3625,14 @@
           );
         }
         return;
+      }
+    },
+
+    // See `pastedLines`. An empty string is an empty line.
+    _insertPastedLines: function (lines) {
+      for (var i = 0; i < lines.length; i++) {
+        if (i > 0) document.execCommand("insertParagraph", false);
+        if (lines[i]) document.execCommand("insertHTML", false, lines[i]);
       }
     },
 
@@ -17132,6 +17189,111 @@
 
     // -- Commands from parent --
 
+    // Inserting a preserved tag from the host (a toolbar button). Never
+    // `execCommand("insertHTML")`: where the caret is decides what the browser
+    // makes of it, and in the editor the answer was wrong most of the time.
+    // Inside an active hybrid line (which is showing its markdown source) or
+    // an empty line the chip's markup was serialised as its VISIBLE TEXT, and
+    // "HeadlineDouble-click to editHeadline text…" was saved as the post;
+    // mid-line it split the paragraph; next to another chip it did nothing.
+    // So the chip's position is decided here, from the block the caret is in.
+
+    // The top-level block (a direct child of the editor) holding `node`.
+    _topBlockOf: function (node) {
+      var root = this._visualEl;
+      if (!node || !root.contains(node) || node === root) return null;
+      while (node && node.parentNode !== root) node = node.parentNode;
+      return node || null;
+    },
+
+    _isBlankBlock: function (block) {
+      if (!block || block.nodeType !== Node.ELEMENT_NODE) return false;
+      if (block.tagName !== "P" && block.tagName !== "DIV") return false;
+      if (block.querySelector("img, hr, table, .leaf-atomic, [data-leaf-raw]")) return false;
+      return !/[^\s\u200B\uFEFF\u00a0]/.test(block.textContent || "");
+    },
+
+    _caretBlock: function () {
+      var sel = window.getSelection();
+      if (!sel || !sel.rangeCount || !sel.anchorNode) return null;
+      return this._topBlockOf(sel.anchorNode);
+    },
+
+    // A block-level component: its own block, after the line the caret is on
+    // (in place of it when that line is empty), with a line after it to keep
+    // typing in.
+    _insertChipBlock: function (chip) {
+      var root = this._visualEl;
+      var holder = document.createElement("p");
+      holder.innerHTML = chip;
+
+      var block = this._caretBlock();
+      if (block && this._isBlankBlock(block)) {
+        this._forgetSourceBlock(block);
+        root.replaceChild(holder, block);
+      } else {
+        root.insertBefore(holder, block ? block.nextSibling : null);
+      }
+
+      var next = holder.nextElementSibling;
+      if (!next) {
+        next = document.createElement("p");
+        next.appendChild(document.createElement("br"));
+        root.appendChild(next);
+      }
+
+      var range = document.createRange();
+      range.setStart(next, 0);
+      range.collapse(true);
+      var sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    },
+
+    // An inline component (a note on a phrase): at the caret, in place of the
+    // selection. On a line that is showing its source, the source is what
+    // gets the tag — the line turns it into a chip when the caret leaves.
+    _insertInlineChip: function (chip, raw) {
+      var sel = window.getSelection();
+      var inEditor = sel && sel.rangeCount && this._visualEl.contains(sel.anchorNode);
+      var block = inEditor ? this._caretBlock() : null;
+
+      if (!block) {
+        this._insertChipBlock(chip);
+        return;
+      }
+
+      if (block.hasAttribute("data-leaf-source") || block === this._sourceBlock) {
+        if (!document.execCommand("insertText", false, raw)) {
+          var range = sel.getRangeAt(0);
+          range.deleteContents();
+          var text = document.createTextNode(raw);
+          range.insertNode(text);
+          range.setStartAfter(text);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+        if (this._mode === "hybrid") this._refreshSourceBlock();
+        return;
+      }
+
+      var r = sel.getRangeAt(0);
+      r.deleteContents();
+      var holder = document.createElement("template");
+      holder.innerHTML = chip;
+      var node = holder.content.firstChild;
+      if (!node) return;
+      r.insertNode(node);
+      var after = document.createRange();
+      after.setStartAfter(node);
+      after.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(after);
+    },
+
     _handleCommand: function (payload) {
       switch (payload.action) {
         case "insert_image":
@@ -17236,10 +17398,14 @@
             }
           } else if (this._visualEl) {
             this._visualEl.focus();
-            var chip = this._maybeAtomicChip(text);
+            var chip = payload.chip || this._maybeAtomicChip(text);
             if (chip) {
               // A preserved custom tag — drop it in as a finished chip.
-              document.execCommand("insertHTML", false, chip);
+              if (payload.layout === "inline") {
+                this._insertInlineChip(chip, payload.raw || text.trim());
+              } else {
+                this._insertChipBlock(chip);
+              }
             } else {
               document.execCommand("insertText", false, text);
               if (this._mode === "hybrid") this._refreshSourceBlock();

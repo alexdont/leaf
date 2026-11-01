@@ -446,6 +446,41 @@ defmodule Leaf do
     """
   )
 
+  attr(:media_url, :any,
+    default: nil,
+    doc: """
+    A function `(tag_name, attrs) -> url | nil` that lets a host say which
+    picture a preserved tag stands for. `attrs` is a map of the tag's
+    attributes (`%{"file_uuid" => "…", "alt" => "…"}`); return a URL to draw
+    it as a thumbnail, or `nil` for none. Leaf cannot guess that a
+    `file_uuid` is an image or turn it into a URL, so without this a
+    `<Image file_uuid="…"/>` or a `<Gallery>` of them previews as text.
+    Asked while the document is drawn, and again when a tag is inserted from
+    the host, so keep it cheap. A raise is treated as `nil`.
+    """
+  )
+
+  attr(:tag_previews, :map,
+    default: %{},
+    doc: """
+    How a preserved tag looks in the editor, as `%{"Tag" => kind}`. By
+    default every preserved tag is the same generic box (nameplate, title,
+    attributes as a faint source line), which tells a writer little about
+    what the component will be. A kind draws it like the thing it is:
+
+    - `:headline` — the body text, set large. Attributes stay out of sight.
+    - `:split` — a picture beside its text, on the side the tag's `side`
+      attribute names (default left). The picture is the host's `:media_url`
+      or an image-shaped `src`; with none, a placeholder says so.
+    - `:button` — the body or `label`, drawn as a button, with its `href`.
+    - `:frame` — an embedded page: its `title`, `src` and `height`.
+    - `:audio` — a player bar with the tag's `title`.
+
+    A tag with no entry, or an unknown kind, keeps the generic box. Only the
+    block form (a tag on its own line) uses a kind; inline tags stay words.
+    """
+  )
+
   attr(:maxlength, :integer, default: nil)
   attr(:spellcheck, :boolean, default: true)
   attr(:dir, :string, default: "ltr", values: ["ltr", "rtl", "auto"])
@@ -708,11 +743,19 @@ defmodule Leaf do
   def update(%{action: :insert_markdown} = assigns, socket) do
     text = Map.get(assigns, :text, "")
 
-    {:ok,
-     push_event(socket, "leaf-command:#{socket.assigns.id}", %{
-       action: "insert_markdown",
-       text: text
-     })}
+    payload = %{action: "insert_markdown", text: text}
+
+    # A text that is exactly one preserved tag goes in as the finished chip,
+    # drawn here with the same code (and the host's `:media_url`) as when the
+    # document loads. The browser can only draw a bare approximation: no
+    # markdown renderer, no way to turn a `file_uuid` into a picture.
+    payload =
+      case inserted_chip(text, socket) do
+        nil -> payload
+        extra -> Map.merge(payload, extra)
+      end
+
+    {:ok, push_event(socket, "leaf-command:#{socket.assigns.id}", payload)}
   end
 
   # Reply to a `{:leaf_suggest, …}` request. `trigger`, `query` and `seq` are
@@ -1673,9 +1716,11 @@ defmodule Leaf do
               class={["btn btn-xs px-2", (@mode == :hybrid && "btn-active") || "btn-ghost"]}
               title={t("Hybrid mode")}
             >
+              <%!-- The sparkle is drawn off-center in its 20x20 box (ink centre
+                   at 8.5, 11.58), so the viewBox is shifted onto it. --%>
               <svg
                 xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 20 20"
+                viewBox="-1.5 1.58 20 20"
                 fill="currentColor"
                 class="w-3.5 h-3.5"
               >
@@ -1716,7 +1761,7 @@ defmodule Leaf do
               class={["btn btn-xs px-2", (@mode == :markdown && "btn-active") || "btn-ghost"]}
               title={t("Markdown mode")}
             >
-              <svg viewBox="0 0 208 128" fill="currentColor" class="w-4 h-3">
+              <svg viewBox="23.5 26 168 76" fill="currentColor" class="w-5 h-2.5">
                 <path d="M30 98V30h20l20 25 20-25h20v68H90V59L70 84 50 59v39zm125 0l-30-33h20V30h20v35h20z" />
               </svg>
             </button>
@@ -2548,7 +2593,7 @@ defmodule Leaf do
     {:noreply,
      push_event(socket, "leaf-preserved-html:#{socket.assigns.id}", %{
        token: token,
-       html: preserved_chip(raw, :block)
+       html: preserved_chip(raw, :block, render_opts(socket))
      })}
   end
 
@@ -3111,6 +3156,97 @@ defmodule Leaf do
        the leaf library files). Mirrors the `overflow-auto p-4 pl-10`
        classes on [data-editor-visual] and `relative` on the wrapper. */
     [data-visual-wrapper] { position: relative; }
+
+    /* Preserved-tag previews. Emitted with the markup that needs them, not
+       left to the JS bundle's stylesheet: the bundle is cached by the
+       browser separately from the page, and a tab holding an older one
+       would draw new markup with none of its styling — a block of bare
+       text. The markup and its CSS now always arrive together. */
+    /* Component kinds (`tag_previews`): a preserved tag drawn like the */
+    /* thing it is. See kind_chip_body in lib/leaf.ex. */
+    .content-editor-visual .leaf-atomic-kind-headline > .leaf-kind-headline,
+    .content-editor-visual .leaf-atomic-kind-button > .leaf-kind-button,
+    .content-editor-visual .leaf-atomic-kind-audio > .leaf-kind-audio { margin-right: 5.5rem; }
+    .content-editor-visual .leaf-kind-headline {
+      display: block; font-size: 1.9em; font-weight: 800; line-height: 1.15;
+      letter-spacing: -0.01em;
+    }
+    .content-editor-visual .leaf-kind-meta {
+      display: block; margin-top: 0.55em;
+      font: 400 0.72em/1.4 ui-monospace, SFMono-Regular, monospace;
+      color: color-mix(in oklab, var(--color-base-content, #1f2937) 45%, transparent);
+    }
+    .content-editor-visual .leaf-kind-split { display: flex; gap: 1rem; align-items: stretch; margin-top: 0.6rem; }
+    .content-editor-visual .leaf-kind-split-right { flex-direction: row-reverse; }
+    .content-editor-visual .leaf-kind-split-media { display: block; flex: 0 0 38%; min-width: 0; }
+    .content-editor-visual .leaf-kind-picture {
+      display: block; width: 100%; height: 100%; min-height: 7rem; max-height: 12rem;
+      object-fit: cover; border-radius: 0.4rem; cursor: default;
+    }
+    .content-editor-visual .leaf-kind-placeholder {
+      display: flex; align-items: center; justify-content: center;
+      height: 100%; min-height: 7rem; border-radius: 0.4rem; font-size: 0.85em;
+      border: 2px dashed color-mix(in oklab, var(--color-base-content, #1f2937) 25%, transparent);
+      color: color-mix(in oklab, var(--color-base-content, #1f2937) 50%, transparent);
+    }
+    .content-editor-visual .leaf-kind-split-text { display: block; flex: 1; min-width: 0; align-self: center; line-height: 1.5; }
+    .content-editor-visual .leaf-kind-button {
+      display: inline-block; padding: 0.45em 1.3em; border-radius: 999px; font-weight: 650;
+      background: color-mix(in oklab, var(--color-primary, #3b82f6) 16%, transparent);
+      color: color-mix(in oklab, var(--color-primary, #3b82f6) 90%, var(--color-base-content, #1f2937));
+    }
+    .content-editor-visual .leaf-kind-frame {
+      display: block; padding: 0.8rem 1rem; border-radius: 0.4rem;
+      border: 1px solid color-mix(in oklab, var(--color-base-content, #1f2937) 22%, transparent);
+      background: var(--color-base-100, #fff);
+    }
+    .content-editor-visual .leaf-kind-frame-title { display: block; font-weight: 650; }
+    .content-editor-visual .leaf-kind-frame-url {
+      display: block; margin-top: 0.15em; word-break: break-all;
+      font: 400 0.78em ui-monospace, SFMono-Regular, monospace;
+      color: color-mix(in oklab, var(--color-base-content, #1f2937) 55%, transparent);
+    }
+    .content-editor-visual .leaf-kind-audio {
+      display: flex; align-items: center; gap: 0.7rem; padding: 0.55rem 0.8rem; border-radius: 0.5rem;
+      background: color-mix(in oklab, var(--color-base-content, #1f2937) 6%, transparent);
+    }
+    .content-editor-visual .leaf-kind-audio-play {
+      display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+      width: 1.7rem; height: 1.7rem; border-radius: 50%; font-size: 0.7em;
+      background: var(--color-primary, #3b82f6); color: var(--color-primary-content, #fff);
+    }
+    .content-editor-visual .leaf-kind-audio-bar {
+      display: block; flex: 1; height: 4px; border-radius: 2px; min-width: 2rem;
+      background: color-mix(in oklab, var(--color-base-content, #1f2937) 22%, transparent);
+    }
+    .content-editor-visual .leaf-kind-audio-title { font-size: 0.85em; }
+    /* Block children flattened to inline elements (see flatten_block_children */
+    /* in lib/leaf.ex): still one per line, but safe inside the chip's <p>. */
+    .content-editor-visual .leaf-atomic-h { font-size: 1.05em; font-weight: 650; }
+    .content-editor-visual .leaf-atomic-li::before { content: '• '; opacity: 0.6; }
+    .content-editor-visual .leaf-atomic-quote {
+      display: inline-block; padding-left: 0.7em;
+      border-left: 3px solid color-mix(in oklab, var(--color-base-content, #1f2937) 25%, transparent);
+    }
+    .content-editor-visual .leaf-atomic-pre {
+      font: 400 0.85em ui-monospace, SFMono-Regular, monospace; white-space: pre-wrap;
+    }
+    /* Tags nested in a tag (a Gallery's images): a row of thumbnails, or */
+    /* small labelled chiplets where there is no picture to draw. */
+    .content-editor-visual .leaf-atomic-children {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-top: 0.55em;
+    }
+    .content-editor-visual .leaf-atomic-thumb {
+      display: block; width: 4.5rem; height: 3.4rem; object-fit: cover;
+      border-radius: 0.3rem; cursor: default;
+      background: color-mix(in oklab, var(--color-base-content, #1f2937) 6%, transparent);
+    }
+    .content-editor-visual .leaf-atomic-chiplet {
+      display: inline-block; padding: 0.15em 0.55em; border-radius: 0.3rem;
+      font-size: 0.78em;
+      border: 1px dashed color-mix(in oklab, var(--color-base-content, #1f2937) 30%, transparent);
+      color: color-mix(in oklab, var(--color-base-content, #1f2937) 65%, transparent);
+    }
     .content-editor-visual {
       box-sizing: border-box;
       overflow: auto;
@@ -3123,6 +3259,34 @@ defmodule Leaf do
        editor stylesheet. Without this the toolbar is briefly jagged. */
     [data-visual-toolbar] svg { display: block; }
     [data-visual-toolbar] button { line-height: 1; }
+    /* The letter buttons (H B I S </>) are text, not icons. At the 11px
+       size of a `btn-xs` label they read smaller than the 14px icons beside
+       them (undo, lists, link…), so they take the icons' size and sit
+       centered in the same box. */
+    [data-visual-toolbar] button[data-toolbar-action="bold"],
+    [data-visual-toolbar] button[data-toolbar-action="italic"],
+    [data-visual-toolbar] button[data-toolbar-action="strike"],
+    [data-visual-toolbar] button[data-heading-trigger] {
+      font-size: 13px;
+      justify-content: center;
+      align-items: center;
+    }
+    [data-visual-toolbar] button[data-mode-tab="html"] {
+      font-size: 12px;
+      justify-content: center;
+      align-items: center;
+    }
+    /* The overflow dots and the Markdown mark are drawn small inside their
+       box; sized up so their ink matches the 14px icons. */
+    [data-visual-toolbar] [data-inline-more-trigger] svg,
+    [data-visual-toolbar] [data-insert-more-trigger] svg {
+      width: 18px;
+      height: 18px;
+    }
+    [data-visual-toolbar] button[data-mode-tab="markdown"] svg {
+      width: 20px;
+      height: 9px;
+    }
     [data-mobile-toolbar] svg { display: block; }
     [data-mobile-toolbar] button { line-height: 1; }
     [data-visual-toolbar] [data-heading-dropdown],
@@ -3627,7 +3791,7 @@ defmodule Leaf do
 
         protected
         |> markdown_to_html()
-        |> restore_preserved_tags(store)
+        |> restore_preserved_tags(store, opts)
       end
 
     html = if Map.get(opts, :hashtags, false), do: decorate_hashtags(html), else: html
@@ -3639,6 +3803,8 @@ defmodule Leaf do
   defp render_opts(socket) do
     %{
       preserve_tags: preserve_tags(socket),
+      media_url: Map.get(socket.assigns, :media_url),
+      tag_previews: normalize_tag_previews(Map.get(socket.assigns, :tag_previews)),
       hashtags:
         socket.assigns
         |> Map.get(:suggestions, [])
@@ -3775,35 +3941,90 @@ defmodule Leaf do
 
   defp normalize_link_target(_), do: %{href: nil, exists: false, title: nil}
 
-  # Replace each occurrence of a preserved tag with an inert text token,
-  # returning {protected_markdown, %{token => original_source}}.
+  # `%{chip:, raw:, layout:}` for a text that is exactly one preserved tag,
+  # else nil. The layout follows how the host wrote it: a tag with a line
+  # break before or after is a block of its own (`"<Headline>…</Headline>\n\n"`);
+  # one without (`"<Note>the phrase</Note>"`) goes in at the caret.
+  defp inserted_chip(text, socket) do
+    preserve = preserve_tags(socket)
+    trimmed = String.trim(text)
+
+    if preserve == [] or trimmed == "" do
+      nil
+    else
+      {protected, store} = extract_preserved_tags(trimmed, preserve)
+
+      case {String.trim(protected), Map.to_list(store)} do
+        {token, [{token, raw}]} ->
+          block? = String.starts_with?(text, "\n") or String.ends_with?(text, "\n")
+          layout = if block?, do: :block, else: :inline
+
+          %{
+            chip: preserved_chip(raw, layout, render_opts(socket)),
+            raw: raw,
+            layout: Atom.to_string(layout)
+          }
+
+        _ ->
+          nil
+      end
+    end
+  end
+
+  # Replace each OUTERMOST occurrence of a preserved tag with an inert text
+  # token, returning {protected_markdown, %{token => original_source}}.
+  #
+  # Outermost matters: `<Gallery><Image …/></Gallery>` has two preserved
+  # tags in it, and the inner one used to be replaced first, which left the
+  # outer match without its source to find — the Gallery's own tags were
+  # then handed to the markdown parser, which swallowed them. A tag inside
+  # another is part of that tag's source and travels with it.
   defp extract_preserved_tags(markdown, preserve_tags) do
-    matches =
+    ranges =
       preserve_tags
       |> Enum.flat_map(fn tag ->
         t = Regex.escape(to_string(tag))
         {:ok, re} = Regex.compile("<#{t}\\b[^>]*?/>|<#{t}\\b[^>]*?>.*?</#{t}>", "is")
-        re |> Regex.scan(markdown) |> Enum.map(&hd/1)
+        re |> Regex.scan(markdown, return: :index) |> Enum.map(&hd/1)
       end)
-      |> Enum.uniq()
+      |> Enum.sort_by(fn {start, len} -> {start, -len} end)
+      |> outermost_ranges()
 
-    matches
-    |> Enum.with_index()
-    |> Enum.reduce({markdown, %{}}, fn {match, i}, {md, store} ->
-      token = "LEAFPRESERVED#{i}LEAFEND"
-      {String.replace(md, match, token), Map.put(store, token, match)}
-    end)
+    {protected, store, _i} =
+      ranges
+      |> Enum.reverse()
+      |> Enum.with_index()
+      |> Enum.reduce({markdown, %{}, 0}, fn {{start, len}, i}, {md, store, _} ->
+        token = "LEAFPRESERVED#{i}LEAFEND"
+        raw = binary_part(md, start, len)
+        before = binary_part(md, 0, start)
+        rest = binary_part(md, start + len, byte_size(md) - start - len)
+        {before <> token <> rest, Map.put(store, token, raw), i}
+      end)
+
+    {protected, store}
+  end
+
+  # Ranges sorted by start (longest first on a tie), keeping those that do
+  # not begin inside one already kept.
+  defp outermost_ranges(ranges) do
+    {kept, _end} =
+      Enum.reduce(ranges, {[], 0}, fn {start, len}, {acc, last_end} ->
+        if start >= last_end, do: {[{start, len} | acc], start + len}, else: {acc, last_end}
+      end)
+
+    Enum.reverse(kept)
   end
 
   # Swap tokens back for atomic placeholder spans carrying the verbatim
   # source in a `data-leaf-raw` attribute. A standalone token that MDEx
   # wrapped in its own `<p>` becomes the taller block chip; an inline token
   # stays a compact inline one.
-  defp restore_preserved_tags(html, store) do
+  defp restore_preserved_tags(html, store, opts) do
     Enum.reduce(store, html, fn {token, raw}, acc ->
       acc
-      |> String.replace("<p>#{token}</p>", "<p>#{preserved_chip(raw, :block)}</p>")
-      |> String.replace(token, preserved_chip(raw, :inline))
+      |> String.replace("<p>#{token}</p>", "<p>#{preserved_chip(raw, :block, opts)}</p>")
+      |> String.replace(token, preserved_chip(raw, :inline, opts))
     end)
   end
 
@@ -3830,14 +4051,18 @@ defmodule Leaf do
   #
   # Every child element is phrasing content, because the block form still
   # sits inside the `<p>` MDEx produced.
-  defp preserved_chip(raw, layout) do
+  defp preserved_chip(raw, layout, opts) do
     {name, attrs, inner} = parse_preserved_tag(raw)
     roles = attribute_roles(attrs)
+    roles = with_host_media(roles, name, attrs, opts)
+
+    kind = if layout == :block, do: tag_kind(opts, name), else: nil
 
     body =
-      case layout do
-        :inline -> inline_chip_body(name, roles, inner)
-        :block -> block_chip_body(name, roles, inner)
+      case {layout, kind} do
+        {:inline, _} -> inline_chip_body(name, roles, inner)
+        {:block, nil} -> block_chip_body(name, roles, inner, opts)
+        {:block, kind} -> kind_chip_body(kind, name, attrs, roles, inner, opts)
       end
 
     # `has-media` lets the stylesheet know the nameplate is sitting over a
@@ -3846,6 +4071,7 @@ defmodule Leaf do
     classes =
       case layout do
         :inline -> "leaf-atomic leaf-atomic-inline"
+        :block when kind != nil -> "leaf-atomic leaf-atomic-block leaf-atomic-kind-#{kind}"
         :block when roles.media != "" -> "leaf-atomic leaf-atomic-block leaf-atomic-has-media"
         :block -> "leaf-atomic leaf-atomic-block"
       end
@@ -3855,17 +4081,179 @@ defmodule Leaf do
       body <> ~s(</span>)
   end
 
+  @tag_kinds ~w(headline split button frame audio)a
+
+  defp normalize_tag_previews(map) when is_map(map) do
+    for {tag, kind} <- map,
+        kind = normalize_kind(kind),
+        into: %{},
+        do: {String.downcase(to_string(tag)), kind}
+  end
+
+  defp normalize_tag_previews(_), do: %{}
+
+  defp normalize_kind(kind) when kind in @tag_kinds, do: kind
+
+  defp normalize_kind(kind) when is_binary(kind) do
+    Enum.find(@tag_kinds, &(Atom.to_string(&1) == kind))
+  end
+
+  defp normalize_kind(_), do: nil
+
+  defp tag_kind(%{tag_previews: previews}, name) when is_map(previews),
+    do: Map.get(previews, String.downcase(name))
+
+  defp tag_kind(_opts, _name), do: nil
+
+  # A kind's body. Same nameplate and edit hint as the generic box, so the
+  # block still reads as one thing you can double-click; what differs is the
+  # preview, drawn like the component it stands for. Everything is phrasing
+  # content (spans) because the chip lives inside a `<p>`; the stylesheet
+  # does the block layout.
+  defp kind_chip_body(kind, name, attrs, roles, inner, opts) do
+    nameplate = ~s(<span class="leaf-atomic-name">#{escape_text(name)}</span>)
+    hint = ~s(<span class="leaf-atomic-hint">#{escape_text(t("Double-click to edit"))}</span>)
+
+    nameplate <> hint <> kind_preview(kind, attrs, roles, inner, opts)
+  end
+
+  defp kind_preview(:headline, attrs, roles, inner, _opts) do
+    text = first_present([render_body(inner), escape_text(roles.title)], t("Headline text"))
+    stretch = attr_value(attrs, "stretch")
+
+    ~s(<span class="leaf-kind-headline">#{text}</span>) <>
+      if(stretch == "",
+        do: "",
+        else:
+          ~s(<span class="leaf-kind-meta">#{escape_text(t("stretch"))} #{escape_text(stretch)}</span>)
+      )
+  end
+
+  defp kind_preview(:split, attrs, roles, inner, _opts) do
+    side = if String.downcase(attr_value(attrs, "side")) == "right", do: "right", else: "left"
+    {children, inner} = nested_tags(inner, %{})
+    body = first_present([render_body(inner)], "")
+
+    picture =
+      case roles.media do
+        "" ->
+          ~s(<span class="leaf-kind-placeholder">#{escape_text(t("Picture"))}</span>)
+
+        url ->
+          ~s(<img class="leaf-kind-picture" src="#{escape_attr(url)}" alt="#{escape_attr(attr_value(attrs, "alt"))}" loading="lazy">)
+      end
+
+    meta =
+      attrs
+      |> Enum.reject(fn {k, v} ->
+        String.downcase(k) in ~w(src file_uuid side alt image) or String.trim(v) == ""
+      end)
+      |> Enum.map_join(" · ", fn {k, v} -> "#{k} #{truncate(v, 24)}" end)
+
+    ~s(<span class="leaf-kind-split leaf-kind-split-#{side}">) <>
+      ~s(<span class="leaf-kind-split-media">#{picture}</span>) <>
+      ~s(<span class="leaf-kind-split-text">#{body}#{children}</span></span>) <>
+      if(meta == "", do: "", else: ~s(<span class="leaf-kind-meta">#{escape_text(meta)}</span>))
+  end
+
+  defp kind_preview(:button, attrs, roles, inner, _opts) do
+    label =
+      first_present(
+        [render_body(inner), escape_text(roles.cta_label), escape_text(roles.title)],
+        t("Button")
+      )
+
+    link = first_present([roles.link, attr_value(attrs, "href")], "")
+
+    ~s(<span class="leaf-kind-button">#{label}</span>) <>
+      if(link == "",
+        do: "",
+        else: ~s(<span class="leaf-kind-meta">→ #{escape_text(truncate(link, 60))}</span>)
+      )
+  end
+
+  defp kind_preview(:frame, attrs, roles, _inner, _opts) do
+    src = first_present([attr_value(attrs, "src"), roles.link], "")
+    height = attr_value(attrs, "height")
+    title = first_present([escape_text(roles.title)], t("Embedded page"))
+
+    ~s(<span class="leaf-kind-frame">) <>
+      ~s(<span class="leaf-kind-frame-title">#{title}</span>) <>
+      ~s(<span class="leaf-kind-frame-url">#{if src == "", do: escape_text(t("No address yet")), else: escape_text(truncate(src, 70))}</span>) <>
+      if(height == "",
+        do: "",
+        else: ~s(<span class="leaf-kind-meta">#{escape_text(t("height"))} #{escape_text(height)}</span>)
+      ) <> ~s(</span>)
+  end
+
+  defp kind_preview(:audio, attrs, roles, _inner, _opts) do
+    title =
+      first_present(
+        [escape_text(roles.title), escape_text(file_label(attr_value(attrs, "src")))],
+        t("Audio")
+      )
+
+    ~s(<span class="leaf-kind-audio"><span class="leaf-kind-audio-play">▶</span>) <>
+      ~s(<span class="leaf-kind-audio-bar"></span>) <>
+      ~s(<span class="leaf-kind-audio-title">#{title}</span></span>)
+  end
+
+  # The tag's body as already-escaped, inline-safe HTML; "" when empty.
+  defp render_body(inner) do
+    case String.trim(inner) do
+      "" -> ""
+      trimmed -> render_inner_markdown(trimmed)
+    end
+  end
+
+  defp attr_value(attrs, key) do
+    Enum.find_value(attrs, "", fn {k, v} ->
+      if String.downcase(k) == key and String.trim(v) != "", do: String.trim(v)
+    end)
+  end
+
+  defp first_present(values, default) do
+    Enum.find(values, default, &(&1 not in ["", nil]))
+  end
+
+  # The host's answer to "which picture is this tag?" (`:media_url`), used
+  # only when the tag carries no picture of its own that Leaf can draw.
+  defp with_host_media(%{media: ""} = roles, name, attrs, opts) do
+    case host_media_url(opts, name, attrs) do
+      "" -> roles
+      url -> %{roles | media: url}
+    end
+  end
+
+  defp with_host_media(roles, _name, _attrs, _opts), do: roles
+
+  defp host_media_url(%{media_url: fun}, name, attrs) when is_function(fun, 2) do
+    case fun.(name, Map.new(attrs)) do
+      url when is_binary(url) -> if url_ref?(url), do: url, else: ""
+      _ -> ""
+    end
+  rescue
+    _ -> ""
+  catch
+    _, _ -> ""
+  end
+
+  defp host_media_url(_opts, _name, _attrs), do: ""
+
   # The nameplate sits in the top-RIGHT corner, which is the one structural
   # choice here worth defending: it hands the primary reading position —
   # top-left, where the eye lands — to the writer's own content, and puts
   # the machine fact where it can be found but not tripped over.
-  defp block_chip_body(name, roles, inner) do
+  defp block_chip_body(name, roles, inner, opts) do
+    {children, inner} = nested_tags(inner, opts)
+
     preview =
       [
         role_span(roles.eyebrow, "leaf-atomic-eyebrow"),
         role_span(roles.title, "leaf-atomic-title"),
         role_span(roles.subtitle, "leaf-atomic-subtitle"),
         preserved_inner_preview(inner),
+        children,
         chip_cta(roles),
         chip_rest_attrs(roles.rest)
       ]
@@ -3885,6 +4273,43 @@ defmodule Leaf do
       end
 
     nameplate <> hint <> content
+  end
+
+  # Tags nested inside a tag's body (`<Gallery><Image …/><Image …/></Gallery>`)
+  # are not markdown, so the body's markdown pass would drop them and the
+  # container would look empty. They are pulled out and drawn as a row:
+  # a thumbnail where the host can name a picture, else a small labelled
+  # chiplet. Returns {row_html, body_without_them}.
+  @nested_tag_re ~r{<([A-Z][\w.-]*)\b([^>]*?)/>|<([A-Z][\w.-]*)\b([^>]*?)>(.*?)</\3>}s
+
+  defp nested_tags(inner, opts) do
+    found = Regex.scan(@nested_tag_re, inner)
+
+    items =
+      Enum.map(found, fn
+        [_whole, name, attr_src] -> nested_item(name, attr_src, opts)
+        [_whole, "", "", name, attr_src, _body] -> nested_item(name, attr_src, opts)
+        [_whole, name, attr_src | _] -> nested_item(name, attr_src, opts)
+      end)
+
+    row =
+      if items == [],
+        do: "",
+        else: ~s(<span class="leaf-atomic-children">#{Enum.join(items)}</span>)
+
+    {row, Regex.replace(@nested_tag_re, inner, "")}
+  end
+
+  defp nested_item(name, attr_src, opts) do
+    attrs = parse_attr_source(attr_src)
+    roles = attribute_roles(attrs) |> with_host_media(name, attrs, opts)
+    label = [roles.title, roles.subtitle, file_label(roles.source)] |> Enum.find("", &(&1 != ""))
+
+    if roles.media != "" do
+      ~s(<img class="leaf-atomic-thumb" src="#{escape_attr(roles.media)}" alt="#{escape_attr(label)}" title="#{escape_attr(label)}" loading="lazy">)
+    else
+      ~s(<span class="leaf-atomic-chiplet">#{escape_text(name)}#{if label != "", do: " " <> escape_text(truncate(label, 24)), else: ""}</span>)
+    end
   end
 
   # Inline tags interrupt a sentence, so they stay the size of a word: the
@@ -3955,6 +4380,17 @@ defmodule Leaf do
 
   @preserved_attr_re ~r/([A-Za-z_:][\w.:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/
 
+  defp parse_attr_source(source) do
+    @preserved_attr_re
+    |> Regex.scan(source)
+    |> Enum.map(fn
+      [_, key, dq, "", ""] -> {key, dq}
+      [_, key, "", sq, ""] -> {key, sq}
+      [_, key, "", "", bare] -> {key, bare}
+      [_, key | rest] -> {key, Enum.find(rest, "", &(&1 != ""))}
+    end)
+  end
+
   # {tag_name, [{attr, value}], inner_source}. Only the OPENING tag is
   # scanned for attributes — attributes on nested tags belong to those.
   defp parse_preserved_tag(raw) do
@@ -3970,15 +4406,7 @@ defmodule Leaf do
         _ -> raw
       end
 
-    attrs =
-      @preserved_attr_re
-      |> Regex.scan(open_tag)
-      |> Enum.map(fn
-        [_, key, dq, "", ""] -> {key, dq}
-        [_, key, "", sq, ""] -> {key, sq}
-        [_, key, "", "", bare] -> {key, bare}
-        [_, key | rest] -> {key, Enum.find(rest, "", &(&1 != ""))}
-      end)
+    attrs = parse_attr_source(open_tag)
 
     inner =
       case Regex.run(~r/^\s*<[^>]*[^\/]>(.*)<\/[A-Za-z][\w.-]*\s*>\s*$/s, raw) do
@@ -4066,6 +4494,8 @@ defmodule Leaf do
     end)
   end
 
+  defp url_ref?(value), do: Regex.match?(@url_ref_re, value)
+
   defp image_attr?({key, value}) do
     key = String.downcase(key)
 
@@ -4114,6 +4544,7 @@ defmodule Leaf do
         |> String.replace(~r{<!--\s*raw HTML omitted\s*-->}i, "")
         |> String.replace(~r{</p>\s*<p>}, "<br>")
         |> String.replace(~r{^\s*<p>|</p>\s*$}, "")
+        |> flatten_block_children()
         # The chip is not editable, but a real `href` inside a
         # contenteditable is still a live target for ctrl-click and drag.
         # Keep the look, drop the destination.
@@ -4123,6 +4554,28 @@ defmodule Leaf do
       {:error, _} ->
         escape_text(source)
     end
+  end
+
+  # The chip is phrasing content inside MDEx's `<p>`, so a heading, list or
+  # quote in a tag's body cannot stay a block: the HTML parser closes the
+  # `<p>` at the first one and the chip falls apart — its nameplate and
+  # attributes land AFTER the body, outside the box. Each block becomes an
+  # inline element that is still shown on its own line.
+  defp flatten_block_children(html) do
+    html
+    |> String.replace(~r{<h[1-6][^>]*>(.*?)</h[1-6]>\s*}is, ~s(<strong class="leaf-atomic-h">\\1</strong><br>))
+    |> String.replace(~r{<li[^>]*>(.*?)</li>\s*}is, ~s(<span class="leaf-atomic-li">\\1</span><br>))
+    |> String.replace(~r{</?(?:ul|ol)[^>]*>\s*}i, "")
+    |> String.replace(~r{<blockquote[^>]*>\s*}i, ~s(<span class="leaf-atomic-quote">))
+    |> String.replace(~r{\s*</blockquote>\s*}i, "</span><br>")
+    |> String.replace(~r{<pre[^>]*>\s*(?:<code[^>]*>)?(.*?)(?:</code>)?\s*</pre>\s*}is, ~s(<code class="leaf-atomic-pre">\\1</code><br>))
+    |> String.replace(~r{<hr\s*/?>\s*}i, "<br>")
+    # A paragraph after a heading or list is not the first or last one, so
+    # the unwrapping above never saw it.
+    |> String.replace(~r{<p[^>]*>}i, "")
+    |> String.replace(~r{</p>\s*}i, "<br>")
+    |> String.replace(~r/(?:<br\s*\/?>\s*){2,}/i, "<br>")
+    |> String.replace(~r{(?:<br\s*/?>\s*)+$}i, "")
   end
 
   defp preserved_tooltip(raw) do

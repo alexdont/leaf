@@ -16,6 +16,9 @@ defmodule Leaf.PreservedTagsTest do
     opts
     |> Keyword.put_new(:id, "editor-1")
     |> then(&render_component(Leaf, &1))
+    # The inline stylesheet names every class the chips use; assertions are
+    # about the markup, so it is left out.
+    |> String.replace(~r|<style.*?</style>|s, "")
   end
 
   describe "atomic block preview" do
@@ -238,6 +241,365 @@ defmodule Leaf.PreservedTagsTest do
         end)
 
       refute log =~ "Showcase"
+    end
+  end
+
+  describe "tags inside tags" do
+    @gallery ~s|<Gallery height="520">\n<Image file_uuid="aaa" alt="One"/>\n<Image file_uuid="bbb" alt="Two"/>\n</Gallery>|
+    @tags ["Image", "Gallery"]
+
+    test "the outer tag is the chip, and carries the whole source" do
+      html = visual_html(content: @gallery, preserve_tags: @tags)
+
+      assert html =~ ~s|data-leaf-tag="Gallery"|
+      # One chip: the images are part of the Gallery's source, not chips of
+      # their own beside it (the Gallery used to vanish into the markdown
+      # parser because its images were swapped out first).
+      assert length(Regex.scan(~r/ data-leaf-tag="/, html)) == 1
+      assert html =~ "&lt;Image file_uuid=&quot;aaa&quot;"
+      assert html =~ "&lt;/Gallery&gt;"
+    end
+
+    test "nested tags show as chiplets when the host names no picture" do
+      html = visual_html(content: @gallery, preserve_tags: @tags)
+
+      assert html =~ ~s|<span class="leaf-atomic-chiplet">Image One</span>|
+      assert html =~ ~s|<span class="leaf-atomic-chiplet">Image Two</span>|
+    end
+
+    test "the host's media_url draws them as thumbnails" do
+      media_url = fn "Image", %{"file_uuid" => uuid} -> "/file/#{uuid}/thumb" end
+
+      html = visual_html(content: @gallery, preserve_tags: @tags, media_url: media_url)
+
+      assert html =~ ~s|<img class="leaf-atomic-thumb" src="/file/aaa/thumb"|
+      assert html =~ ~s|<img class="leaf-atomic-thumb" src="/file/bbb/thumb"|
+      refute html =~ "leaf-atomic-chiplet"
+    end
+
+    test "two galleries in one document stay two chips" do
+      html =
+        visual_html(content: @gallery <> "\n\ntext\n\n" <> @gallery, preserve_tags: @tags)
+
+      assert length(Regex.scan(~r/data-leaf-tag="Gallery"/, html)) == 2
+    end
+  end
+
+  describe "media_url" do
+    test "a top-level tag gets its picture as the banner" do
+      media_url = fn "Image", %{"file_uuid" => uuid} -> "/file/#{uuid}/large" end
+
+      html =
+        visual_html(
+          content: ~s|<Image file_uuid="abc" alt="A cat"/>|,
+          preserve_tags: ["Image"],
+          media_url: media_url
+        )
+
+      assert html =~ ~s|<img class="leaf-atomic-media" src="/file/abc/large"|
+      assert html =~ "leaf-atomic-has-media"
+    end
+
+    test "it is told the tag, so a non-picture file is the host's call" do
+      media_url = fn
+        "Image", %{"file_uuid" => uuid} -> "/file/#{uuid}"
+        _tag, _attrs -> nil
+      end
+
+      html =
+        visual_html(
+          content: ~s|<Audio file_uuid="abc" title="Episode"/>|,
+          preserve_tags: ["Audio"],
+          media_url: media_url
+        )
+
+      refute html =~ "<img"
+      assert html =~ "Episode"
+    end
+
+    test "a picture the tag carries itself wins" do
+      html =
+        visual_html(
+          content: ~s|<Hero image="https://x.test/a.png" file_uuid="abc"/>|,
+          preserve_tags: ["Hero"],
+          media_url: fn _, _ -> "/should-not-be-used" end
+        )
+
+      assert html =~ ~s|src="https://x.test/a.png"|
+      refute html =~ "should-not-be-used"
+    end
+
+    test "a function that raises, or answers a non-URL, draws nothing" do
+      for fun <- [
+            fn _, _ -> raise "boom" end,
+            fn _, _ -> "javascript:alert(1)" end,
+            fn _, _ -> 42 end
+          ] do
+        html =
+          visual_html(
+            content: ~s|<Image file_uuid="abc"/>|,
+            preserve_tags: ["Image"],
+            media_url: fun
+          )
+
+        refute html =~ "<img"
+        assert html =~ ~s|data-leaf-tag="Image"|
+      end
+    end
+  end
+
+  describe "block children" do
+    test "a heading and a paragraph in the body stay inside the chip" do
+      source = "<Showcase side=\"left\">\n### Heading\n\nWords beside the picture.\n</Showcase>"
+      html = visual_html(content: source, preserve_tags: ["Showcase"])
+
+      [chip] =
+        Regex.run(
+          ~r|<span class="leaf-atomic leaf-atomic-block".*?</p>|s,
+          html
+        )
+
+      # Block elements in a chip's body close the <p> it lives in, which
+      # threw the nameplate and attributes out below the box.
+      refute chip =~ ~r|<h3|
+      refute chip =~ ~r|<p>[^<]*Words|
+      assert chip =~ ~s|<strong class="leaf-atomic-h">Heading</strong>|
+      assert chip =~ "Words beside the picture."
+      assert chip =~ ~s|<span class="leaf-atomic-rest">side=|
+    end
+
+    test "paragraphs between headings do not end the chip early" do
+      source = "<Showcase side=\"left\">\n### A\n\ntext a\n\n### B\n\ntext b\n</Showcase>"
+      html = visual_html(content: source, preserve_tags: ["Showcase"])
+
+      [chip] = Regex.run(~r|<span class="leaf-atomic leaf-atomic-block".*?</p>|s, html)
+
+      assert chip =~ "text a"
+      assert chip =~ "text b"
+      assert chip =~ ~s|<span class="leaf-atomic-rest">side=|
+    end
+
+    test "a list in the body is flattened too" do
+      html =
+        visual_html(
+          content: "<Card>\n- one\n- two\n</Card>",
+          preserve_tags: ["Card"]
+        )
+
+      [chip] =
+        Regex.run(~r|<span class="leaf-atomic leaf-atomic-block".*?</span></span></p>|s, html)
+
+      refute chip =~ "<ul"
+      refute chip =~ "<li"
+      assert html =~ ~s|<span class="leaf-atomic-li">one</span>|
+      assert html =~ ~s|<span class="leaf-atomic-li">two</span>|
+    end
+  end
+
+  describe "inserting a tag from the host" do
+    defp insert(text, assigns) do
+      socket = %Phoenix.LiveView.Socket{
+        assigns: Map.merge(%{__changed__: %{}, id: "ed", preserve_tags: []}, Map.new(assigns))
+      }
+
+      {:ok, socket} = Leaf.update(%{action: :insert_markdown, text: text}, socket)
+      [["leaf-command:ed", payload]] = socket.private.live_temp.push_events
+      payload
+    end
+
+    test "a lone preserved tag arrives as the finished chip" do
+      payload =
+        insert("\n<Image file_uuid=\"abc\" alt=\"A cat\"/>\n",
+          preserve_tags: ["Image"],
+          media_url: fn "Image", %{"file_uuid" => u} -> "/file/#{u}/t" end
+        )
+
+      assert payload.action == "insert_markdown"
+      assert payload.chip =~ ~s|src="/file/abc/t"|
+      assert payload.chip =~ ~s|data-leaf-tag="Image"|
+    end
+
+    test "a whole gallery arrives as one chip with its thumbnails" do
+      payload =
+        insert("\n<Gallery>\n<Image file_uuid=\"a\"/>\n<Image file_uuid=\"b\"/>\n</Gallery>\n",
+          preserve_tags: ["Image", "Gallery"],
+          media_url: fn _, %{"file_uuid" => u} -> "/file/#{u}/t" end
+        )
+
+      assert length(Regex.scan(~r/leaf-atomic-thumb/, payload.chip)) == 2
+      assert length(Regex.scan(~r/data-leaf-tag=/, payload.chip)) == 1
+    end
+
+    test "plain text, or text around a tag, is left to the browser" do
+      assert insert("just words", preserve_tags: ["Image"]) |> Map.has_key?(:chip) == false
+
+      refute insert("words <Image file_uuid=\"a\"/> more", preserve_tags: ["Image"])
+             |> Map.has_key?(:chip)
+    end
+
+    test "with nothing preserved there is no chip" do
+      refute insert("<Image file_uuid=\"a\"/>", preserve_tags: []) |> Map.has_key?(:chip)
+    end
+  end
+
+  describe "tag_previews kinds" do
+    @previews %{
+      "Headline" => :headline,
+      "Showcase" => :split,
+      "CTA" => :button,
+      "Embed" => :frame,
+      "Audio" => :audio
+    }
+
+    defp kinds(source, tags, extra \\ []) do
+      visual_html([content: source, preserve_tags: tags, tag_previews: @previews] ++ extra)
+    end
+
+    test "a headline is its text, set large, with no attribute line" do
+      html = kinds(~s|<Headline stretch="30">Big words</Headline>|, ["Headline"])
+
+      assert html =~ "leaf-atomic-kind-headline"
+      assert html =~ ~s|<span class="leaf-kind-headline">Big words</span>|
+      refute html =~ "leaf-atomic-rest"
+    end
+
+    test "a showcase puts the picture beside the text, on its side" do
+      source =
+        "<Showcase file_uuid=\"u1\" side=\"right\" height=\"medium\">\n### Hi\n\nBody\n</Showcase>"
+
+      html =
+        kinds(source, ["Showcase"],
+          media_url: fn "Showcase", %{"file_uuid" => u} -> "/file/#{u}" end
+        )
+
+      assert html =~ "leaf-kind-split-right"
+      assert html =~ ~s|<img class="leaf-kind-picture" src="/file/u1"|
+      assert html =~ ~s|<strong class="leaf-atomic-h">Hi</strong>|
+      assert html =~ "height medium"
+    end
+
+    test "a showcase with no picture says so, and defaults to the left" do
+      html = kinds(~s|<Showcase src="">Words</Showcase>|, ["Showcase"])
+
+      assert html =~ "leaf-kind-split-left"
+      assert html =~ ~s|<span class="leaf-kind-placeholder">Picture</span>|
+      refute html =~ "<img class=\"leaf-kind-picture\""
+    end
+
+    test "a CTA is a button, with where it goes" do
+      html = kinds(~s|<CTA href="/signup">Join us</CTA>|, ["CTA"])
+
+      assert html =~ ~s|<span class="leaf-kind-button">Join us</span>|
+      assert html =~ "→ /signup"
+    end
+
+    test "an embed shows its title, address and height" do
+      html = kinds(~s|<Embed src="https://x.test/demo" height="320" title="Demo" />|, ["Embed"])
+
+      assert html =~ ~s|<span class="leaf-kind-frame-title">Demo</span>|
+      assert html =~ "https://x.test/demo"
+      assert html =~ "height 320"
+    end
+
+    test "an embed with no address says so" do
+      html = kinds(~s|<Embed src="" height="480" title="Try it" />|, ["Embed"])
+
+      assert html =~ "No address yet"
+    end
+
+    test "audio is a player bar with its title" do
+      html = kinds(~s|<Audio file_uuid="a" title="Episode"/>|, ["Audio"])
+
+      assert html =~ "leaf-kind-audio-play"
+      assert html =~ ~s|<span class="leaf-kind-audio-title">Episode</span>|
+    end
+
+    test "a tag with no kind, or an unknown one, keeps the generic box" do
+      html =
+        visual_html(
+          content: ~s|<Hero title="Hi"/>|,
+          preserve_tags: ["Hero"],
+          tag_previews: %{"Hero" => :nonsense, "Other" => :button}
+        )
+
+      assert html =~ "leaf-atomic-title"
+      refute html =~ "leaf-atomic-kind-"
+    end
+
+    test "kind names are matched without regard to case, and may be strings" do
+      html =
+        visual_html(
+          content: ~s|<CTA>Go</CTA>|,
+          preserve_tags: ["CTA"],
+          tag_previews: %{"cta" => "button"}
+        )
+
+      assert html =~ "leaf-kind-button"
+    end
+
+    test "an inline tag stays a word even with a kind" do
+      html = kinds("Press <CTA>Go</CTA> now", ["CTA"])
+
+      assert html =~ "leaf-atomic-inline"
+      refute html =~ "leaf-kind-button"
+    end
+
+    test "the user's text is escaped in every kind" do
+      html = kinds(~s|<Embed src="x" title="Tom & Jerry <i" />|, ["Embed"])
+
+      [chip] = Regex.run(~r|<span class="leaf-atomic leaf-atomic-block.*?</p>|s, html)
+
+      assert chip =~ "Tom &amp; Jerry"
+      refute String.replace(chip, ~r/data-leaf-raw="[^"]*"/, "") =~ "Jerry <"
+    end
+
+    test "an inserted tag arrives drawn as its kind" do
+      socket = %Phoenix.LiveView.Socket{
+        assigns: %{
+          __changed__: %{},
+          id: "ed",
+          preserve_tags: ["Headline"],
+          tag_previews: %{"Headline" => :headline}
+        }
+      }
+
+      {:ok, socket} =
+        Leaf.update(
+          %{
+            action: :insert_markdown,
+            text: ~s|\n<Headline stretch="30">Headline text</Headline>\n|
+          },
+          socket
+        )
+
+      [["leaf-command:ed", payload]] = socket.private.live_temp.push_events
+      assert payload.chip =~ ~s|<span class="leaf-kind-headline">Headline text</span>|
+    end
+  end
+
+  describe "preview stylesheet" do
+    test "ships with the markup, not only with the JS bundle" do
+      raw =
+        render_component(Leaf,
+          id: "e",
+          content: ~s|<CTA>Go</CTA>|,
+          preserve_tags: ["CTA"],
+          tag_previews: %{"CTA" => :button}
+        )
+
+      [style] = Regex.run(~r|<style.*?</style>|s, raw)
+
+      for selector <- [
+            ".leaf-kind-button",
+            ".leaf-kind-split",
+            ".leaf-kind-headline",
+            ".leaf-kind-frame",
+            ".leaf-kind-audio",
+            ".leaf-atomic-thumb",
+            ".leaf-atomic-h"
+          ] do
+        assert style =~ selector
+      end
     end
   end
 end
