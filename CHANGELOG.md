@@ -4,6 +4,15 @@
 
 ### Added
 
+- **`tag_previews` — preserved tags drawn like the components they are.**
+  `tag_previews={%{"Showcase" => :split, "Headline" => :headline, …}}`. A
+  generic box (nameplate, title, a faint line of attributes) tells a writer
+  little about a `<Showcase>` or an `<Embed>`. Five kinds: `:headline` (the
+  text, set large), `:split` (a picture beside its text on the side the
+  `side` attribute names, with a placeholder when there is no picture),
+  `:button` (a CTA with its destination), `:frame` (an embedded page's
+  title, address and height) and `:audio` (a player bar). Tags with no
+  entry keep the generic box.
 - **`media_url` — the host says which picture a preserved tag is.** A
   function `(tag_name, attrs) -> url | nil`. Leaf cannot tell that a
   `file_uuid` is an image or turn it into a URL, so `<Image file_uuid=…/>`

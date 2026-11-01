@@ -460,6 +460,27 @@ defmodule Leaf do
     """
   )
 
+  attr(:tag_previews, :map,
+    default: %{},
+    doc: """
+    How a preserved tag looks in the editor, as `%{"Tag" => kind}`. By
+    default every preserved tag is the same generic box (nameplate, title,
+    attributes as a faint source line), which tells a writer little about
+    what the component will be. A kind draws it like the thing it is:
+
+    - `:headline` — the body text, set large. Attributes stay out of sight.
+    - `:split` — a picture beside its text, on the side the tag's `side`
+      attribute names (default left). The picture is the host's `:media_url`
+      or an image-shaped `src`; with none, a placeholder says so.
+    - `:button` — the body or `label`, drawn as a button, with its `href`.
+    - `:frame` — an embedded page: its `title`, `src` and `height`.
+    - `:audio` — a player bar with the tag's `title`.
+
+    A tag with no entry, or an unknown kind, keeps the generic box. Only the
+    block form (a tag on its own line) uses a kind; inline tags stay words.
+    """
+  )
+
   attr(:maxlength, :integer, default: nil)
   attr(:spellcheck, :boolean, default: true)
   attr(:dir, :string, default: "ltr", values: ["ltr", "rtl", "auto"])
@@ -3692,6 +3713,7 @@ defmodule Leaf do
     %{
       preserve_tags: preserve_tags(socket),
       media_url: Map.get(socket.assigns, :media_url),
+      tag_previews: normalize_tag_previews(Map.get(socket.assigns, :tag_previews)),
       hashtags:
         socket.assigns
         |> Map.get(:suggestions, [])
@@ -3929,10 +3951,13 @@ defmodule Leaf do
     roles = attribute_roles(attrs)
     roles = with_host_media(roles, name, attrs, opts)
 
+    kind = if layout == :block, do: tag_kind(opts, name), else: nil
+
     body =
-      case layout do
-        :inline -> inline_chip_body(name, roles, inner)
-        :block -> block_chip_body(name, roles, inner, opts)
+      case {layout, kind} do
+        {:inline, _} -> inline_chip_body(name, roles, inner)
+        {:block, nil} -> block_chip_body(name, roles, inner, opts)
+        {:block, kind} -> kind_chip_body(kind, name, attrs, roles, inner, opts)
       end
 
     # `has-media` lets the stylesheet know the nameplate is sitting over a
@@ -3941,6 +3966,7 @@ defmodule Leaf do
     classes =
       case layout do
         :inline -> "leaf-atomic leaf-atomic-inline"
+        :block when kind != nil -> "leaf-atomic leaf-atomic-block leaf-atomic-kind-#{kind}"
         :block when roles.media != "" -> "leaf-atomic leaf-atomic-block leaf-atomic-has-media"
         :block -> "leaf-atomic leaf-atomic-block"
       end
@@ -3948,6 +3974,141 @@ defmodule Leaf do
     ~s(<span class="#{classes}" contenteditable="false" data-leaf-raw="#{escape_attr(raw)}") <>
       ~s( data-leaf-tag="#{escape_attr(name)}" title="#{escape_attr(preserved_tooltip(raw))}">) <>
       body <> ~s(</span>)
+  end
+
+  @tag_kinds ~w(headline split button frame audio)a
+
+  defp normalize_tag_previews(map) when is_map(map) do
+    for {tag, kind} <- map,
+        kind = normalize_kind(kind),
+        into: %{},
+        do: {String.downcase(to_string(tag)), kind}
+  end
+
+  defp normalize_tag_previews(_), do: %{}
+
+  defp normalize_kind(kind) when kind in @tag_kinds, do: kind
+
+  defp normalize_kind(kind) when is_binary(kind) do
+    Enum.find(@tag_kinds, &(Atom.to_string(&1) == kind))
+  end
+
+  defp normalize_kind(_), do: nil
+
+  defp tag_kind(%{tag_previews: previews}, name) when is_map(previews),
+    do: Map.get(previews, String.downcase(name))
+
+  defp tag_kind(_opts, _name), do: nil
+
+  # A kind's body. Same nameplate and edit hint as the generic box, so the
+  # block still reads as one thing you can double-click; what differs is the
+  # preview, drawn like the component it stands for. Everything is phrasing
+  # content (spans) because the chip lives inside a `<p>`; the stylesheet
+  # does the block layout.
+  defp kind_chip_body(kind, name, attrs, roles, inner, opts) do
+    nameplate = ~s(<span class="leaf-atomic-name">#{escape_text(name)}</span>)
+    hint = ~s(<span class="leaf-atomic-hint">#{escape_text(t("Double-click to edit"))}</span>)
+
+    nameplate <> hint <> kind_preview(kind, attrs, roles, inner, opts)
+  end
+
+  defp kind_preview(:headline, attrs, roles, inner, _opts) do
+    text = first_present([render_body(inner), escape_text(roles.title)], t("Headline text"))
+    stretch = attr_value(attrs, "stretch")
+
+    ~s(<span class="leaf-kind-headline">#{text}</span>) <>
+      if(stretch == "",
+        do: "",
+        else:
+          ~s(<span class="leaf-kind-meta">#{escape_text(t("stretch"))} #{escape_text(stretch)}</span>)
+      )
+  end
+
+  defp kind_preview(:split, attrs, roles, inner, _opts) do
+    side = if String.downcase(attr_value(attrs, "side")) == "right", do: "right", else: "left"
+    {children, inner} = nested_tags(inner, %{})
+    body = first_present([render_body(inner)], "")
+
+    picture =
+      case roles.media do
+        "" ->
+          ~s(<span class="leaf-kind-placeholder">#{escape_text(t("Picture"))}</span>)
+
+        url ->
+          ~s(<img class="leaf-kind-picture" src="#{escape_attr(url)}" alt="#{escape_attr(attr_value(attrs, "alt"))}" loading="lazy">)
+      end
+
+    meta =
+      attrs
+      |> Enum.reject(fn {k, v} ->
+        String.downcase(k) in ~w(src file_uuid side alt image) or String.trim(v) == ""
+      end)
+      |> Enum.map_join(" · ", fn {k, v} -> "#{k} #{truncate(v, 24)}" end)
+
+    ~s(<span class="leaf-kind-split leaf-kind-split-#{side}">) <>
+      ~s(<span class="leaf-kind-split-media">#{picture}</span>) <>
+      ~s(<span class="leaf-kind-split-text">#{body}#{children}</span></span>) <>
+      if(meta == "", do: "", else: ~s(<span class="leaf-kind-meta">#{escape_text(meta)}</span>))
+  end
+
+  defp kind_preview(:button, attrs, roles, inner, _opts) do
+    label =
+      first_present(
+        [render_body(inner), escape_text(roles.cta_label), escape_text(roles.title)],
+        t("Button")
+      )
+
+    link = first_present([roles.link, attr_value(attrs, "href")], "")
+
+    ~s(<span class="leaf-kind-button">#{label}</span>) <>
+      if(link == "",
+        do: "",
+        else: ~s(<span class="leaf-kind-meta">→ #{escape_text(truncate(link, 60))}</span>)
+      )
+  end
+
+  defp kind_preview(:frame, attrs, roles, _inner, _opts) do
+    src = first_present([attr_value(attrs, "src"), roles.link], "")
+    height = attr_value(attrs, "height")
+    title = first_present([escape_text(roles.title)], t("Embedded page"))
+
+    ~s(<span class="leaf-kind-frame">) <>
+      ~s(<span class="leaf-kind-frame-title">#{title}</span>) <>
+      ~s(<span class="leaf-kind-frame-url">#{if src == "", do: escape_text(t("No address yet")), else: escape_text(truncate(src, 70))}</span>) <>
+      if(height == "",
+        do: "",
+        else: ~s(<span class="leaf-kind-meta">#{escape_text(t("height"))} #{escape_text(height)}</span>)
+      ) <> ~s(</span>)
+  end
+
+  defp kind_preview(:audio, attrs, roles, _inner, _opts) do
+    title =
+      first_present(
+        [escape_text(roles.title), escape_text(file_label(attr_value(attrs, "src")))],
+        t("Audio")
+      )
+
+    ~s(<span class="leaf-kind-audio"><span class="leaf-kind-audio-play">▶</span>) <>
+      ~s(<span class="leaf-kind-audio-bar"></span>) <>
+      ~s(<span class="leaf-kind-audio-title">#{title}</span></span>)
+  end
+
+  # The tag's body as already-escaped, inline-safe HTML; "" when empty.
+  defp render_body(inner) do
+    case String.trim(inner) do
+      "" -> ""
+      trimmed -> render_inner_markdown(trimmed)
+    end
+  end
+
+  defp attr_value(attrs, key) do
+    Enum.find_value(attrs, "", fn {k, v} ->
+      if String.downcase(k) == key and String.trim(v) != "", do: String.trim(v)
+    end)
+  end
+
+  defp first_present(values, default) do
+    Enum.find(values, default, &(&1 not in ["", nil]))
   end
 
   # The host's answer to "which picture is this tag?" (`:media_url`), used

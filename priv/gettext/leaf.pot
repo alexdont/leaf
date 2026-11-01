@@ -30,6 +30,9 @@ msgstr ""
 msgid "Align Right"
 msgstr ""
 
+msgid "Audio"
+msgstr ""
+
 msgid "Blockquote"
 msgstr ""
 
@@ -37,6 +40,9 @@ msgid "Bold"
 msgstr ""
 
 msgid "Bullet List"
+msgstr ""
+
+msgid "Button"
 msgstr ""
 
 msgid "By URL"
@@ -81,6 +87,9 @@ msgstr ""
 msgid "Download .md"
 msgstr ""
 
+msgid "Embedded page"
+msgstr ""
+
 msgid "Emoji"
 msgstr ""
 
@@ -103,6 +112,9 @@ msgid "Heading"
 msgstr ""
 
 msgid "Headings"
+msgstr ""
+
+msgid "Headline text"
 msgstr ""
 
 msgid "Horizontal Rule"
@@ -171,10 +183,16 @@ msgstr ""
 msgid "More inserts"
 msgstr ""
 
+msgid "No address yet"
+msgstr ""
+
 msgid "No matches"
 msgstr ""
 
 msgid "Numbered List"
+msgstr ""
+
+msgid "Picture"
 msgstr ""
 
 msgid "Redo"
@@ -249,5 +267,11 @@ msgstr ""
 msgid "Visual mode"
 msgstr ""
 
+msgid "height"
+msgstr ""
+
 msgid "results"
+msgstr ""
+
+msgid "stretch"
 msgstr ""

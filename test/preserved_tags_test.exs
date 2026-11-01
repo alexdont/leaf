@@ -438,4 +438,139 @@ defmodule Leaf.PreservedTagsTest do
       refute insert("<Image file_uuid=\"a\"/>", preserve_tags: []) |> Map.has_key?(:chip)
     end
   end
+
+  describe "tag_previews kinds" do
+    @previews %{
+      "Headline" => :headline,
+      "Showcase" => :split,
+      "CTA" => :button,
+      "Embed" => :frame,
+      "Audio" => :audio
+    }
+
+    defp kinds(source, tags, extra \\ []) do
+      visual_html([content: source, preserve_tags: tags, tag_previews: @previews] ++ extra)
+    end
+
+    test "a headline is its text, set large, with no attribute line" do
+      html = kinds(~s|<Headline stretch="30">Big words</Headline>|, ["Headline"])
+
+      assert html =~ "leaf-atomic-kind-headline"
+      assert html =~ ~s|<span class="leaf-kind-headline">Big words</span>|
+      refute html =~ "leaf-atomic-rest"
+    end
+
+    test "a showcase puts the picture beside the text, on its side" do
+      source =
+        "<Showcase file_uuid=\"u1\" side=\"right\" height=\"medium\">\n### Hi\n\nBody\n</Showcase>"
+
+      html =
+        kinds(source, ["Showcase"],
+          media_url: fn "Showcase", %{"file_uuid" => u} -> "/file/#{u}" end
+        )
+
+      assert html =~ "leaf-kind-split-right"
+      assert html =~ ~s|<img class="leaf-kind-picture" src="/file/u1"|
+      assert html =~ ~s|<strong class="leaf-atomic-h">Hi</strong>|
+      assert html =~ "height medium"
+    end
+
+    test "a showcase with no picture says so, and defaults to the left" do
+      html = kinds(~s|<Showcase src="">Words</Showcase>|, ["Showcase"])
+
+      assert html =~ "leaf-kind-split-left"
+      assert html =~ ~s|<span class="leaf-kind-placeholder">Picture</span>|
+      refute html =~ "<img class=\"leaf-kind-picture\""
+    end
+
+    test "a CTA is a button, with where it goes" do
+      html = kinds(~s|<CTA href="/signup">Join us</CTA>|, ["CTA"])
+
+      assert html =~ ~s|<span class="leaf-kind-button">Join us</span>|
+      assert html =~ "→ /signup"
+    end
+
+    test "an embed shows its title, address and height" do
+      html = kinds(~s|<Embed src="https://x.test/demo" height="320" title="Demo" />|, ["Embed"])
+
+      assert html =~ ~s|<span class="leaf-kind-frame-title">Demo</span>|
+      assert html =~ "https://x.test/demo"
+      assert html =~ "height 320"
+    end
+
+    test "an embed with no address says so" do
+      html = kinds(~s|<Embed src="" height="480" title="Try it" />|, ["Embed"])
+
+      assert html =~ "No address yet"
+    end
+
+    test "audio is a player bar with its title" do
+      html = kinds(~s|<Audio file_uuid="a" title="Episode"/>|, ["Audio"])
+
+      assert html =~ "leaf-kind-audio-play"
+      assert html =~ ~s|<span class="leaf-kind-audio-title">Episode</span>|
+    end
+
+    test "a tag with no kind, or an unknown one, keeps the generic box" do
+      html =
+        visual_html(
+          content: ~s|<Hero title="Hi"/>|,
+          preserve_tags: ["Hero"],
+          tag_previews: %{"Hero" => :nonsense, "Other" => :button}
+        )
+
+      assert html =~ "leaf-atomic-title"
+      refute html =~ "leaf-atomic-kind-"
+    end
+
+    test "kind names are matched without regard to case, and may be strings" do
+      html =
+        visual_html(
+          content: ~s|<CTA>Go</CTA>|,
+          preserve_tags: ["CTA"],
+          tag_previews: %{"cta" => "button"}
+        )
+
+      assert html =~ "leaf-kind-button"
+    end
+
+    test "an inline tag stays a word even with a kind" do
+      html = kinds("Press <CTA>Go</CTA> now", ["CTA"])
+
+      assert html =~ "leaf-atomic-inline"
+      refute html =~ "leaf-kind-button"
+    end
+
+    test "the user's text is escaped in every kind" do
+      html = kinds(~s|<Embed src="x" title="Tom & Jerry <i" />|, ["Embed"])
+
+      [chip] = Regex.run(~r|<span class="leaf-atomic leaf-atomic-block.*?</p>|s, html)
+
+      assert chip =~ "Tom &amp; Jerry"
+      refute String.replace(chip, ~r/data-leaf-raw="[^"]*"/, "") =~ "Jerry <"
+    end
+
+    test "an inserted tag arrives drawn as its kind" do
+      socket = %Phoenix.LiveView.Socket{
+        assigns: %{
+          __changed__: %{},
+          id: "ed",
+          preserve_tags: ["Headline"],
+          tag_previews: %{"Headline" => :headline}
+        }
+      }
+
+      {:ok, socket} =
+        Leaf.update(
+          %{
+            action: :insert_markdown,
+            text: ~s|\n<Headline stretch="30">Headline text</Headline>\n|
+          },
+          socket
+        )
+
+      [["leaf-command:ed", payload]] = socket.private.live_temp.push_events
+      assert payload.chip =~ ~s|<span class="leaf-kind-headline">Headline text</span>|
+    end
+  end
 end
