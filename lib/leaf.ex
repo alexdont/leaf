@@ -1673,9 +1673,11 @@ defmodule Leaf do
               class={["btn btn-xs px-2", (@mode == :hybrid && "btn-active") || "btn-ghost"]}
               title={t("Hybrid mode")}
             >
+              <%!-- The sparkle is drawn off-center in its 20x20 box (ink centre
+                   at 8.5, 11.58), so the viewBox is shifted onto it. --%>
               <svg
                 xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 20 20"
+                viewBox="-1.5 1.58 20 20"
                 fill="currentColor"
                 class="w-3.5 h-3.5"
               >
@@ -1716,7 +1718,7 @@ defmodule Leaf do
               class={["btn btn-xs px-2", (@mode == :markdown && "btn-active") || "btn-ghost"]}
               title={t("Markdown mode")}
             >
-              <svg viewBox="26 26 168 76" fill="currentColor" class="w-5 h-2.5">
+              <svg viewBox="23.5 26 168 76" fill="currentColor" class="w-5 h-2.5">
                 <path d="M30 98V30h20l20 25 20-25h20v68H90V59L70 84 50 59v39zm125 0l-30-33h20V30h20v35h20z" />
               </svg>
             </button>
