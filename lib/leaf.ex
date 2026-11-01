@@ -446,6 +446,20 @@ defmodule Leaf do
     """
   )
 
+  attr(:media_url, :any,
+    default: nil,
+    doc: """
+    A function `(tag_name, attrs) -> url | nil` that lets a host say which
+    picture a preserved tag stands for. `attrs` is a map of the tag's
+    attributes (`%{"file_uuid" => "…", "alt" => "…"}`); return a URL to draw
+    it as a thumbnail, or `nil` for none. Leaf cannot guess that a
+    `file_uuid` is an image or turn it into a URL, so without this a
+    `<Image file_uuid="…"/>` or a `<Gallery>` of them previews as text.
+    Asked while the document is drawn, and again when a tag is inserted from
+    the host, so keep it cheap. A raise is treated as `nil`.
+    """
+  )
+
   attr(:maxlength, :integer, default: nil)
   attr(:spellcheck, :boolean, default: true)
   attr(:dir, :string, default: "ltr", values: ["ltr", "rtl", "auto"])
@@ -708,11 +722,19 @@ defmodule Leaf do
   def update(%{action: :insert_markdown} = assigns, socket) do
     text = Map.get(assigns, :text, "")
 
-    {:ok,
-     push_event(socket, "leaf-command:#{socket.assigns.id}", %{
-       action: "insert_markdown",
-       text: text
-     })}
+    payload = %{action: "insert_markdown", text: text}
+
+    # A text that is exactly one preserved tag goes in as the finished chip,
+    # drawn here with the same code (and the host's `:media_url`) as when the
+    # document loads. The browser can only draw a bare approximation: no
+    # markdown renderer, no way to turn a `file_uuid` into a picture.
+    payload =
+      case inserted_chip(text, socket) do
+        nil -> payload
+        chip -> Map.put(payload, :chip, chip)
+      end
+
+    {:ok, push_event(socket, "leaf-command:#{socket.assigns.id}", payload)}
   end
 
   # Reply to a `{:leaf_suggest, …}` request. `trigger`, `query` and `seq` are
@@ -2550,7 +2572,7 @@ defmodule Leaf do
     {:noreply,
      push_event(socket, "leaf-preserved-html:#{socket.assigns.id}", %{
        token: token,
-       html: preserved_chip(raw, :block)
+       html: preserved_chip(raw, :block, render_opts(socket))
      })}
   end
 
@@ -3657,7 +3679,7 @@ defmodule Leaf do
 
         protected
         |> markdown_to_html()
-        |> restore_preserved_tags(store)
+        |> restore_preserved_tags(store, opts)
       end
 
     html = if Map.get(opts, :hashtags, false), do: decorate_hashtags(html), else: html
@@ -3669,6 +3691,7 @@ defmodule Leaf do
   defp render_opts(socket) do
     %{
       preserve_tags: preserve_tags(socket),
+      media_url: Map.get(socket.assigns, :media_url),
       hashtags:
         socket.assigns
         |> Map.get(:suggestions, [])
@@ -3805,35 +3828,76 @@ defmodule Leaf do
 
   defp normalize_link_target(_), do: %{href: nil, exists: false, title: nil}
 
-  # Replace each occurrence of a preserved tag with an inert text token,
-  # returning {protected_markdown, %{token => original_source}}.
+  defp inserted_chip(text, socket) do
+    preserve = preserve_tags(socket)
+    trimmed = String.trim(text)
+
+    if preserve == [] or trimmed == "" do
+      nil
+    else
+      {protected, store} = extract_preserved_tags(trimmed, preserve)
+
+      case {String.trim(protected), Map.to_list(store)} do
+        {token, [{token, raw}]} -> preserved_chip(raw, :block, render_opts(socket))
+        _ -> nil
+      end
+    end
+  end
+
+  # Replace each OUTERMOST occurrence of a preserved tag with an inert text
+  # token, returning {protected_markdown, %{token => original_source}}.
+  #
+  # Outermost matters: `<Gallery><Image …/></Gallery>` has two preserved
+  # tags in it, and the inner one used to be replaced first, which left the
+  # outer match without its source to find — the Gallery's own tags were
+  # then handed to the markdown parser, which swallowed them. A tag inside
+  # another is part of that tag's source and travels with it.
   defp extract_preserved_tags(markdown, preserve_tags) do
-    matches =
+    ranges =
       preserve_tags
       |> Enum.flat_map(fn tag ->
         t = Regex.escape(to_string(tag))
         {:ok, re} = Regex.compile("<#{t}\\b[^>]*?/>|<#{t}\\b[^>]*?>.*?</#{t}>", "is")
-        re |> Regex.scan(markdown) |> Enum.map(&hd/1)
+        re |> Regex.scan(markdown, return: :index) |> Enum.map(&hd/1)
       end)
-      |> Enum.uniq()
+      |> Enum.sort_by(fn {start, len} -> {start, -len} end)
+      |> outermost_ranges()
 
-    matches
-    |> Enum.with_index()
-    |> Enum.reduce({markdown, %{}}, fn {match, i}, {md, store} ->
-      token = "LEAFPRESERVED#{i}LEAFEND"
-      {String.replace(md, match, token), Map.put(store, token, match)}
-    end)
+    {protected, store, _i} =
+      ranges
+      |> Enum.reverse()
+      |> Enum.with_index()
+      |> Enum.reduce({markdown, %{}, 0}, fn {{start, len}, i}, {md, store, _} ->
+        token = "LEAFPRESERVED#{i}LEAFEND"
+        raw = binary_part(md, start, len)
+        before = binary_part(md, 0, start)
+        rest = binary_part(md, start + len, byte_size(md) - start - len)
+        {before <> token <> rest, Map.put(store, token, raw), i}
+      end)
+
+    {protected, store}
+  end
+
+  # Ranges sorted by start (longest first on a tie), keeping those that do
+  # not begin inside one already kept.
+  defp outermost_ranges(ranges) do
+    {kept, _end} =
+      Enum.reduce(ranges, {[], 0}, fn {start, len}, {acc, last_end} ->
+        if start >= last_end, do: {[{start, len} | acc], start + len}, else: {acc, last_end}
+      end)
+
+    Enum.reverse(kept)
   end
 
   # Swap tokens back for atomic placeholder spans carrying the verbatim
   # source in a `data-leaf-raw` attribute. A standalone token that MDEx
   # wrapped in its own `<p>` becomes the taller block chip; an inline token
   # stays a compact inline one.
-  defp restore_preserved_tags(html, store) do
+  defp restore_preserved_tags(html, store, opts) do
     Enum.reduce(store, html, fn {token, raw}, acc ->
       acc
-      |> String.replace("<p>#{token}</p>", "<p>#{preserved_chip(raw, :block)}</p>")
-      |> String.replace(token, preserved_chip(raw, :inline))
+      |> String.replace("<p>#{token}</p>", "<p>#{preserved_chip(raw, :block, opts)}</p>")
+      |> String.replace(token, preserved_chip(raw, :inline, opts))
     end)
   end
 
@@ -3860,14 +3924,15 @@ defmodule Leaf do
   #
   # Every child element is phrasing content, because the block form still
   # sits inside the `<p>` MDEx produced.
-  defp preserved_chip(raw, layout) do
+  defp preserved_chip(raw, layout, opts) do
     {name, attrs, inner} = parse_preserved_tag(raw)
     roles = attribute_roles(attrs)
+    roles = with_host_media(roles, name, attrs, opts)
 
     body =
       case layout do
         :inline -> inline_chip_body(name, roles, inner)
-        :block -> block_chip_body(name, roles, inner)
+        :block -> block_chip_body(name, roles, inner, opts)
       end
 
     # `has-media` lets the stylesheet know the nameplate is sitting over a
@@ -3885,17 +3950,44 @@ defmodule Leaf do
       body <> ~s(</span>)
   end
 
+  # The host's answer to "which picture is this tag?" (`:media_url`), used
+  # only when the tag carries no picture of its own that Leaf can draw.
+  defp with_host_media(%{media: ""} = roles, name, attrs, opts) do
+    case host_media_url(opts, name, attrs) do
+      "" -> roles
+      url -> %{roles | media: url}
+    end
+  end
+
+  defp with_host_media(roles, _name, _attrs, _opts), do: roles
+
+  defp host_media_url(%{media_url: fun}, name, attrs) when is_function(fun, 2) do
+    case fun.(name, Map.new(attrs)) do
+      url when is_binary(url) -> if url_ref?(url), do: url, else: ""
+      _ -> ""
+    end
+  rescue
+    _ -> ""
+  catch
+    _, _ -> ""
+  end
+
+  defp host_media_url(_opts, _name, _attrs), do: ""
+
   # The nameplate sits in the top-RIGHT corner, which is the one structural
   # choice here worth defending: it hands the primary reading position —
   # top-left, where the eye lands — to the writer's own content, and puts
   # the machine fact where it can be found but not tripped over.
-  defp block_chip_body(name, roles, inner) do
+  defp block_chip_body(name, roles, inner, opts) do
+    {children, inner} = nested_tags(inner, opts)
+
     preview =
       [
         role_span(roles.eyebrow, "leaf-atomic-eyebrow"),
         role_span(roles.title, "leaf-atomic-title"),
         role_span(roles.subtitle, "leaf-atomic-subtitle"),
         preserved_inner_preview(inner),
+        children,
         chip_cta(roles),
         chip_rest_attrs(roles.rest)
       ]
@@ -3915,6 +4007,43 @@ defmodule Leaf do
       end
 
     nameplate <> hint <> content
+  end
+
+  # Tags nested inside a tag's body (`<Gallery><Image …/><Image …/></Gallery>`)
+  # are not markdown, so the body's markdown pass would drop them and the
+  # container would look empty. They are pulled out and drawn as a row:
+  # a thumbnail where the host can name a picture, else a small labelled
+  # chiplet. Returns {row_html, body_without_them}.
+  @nested_tag_re ~r{<([A-Z][\w.-]*)\b([^>]*?)/>|<([A-Z][\w.-]*)\b([^>]*?)>(.*?)</\3>}s
+
+  defp nested_tags(inner, opts) do
+    found = Regex.scan(@nested_tag_re, inner)
+
+    items =
+      Enum.map(found, fn
+        [_whole, name, attr_src] -> nested_item(name, attr_src, opts)
+        [_whole, "", "", name, attr_src, _body] -> nested_item(name, attr_src, opts)
+        [_whole, name, attr_src | _] -> nested_item(name, attr_src, opts)
+      end)
+
+    row =
+      if items == [],
+        do: "",
+        else: ~s(<span class="leaf-atomic-children">#{Enum.join(items)}</span>)
+
+    {row, Regex.replace(@nested_tag_re, inner, "")}
+  end
+
+  defp nested_item(name, attr_src, opts) do
+    attrs = parse_attr_source(attr_src)
+    roles = attribute_roles(attrs) |> with_host_media(name, attrs, opts)
+    label = [roles.title, roles.subtitle, file_label(roles.source)] |> Enum.find("", &(&1 != ""))
+
+    if roles.media != "" do
+      ~s(<img class="leaf-atomic-thumb" src="#{escape_attr(roles.media)}" alt="#{escape_attr(label)}" title="#{escape_attr(label)}" loading="lazy">)
+    else
+      ~s(<span class="leaf-atomic-chiplet">#{escape_text(name)}#{if label != "", do: " " <> escape_text(truncate(label, 24)), else: ""}</span>)
+    end
   end
 
   # Inline tags interrupt a sentence, so they stay the size of a word: the
@@ -3985,6 +4114,17 @@ defmodule Leaf do
 
   @preserved_attr_re ~r/([A-Za-z_:][\w.:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/
 
+  defp parse_attr_source(source) do
+    @preserved_attr_re
+    |> Regex.scan(source)
+    |> Enum.map(fn
+      [_, key, dq, "", ""] -> {key, dq}
+      [_, key, "", sq, ""] -> {key, sq}
+      [_, key, "", "", bare] -> {key, bare}
+      [_, key | rest] -> {key, Enum.find(rest, "", &(&1 != ""))}
+    end)
+  end
+
   # {tag_name, [{attr, value}], inner_source}. Only the OPENING tag is
   # scanned for attributes — attributes on nested tags belong to those.
   defp parse_preserved_tag(raw) do
@@ -4000,15 +4140,7 @@ defmodule Leaf do
         _ -> raw
       end
 
-    attrs =
-      @preserved_attr_re
-      |> Regex.scan(open_tag)
-      |> Enum.map(fn
-        [_, key, dq, "", ""] -> {key, dq}
-        [_, key, "", sq, ""] -> {key, sq}
-        [_, key, "", "", bare] -> {key, bare}
-        [_, key | rest] -> {key, Enum.find(rest, "", &(&1 != ""))}
-      end)
+    attrs = parse_attr_source(open_tag)
 
     inner =
       case Regex.run(~r/^\s*<[^>]*[^\/]>(.*)<\/[A-Za-z][\w.-]*\s*>\s*$/s, raw) do
@@ -4096,6 +4228,8 @@ defmodule Leaf do
     end)
   end
 
+  defp url_ref?(value), do: Regex.match?(@url_ref_re, value)
+
   defp image_attr?({key, value}) do
     key = String.downcase(key)
 
@@ -4144,6 +4278,7 @@ defmodule Leaf do
         |> String.replace(~r{<!--\s*raw HTML omitted\s*-->}i, "")
         |> String.replace(~r{</p>\s*<p>}, "<br>")
         |> String.replace(~r{^\s*<p>|</p>\s*$}, "")
+        |> flatten_block_children()
         # The chip is not editable, but a real `href` inside a
         # contenteditable is still a live target for ctrl-click and drag.
         # Keep the look, drop the destination.
@@ -4153,6 +4288,28 @@ defmodule Leaf do
       {:error, _} ->
         escape_text(source)
     end
+  end
+
+  # The chip is phrasing content inside MDEx's `<p>`, so a heading, list or
+  # quote in a tag's body cannot stay a block: the HTML parser closes the
+  # `<p>` at the first one and the chip falls apart — its nameplate and
+  # attributes land AFTER the body, outside the box. Each block becomes an
+  # inline element that is still shown on its own line.
+  defp flatten_block_children(html) do
+    html
+    |> String.replace(~r{<h[1-6][^>]*>(.*?)</h[1-6]>\s*}is, ~s(<strong class="leaf-atomic-h">\\1</strong><br>))
+    |> String.replace(~r{<li[^>]*>(.*?)</li>\s*}is, ~s(<span class="leaf-atomic-li">\\1</span><br>))
+    |> String.replace(~r{</?(?:ul|ol)[^>]*>\s*}i, "")
+    |> String.replace(~r{<blockquote[^>]*>\s*}i, ~s(<span class="leaf-atomic-quote">))
+    |> String.replace(~r{\s*</blockquote>\s*}i, "</span><br>")
+    |> String.replace(~r{<pre[^>]*>\s*(?:<code[^>]*>)?(.*?)(?:</code>)?\s*</pre>\s*}is, ~s(<code class="leaf-atomic-pre">\\1</code><br>))
+    |> String.replace(~r{<hr\s*/?>\s*}i, "<br>")
+    # A paragraph after a heading or list is not the first or last one, so
+    # the unwrapping above never saw it.
+    |> String.replace(~r{<p[^>]*>}i, "")
+    |> String.replace(~r{</p>\s*}i, "<br>")
+    |> String.replace(~r/(?:<br\s*\/?>\s*){2,}/i, "<br>")
+    |> String.replace(~r{(?:<br\s*/?>\s*)+$}i, "")
   end
 
   defp preserved_tooltip(raw) do

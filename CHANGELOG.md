@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Added
+
+- **`media_url` — the host says which picture a preserved tag is.** A
+  function `(tag_name, attrs) -> url | nil`. Leaf cannot tell that a
+  `file_uuid` is an image or turn it into a URL, so `<Image file_uuid=…/>`
+  previewed as a line of text. With it, the tag draws its picture as the
+  banner, and a tag's nested tags draw as thumbnails. Asked again when a
+  tag is inserted from the host, so a freshly inserted block looks like
+  the one that loads with the document.
+- **A tag inserted with `send_update(…, action: :insert_markdown)` arrives
+  as the finished chip** drawn by the server, instead of the browser's
+  approximation (no rendered children, no pictures).
+- **Tags inside tags are shown.** `<Gallery><Image …/>…</Gallery>` previews
+  as a row of thumbnails (or small labelled chiplets without `media_url`)
+  instead of an empty box.
+
 ### Changed
 
 - **Toolbar glyphs match the icons.** The letter buttons (H, B, I, S, `</>`)
@@ -11,6 +27,16 @@
 
 ### Fixed
 
+- **A preserved tag inside another was lost.** `<Gallery>` wrapping
+  `<Image/>` tags: the inner tags were swapped out first, the Gallery's own
+  source then no longer matched, and its tags were handed to the markdown
+  parser, which swallowed them. Only the outermost tag is extracted now; a
+  nested tag is part of its parent's source and round-trips with it.
+- **A heading, list or quote in a tag's body broke the chip apart.** The
+  chip is phrasing content inside a `<p>`; a block element closed the `<p>`
+  and threw the nameplate and attribute line out below the box, with the
+  body spilling into the document as loose paragraphs. Block children are
+  drawn as inline elements, one per line.
 - **Pasted lines go in at the caret, like typed ones.** Triple-clicking a
   line and copying it puts `<p>text</p>` plus Chrome's trailing
   `<br class="Apple-interchange-newline">` on the clipboard, and every

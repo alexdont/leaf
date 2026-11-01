@@ -250,6 +250,35 @@
     "  max-height: 6rem; width: auto; margin: 0.4em 0 0; border-radius: 0.25rem;",
     "}",
 
+    // Block children flattened to inline elements (see flatten_block_children
+    // in lib/leaf.ex): still one per line, but safe inside the chip's <p>.
+    ".content-editor-visual .leaf-atomic-h { font-size: 1.05em; font-weight: 650; }",
+    ".content-editor-visual .leaf-atomic-li::before { content: '• '; opacity: 0.6; }",
+    ".content-editor-visual .leaf-atomic-quote {",
+    "  display: inline-block; padding-left: 0.7em;",
+    "  border-left: 3px solid color-mix(in oklab, var(--color-base-content, #1f2937) 25%, transparent);",
+    "}",
+    ".content-editor-visual .leaf-atomic-pre {",
+    "  font: 400 0.85em ui-monospace, SFMono-Regular, monospace; white-space: pre-wrap;",
+    "}",
+
+    // Tags nested in a tag (a Gallery's images): a row of thumbnails, or
+    // small labelled chiplets where there is no picture to draw.
+    ".content-editor-visual .leaf-atomic-children {",
+    "  display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-top: 0.55em;",
+    "}",
+    ".content-editor-visual .leaf-atomic-thumb {",
+    "  display: block; width: 4.5rem; height: 3.4rem; object-fit: cover;",
+    "  border-radius: 0.3rem; cursor: default;",
+    "  background: color-mix(in oklab, var(--color-base-content, #1f2937) 6%, transparent);",
+    "}",
+    ".content-editor-visual .leaf-atomic-chiplet {",
+    "  display: inline-block; padding: 0.15em 0.55em; border-radius: 0.3rem;",
+    "  font-size: 0.78em;",
+    "  border: 1px dashed color-mix(in oklab, var(--color-base-content, #1f2937) 30%, transparent);",
+    "  color: color-mix(in oklab, var(--color-base-content, #1f2937) 65%, transparent);",
+    "}",
+
     // A label with a destination is a button on the published page, so it
     // previews as one — with the destination alongside, since "where does
     // this go" is usually why you looked.
@@ -17293,7 +17322,7 @@
             }
           } else if (this._visualEl) {
             this._visualEl.focus();
-            var chip = this._maybeAtomicChip(text);
+            var chip = payload.chip || this._maybeAtomicChip(text);
             if (chip) {
               // A preserved custom tag — drop it in as a finished chip.
               document.execCommand("insertHTML", false, chip);
