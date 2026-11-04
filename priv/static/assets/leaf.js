@@ -1038,10 +1038,10 @@
         var h = node.getAttribute("height");
         var imgAlign = node.getAttribute("data-align");
         if (w || h || imgAlign) {
-          var tag = '<img src="' + src + '" alt="' + alt + '"';
-          if (w) tag += ' width="' + w + '"';
-          if (h) tag += ' height="' + h + '"';
-          if (imgAlign) tag += ' data-align="' + imgAlign + '"';
+          var tag = '<img src="' + escapeAttr(src) + '" alt="' + escapeAttr(alt) + '"';
+          if (w) tag += ' width="' + escapeAttr(w) + '"';
+          if (h) tag += ' height="' + escapeAttr(h) + '"';
+          if (imgAlign) tag += ' data-align="' + escapeAttr(imgAlign) + '"';
           tag += ' />';
           return tag;
         }
@@ -1054,13 +1054,13 @@
           node.getAttribute("data-align") || fimg.getAttribute("data-align");
         var fcap = node.querySelector("figcaption");
         var capText = fcap ? fcap.textContent : "";
-        var out = "\n<figure" + (fAlign ? ' data-align="' + fAlign + '"' : "") + ">";
-        out += '<img src="' + (fimg.getAttribute("src") || "") + '"';
-        out += ' alt="' + (fimg.getAttribute("alt") || "") + '"';
-        if (fimg.getAttribute("width")) out += ' width="' + fimg.getAttribute("width") + '"';
-        if (fimg.getAttribute("height")) out += ' height="' + fimg.getAttribute("height") + '"';
+        var out = "\n<figure" + (fAlign ? ' data-align="' + escapeAttr(fAlign) + '"' : "") + ">";
+        out += '<img src="' + escapeAttr(fimg.getAttribute("src")) + '"';
+        out += ' alt="' + escapeAttr(fimg.getAttribute("alt")) + '"';
+        if (fimg.getAttribute("width")) out += ' width="' + escapeAttr(fimg.getAttribute("width")) + '"';
+        if (fimg.getAttribute("height")) out += ' height="' + escapeAttr(fimg.getAttribute("height")) + '"';
         out += " />";
-        if (capText) out += "<figcaption>" + capText + "</figcaption>";
+        if (capText) out += "<figcaption>" + escapeAttr(capText) + "</figcaption>";
         out += "</figure>\n\n";
         return out;
 
@@ -1296,6 +1296,35 @@
   function cleanPastedHtml(html) {
     var container = document.createElement("div");
     container.innerHTML = html;
+
+    // Nothing that runs. Markup copied from a web page can carry event
+    // handlers, embeds and javascript: links, and insertHTML would put them
+    // to work in this page.
+    container
+      .querySelectorAll(
+        "iframe, object, embed, svg, math, form, button, textarea, select, template, base, frame, frameset, applet, noscript, canvas, audio, video"
+      )
+      .forEach(function (el) {
+        el.remove();
+      });
+
+    container.querySelectorAll("*").forEach(function (el) {
+      Array.prototype.slice.call(el.attributes).forEach(function (attr) {
+        var name = attr.name.toLowerCase();
+        if (
+          name.indexOf("on") === 0 ||
+          name === "srcdoc" ||
+          name === "srcset" ||
+          name === "formaction"
+        ) {
+          el.removeAttribute(attr.name);
+        } else if (name === "href" || name === "src" || name === "xlink:href") {
+          if (!safeUrl(attr.value, el.tagName === "IMG" ? "image" : "link")) {
+            el.removeAttribute(attr.name);
+          }
+        }
+      });
+    });
 
     // Chrome ends a copied line with a <br class="Apple-interchange-newline">
     // that stands for the line's own break. Pasted, it is a stray empty line.
@@ -1625,6 +1654,74 @@
       el = el.parentNode;
     }
     return null;
+  }
+
+  // =========================================================================
+  // Text helpers shared by the serializer and the hook
+  // =========================================================================
+
+  function escapeAttr(value) {
+    return String(value == null ? "" : value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  // A URL fit for an href or a src. Relative paths, fragments, http(s),
+  // mailto and tel pass; an image may also be a data: URL holding a raster
+  // picture (a pasted screenshot with no upload handler is one). Anything
+  // else — javascript:, vbscript:, a data: page or SVG — is null and the
+  // caller leaves it out.
+  function safeUrl(url, kind) {
+    if (typeof url !== "string") return null;
+    var trimmed = url.trim();
+    if (trimmed === "") return null;
+    // Browsers drop tabs, newlines and other control characters from a URL
+    // before reading its scheme, so `java\tscript:` is javascript: to them.
+    var bare = trimmed.replace(/[\u0000-\u0020\u007f-\u009f]/g, "");
+    var scheme = bare.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/);
+    if (!scheme) return trimmed;
+    var name = scheme[1].toLowerCase();
+    if (name === "http" || name === "https" || name === "mailto" || name === "tel") {
+      return trimmed;
+    }
+    if (
+      kind === "image" &&
+      name === "data" &&
+      /^data:image\/(png|jpe?g|gif|webp|avif|bmp)[;,]/i.test(bare)
+    ) {
+      return trimmed;
+    }
+    return null;
+  }
+
+  function isHighSurrogate(unit) {
+    return unit >= 0xd800 && unit <= 0xdbff;
+  }
+
+  function isLowSurrogate(unit) {
+    return unit >= 0xdc00 && unit <= 0xdfff;
+  }
+
+  // Code units in the character that ends at, or starts at, `offset`: two
+  // for an emoji or anything else outside the BMP, which a DOM string holds
+  // as a surrogate pair, one otherwise. Removing one unit of a pair leaves
+  // half a character that JSON cannot carry and the server refuses.
+  function unitsBefore(text, offset) {
+    return offset >= 2 &&
+      isLowSurrogate(text.charCodeAt(offset - 1)) &&
+      isHighSurrogate(text.charCodeAt(offset - 2))
+      ? 2
+      : 1;
+  }
+
+  function unitsAt(text, offset) {
+    return offset + 1 < text.length &&
+      isHighSurrogate(text.charCodeAt(offset)) &&
+      isLowSurrogate(text.charCodeAt(offset + 1))
+      ? 2
+      : 1;
   }
 
   // =========================================================================
@@ -2050,22 +2147,10 @@
       this._collabOperations = this.el.dataset.collabOperations === "true";
       this._collabAwareness = this.el.dataset.collabAwareness === "true";
       this._collabDebug = this.el.dataset.collabDebug === "true";
-      // Which version of the document we are starting from. Null, not zero,
-      // when the host does not say: zero is a claim to have been written
-      // against the beginning of time, and a host that keeps versions would
-      // rebase the first edit over everything that ever happened.
-      this._collabRevision = this.el.dataset.collabRevision
-        ? parseInt(this.el.dataset.collabRevision, 10)
-        : null;
-      // Edits sent but not yet acknowledged. Someone else's operation is
-      // written against a document that does not contain these, so it has to
-      // be rebased over them before it can be applied here.
-      this._pending = [];
-      // Operations are not snapshots and must not wait like them. The snapshot
-      // is the whole document and is what the host saves, so it can afford to
-      // wait for a pause in typing; an operation is a few bytes and is what
-      // another person is sitting there waiting to see.
-      this._collabIntervalMs = parseInt(this.el.dataset.collabInterval || "40", 10);
+      // The revision, the unacknowledged edits and the send interval are not
+      // re-read here: a patch can land while an edit is still in the air,
+      // and forgetting it would rebase the next incoming operation against a
+      // document it was not written for. A new revision arrives by event.
       this._wikiLinksResolve = this.el.dataset.wikilinksResolve !== "false";
       this._wikiLinksFollow = this.el.dataset.wikilinksFollow || "click";
 
@@ -2114,6 +2199,7 @@
     },
 
     destroyed() {
+      this._unlistenDocument();
       if (this._closeTextPrompt) {
         this._closeTextPrompt();
       }
@@ -3561,12 +3647,8 @@
         // checkbox can arrive in.
         this._adoptPastedCheckboxes(container);
 
-        var lines = pastedLines(container);
-        if (lines) {
-          this._insertPastedLines(lines);
-          return;
-        }
-
+        // Before the single-line path below, which inserts the container's
+        // markup line by line and would carry a denied link or image in.
         if (this._denyLinks) {
           container.querySelectorAll("a").forEach(function (anchor) {
             var parent = anchor.parentNode;
@@ -3581,6 +3663,12 @@
           container.querySelectorAll("img").forEach(function (img) {
             img.remove();
           });
+        }
+
+        var lines = pastedLines(container);
+        if (lines) {
+          this._insertPastedLines(lines);
+          return;
         }
 
         document.execCommand("insertHTML", false, container.innerHTML);
@@ -3601,7 +3689,7 @@
       // 5. A bare URL on the clipboard: if text is selected, turn it into a
       //    link to that URL; otherwise drop an autolinked anchor. Anything
       //    else falls through to the browser's native plain-text paste.
-      if (text && /^https?:\/\/\S+$/.test(text.trim())) {
+      if (text && !this._denyLinks && /^https?:\/\/\S+$/.test(text.trim())) {
         var url = text.trim();
         e.preventDefault();
         var sel = window.getSelection();
@@ -5348,6 +5436,25 @@
       return this._buildAtomicChip(trimmed, name);
     },
 
+    // Listeners on `document` outlive the editor unless they go with it:
+    // every one added through here is removed in `destroyed`.
+    _listenDocument: function (type, handler) {
+      if (!this._documentListeners) this._documentListeners = [];
+      document.addEventListener(type, handler);
+      this._documentListeners.push([type, handler]);
+    },
+
+    _unlistenDocument: function () {
+      (this._documentListeners || []).forEach(function (pair) {
+        document.removeEventListener(pair[0], pair[1]);
+      });
+      this._documentListeners = [];
+    },
+
+    _safeUrl: function (url, kind) {
+      return safeUrl(url, kind);
+    },
+
     _escapeHtml: function (s) {
       return String(s == null ? "" : s)
         .replace(/&/g, "&amp;")
@@ -6387,7 +6494,7 @@
         menu.querySelectorAll("[data-toolbar-action]").forEach(function (btn) {
           btn.addEventListener("click", function () { menu.classList.add("hidden"); });
         });
-        document.addEventListener("mousedown", function (e) {
+        self._listenDocument("mousedown", function (e) {
           if (!trigger.contains(e.target) && !menu.contains(e.target)) {
             menu.classList.add("hidden");
           }
@@ -6412,7 +6519,7 @@
             compactMenu.removeAttribute("open");
           });
         });
-        document.addEventListener("mousedown", function (e) {
+        self._listenDocument("mousedown", function (e) {
           if (!compactMenu.contains(e.target)) {
             compactMenu.removeAttribute("open");
           }
@@ -6439,7 +6546,7 @@
             details.removeAttribute("open");
           });
         });
-        document.addEventListener("mousedown", function (e) {
+        self._listenDocument("mousedown", function (e) {
           if (!details.contains(e.target)) {
             details.removeAttribute("open");
           }
@@ -6526,7 +6633,7 @@
       // of a checkbox row and type: the first click had put the row into
       // source form, the delete phase changed its text, the refresh rebuilt
       // it, and the keystroke never landed.
-      document.addEventListener("selectionchange", function () {
+      self._listenDocument("selectionchange", function () {
         if (self._sourceUpdateScheduled) return;
         self._sourceUpdateScheduled = true;
 
@@ -7410,7 +7517,7 @@
       var wrapper;
       if (earliestPattern.type === "link") {
         wrapper = document.createElement("a");
-        wrapper.setAttribute("href", earliest[2] || "");
+        wrapper.setAttribute("href", safeUrl(earliest[2], "link") || "");
       } else {
         wrapper = this._createAutoFormatWrapper(earliestPattern);
       }
@@ -8367,6 +8474,23 @@
       ) {
         endBefore--;
         endAfter--;
+      }
+
+      // The scans compare code units, and two emoji can share their first
+      // one: 😀 and 😁 differ only in the second. A boundary inside a
+      // surrogate pair would send half a character, which JSON cannot carry
+      // and the host refuses — so the start backs off to the pair's first
+      // unit and the end moves past its second.
+      if (
+        start > 0 &&
+        start < before.length &&
+        isHighSurrogate(before.charCodeAt(start - 1))
+      ) {
+        start--;
+      }
+      if (endBefore < before.length && isLowSurrogate(before.charCodeAt(endBefore))) {
+        endBefore++;
+        endAfter++;
       }
 
       return {
@@ -10328,10 +10452,11 @@
             sourceText.slice(0, backSpan[0]) + sourceText.slice(cursorOffset);
           newCursor = backSpan[0];
         } else {
+          var backStep = unitsBefore(sourceText, visibleCut);
           newSource =
-            sourceText.slice(0, visibleCut - 1) +
+            sourceText.slice(0, visibleCut - backStep) +
             sourceText.slice(cursorOffset);
-          newCursor = visibleCut - 1;
+          newCursor = visibleCut - backStep;
         }
       } else {
         if (cursorOffset >= sourceText.length) {
@@ -10416,7 +10541,7 @@
         } else {
           newSource =
             sourceText.slice(0, cursorOffset) +
-            sourceText.slice(cursorOffset + 1);
+            sourceText.slice(cursorOffset + unitsAt(sourceText, cursorOffset));
         }
         newCursor = cursorOffset;
       }
@@ -11154,7 +11279,7 @@
           var bodyHost;
           if (p.type === "link") {
             wrapper = document.createElement("a");
-            wrapper.setAttribute("href", match.href || "");
+            wrapper.setAttribute("href", safeUrl(match.href, "link") || "");
             bodyHost = wrapper;
           } else if (p.isSpoiler) {
             wrapper = document.createElement("span");
@@ -14956,7 +15081,7 @@
           self._restoreEditorSelection(saved);
           if (url === "") {
             document.execCommand("unlink", false, null);
-          } else {
+          } else if (safeUrl(url, "link")) {
             document.execCommand("createLink", false, url);
           }
           if (self._mode === "hybrid") self._refreshSourceBlock();
@@ -15672,8 +15797,8 @@
           value: "https://",
           anchor: this._toolbarAnchor("link"),
           onSubmit: function (url) {
-            url = url.trim();
-            if (url === "") return;
+            url = safeUrl(url, "link");
+            if (!url) return;
             self._visualEl.focus({ preventScroll: true });
             self._restoreEditorSelection(saved);
             document.execCommand("createLink", false, url);
@@ -15812,7 +15937,7 @@
             if (newUrl === "") {
               self._unwrapLink(anchorEl);
               self._dismissLinkPopover();
-            } else {
+            } else if (safeUrl(newUrl, "link")) {
               anchorEl.setAttribute("href", newUrl);
               urlLink.href = newUrl;
               urlLink.textContent = newUrl;
@@ -15931,7 +16056,7 @@
       insertBtn.className = "leaf-image-url-insert";
       insertBtn.textContent = "Insert";
       insertBtn.addEventListener("click", function () {
-        var url = urlInput.value.trim();
+        var url = safeUrl(urlInput.value, "image");
         if (!url) return;
         var alt = altInput.value.trim();
         self._dismissImageUrlDialog();
@@ -15989,7 +16114,7 @@
 
 
     _insertImageByUrl: function (url, alt, savedRange) {
-      var escapedAlt = (alt || "").replace(/"/g, "&quot;");
+      var escapedAlt = escapeAttr(alt);
 
       if (this._mode === "visual" && this._visualEl) {
         this._visualEl.focus();
@@ -15999,7 +16124,7 @@
           sel.removeAllRanges();
           sel.addRange(savedRange);
         }
-        var imgHtml = '<img src="' + url + '" alt="' + escapedAlt + '" draggable="true" />';
+        var imgHtml = '<img src="' + escapeAttr(url) + '" alt="' + escapedAlt + '" draggable="true" />';
         document.execCommand("insertHTML", false, imgHtml);
         this._debouncedPushVisualChange();
       } else if (this._mode === "markdown") {
@@ -17297,13 +17422,14 @@
     _handleCommand: function (payload) {
       switch (payload.action) {
         case "insert_image":
-          if (this._visualEl && payload.url) {
+          var imageUrl = safeUrl(payload.url, "image");
+          if (this._visualEl && imageUrl) {
             this._visualEl.focus();
             var imgHtml =
               '<img src="' +
-              payload.url +
+              escapeAttr(imageUrl) +
               '" alt="' +
-              (payload.alt || "").replace(/"/g, "&quot;") +
+              escapeAttr(payload.alt) +
               '" draggable="true" />';
             document.execCommand("insertHTML", false, imgHtml);
             this._debouncedPushVisualChange();

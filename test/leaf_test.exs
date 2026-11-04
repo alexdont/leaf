@@ -430,6 +430,48 @@ defmodule LeafTest do
     end
   end
 
+  describe "a client that is not ours" do
+    test "mode_changed with a mode that is not one of the four is ignored" do
+      socket = base_socket(mode: :visual)
+
+      for mode <- ["zzz", "ok", "nil", ""] do
+        assert {:noreply, ^socket} = Leaf.handle_event("mode_changed", %{"mode" => mode}, socket)
+      end
+
+      refute_received {:leaf_mode_changed, _}
+    end
+
+    test "mode_changed sanitizes the content it carries" do
+      socket = base_socket(deny: [:links])
+
+      assert {:noreply, socket} =
+               Leaf.handle_event(
+                 "mode_changed",
+                 %{"mode" => "markdown", "content" => "see [docs](https://example.com)"},
+                 socket
+               )
+
+      assert socket.assigns.mode == :markdown
+      refute socket.assigns.content =~ "https://example.com"
+    end
+
+    test "insert_request with an unknown type is ignored" do
+      socket = base_socket([])
+
+      for type <- ["nil", "zzz", "Elixir.File"] do
+        assert {:noreply, ^socket} =
+                 Leaf.handle_event("insert_request", %{"type" => type}, socket)
+      end
+
+      refute_received {:leaf_insert_request, _}
+
+      assert {:noreply, ^socket} =
+               Leaf.handle_event("insert_request", %{"type" => "video"}, socket)
+
+      assert_received {:leaf_insert_request, %{type: :video}}
+    end
+  end
+
   defp base_socket(opts) do
     %Socket{
       assigns: %{

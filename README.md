@@ -213,6 +213,19 @@ Denying the mode you also passed as `mode` falls back to the first allowed mode
 When only one mode survives, the switcher is hidden rather than rendered as a
 single dead tab.
 
+### What reaches the page
+
+Raw HTML in the markdown is rendered (Leaf writes figures, details and sized
+images that way itself), then passed through an allow-list before it is put
+on the page: the tags and attributes Leaf's own markup uses, and URLs that
+are relative or `http`, `https`, `mailto`, `tel`. A `<script>`, an `on*`
+handler or a `javascript:` link is dropped whoever typed it — with live
+editing, that is a collaborator's browser. The link and image dialogs refuse
+the same URLs, and pasted markup is stripped of them.
+
+The markdown you save is still the writer's text. Render it on a public page
+through a sanitizer of your own, as you would any user content.
+
 ### Host toolbar buttons
 
 `toolbar_extra` adds your own buttons; each click sends

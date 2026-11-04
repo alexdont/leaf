@@ -244,8 +244,18 @@ defmodule Leaf do
 
   ## Security Note
 
-  The deny-list regex sanitization in this component is a UX layer only.
-  Consumers must still validate and allow-list content at the persistence boundary.
+  Markdown may carry raw HTML, and Leaf writes some itself (figures, details,
+  sized images), so it is rendered with raw HTML allowed — and then passed
+  through an allow-list (`Leaf.Sanitizer`) before it reaches the page: tags
+  and attributes Leaf's own markup uses, URLs that are relative or `http`,
+  `https`, `mailto`, `tel`. A `<script>`, an `on*` handler or a `javascript:`
+  link in a document is dropped, whoever typed it — with live editing that is
+  another collaborator's browser. The client refuses the same URLs in its link
+  and image dialogs and strips them from pasted markup.
+
+  The `deny` list is a UX layer on top of that, not a security boundary.
+  The markdown a host saves is still the writer's text: render it on a public
+  page through a sanitizer of your own, as you would any user content.
 
   ## Denying features
 
@@ -2619,11 +2629,16 @@ defmodule Leaf do
     {:noreply, assign(socket, :content, sanitized_markdown)}
   end
 
-  def handle_event("mode_changed", %{"mode" => mode} = params, socket) do
-    mode_atom = String.to_existing_atom(mode)
+  def handle_event("mode_changed", %{"mode" => mode} = params, socket)
+      when mode in ["visual", "hybrid", "markdown", "html"] do
     deny = Map.get(socket.assigns, :deny, [])
-    mode_atom = normalize_mode(mode_atom, deny)
-    content = Map.get(params, "content", socket.assigns.content)
+    mode_atom = normalize_mode(String.to_existing_atom(mode), deny)
+
+    content =
+      case Map.get(params, "content") do
+        content when is_binary(content) -> sanitize_markdown(content, deny)
+        _ -> socket.assigns.content
+      end
 
     send(
       self(),
@@ -2636,6 +2651,9 @@ defmodule Leaf do
 
     {:noreply, socket |> assign(:mode, mode_atom) |> assign(:content, content)}
   end
+
+  # Anything but one of the four modes is a client that is not ours.
+  def handle_event("mode_changed", _params, socket), do: {:noreply, socket}
 
   # One splice against the state the host last heard about. `remove` characters
   # at `at` are replaced by `insert`.
@@ -2767,20 +2785,20 @@ defmodule Leaf do
     {:noreply, socket}
   end
 
-  def handle_event("insert_request", %{"type" => type}, socket) do
-    type_atom = String.to_existing_atom(type)
-
+  def handle_event("insert_request", %{"type" => type}, socket) when type in ["image", "video"] do
     send(
       self(),
       {:leaf_insert_request,
        %{
          editor_id: socket.assigns.id,
-         type: type_atom
+         type: String.to_existing_atom(type)
        }}
     )
 
     {:noreply, socket}
   end
+
+  def handle_event("insert_request", _params, socket), do: {:noreply, socket}
 
   def handle_event("html_content_changed", %{"content" => html} = params, socket) do
     sanitized_html = sanitize_html(html, socket.assigns.deny)
@@ -4182,7 +4200,8 @@ defmodule Leaf do
       ~s(<span class="leaf-kind-frame-url">#{if src == "", do: escape_text(t("No address yet")), else: escape_text(truncate(src, 70))}</span>) <>
       if(height == "",
         do: "",
-        else: ~s(<span class="leaf-kind-meta">#{escape_text(t("height"))} #{escape_text(height)}</span>)
+        else:
+          ~s(<span class="leaf-kind-meta">#{escape_text(t("height"))} #{escape_text(height)}</span>)
       ) <> ~s(</span>)
   end
 
@@ -4563,12 +4582,21 @@ defmodule Leaf do
   # inline element that is still shown on its own line.
   defp flatten_block_children(html) do
     html
-    |> String.replace(~r{<h[1-6][^>]*>(.*?)</h[1-6]>\s*}is, ~s(<strong class="leaf-atomic-h">\\1</strong><br>))
-    |> String.replace(~r{<li[^>]*>(.*?)</li>\s*}is, ~s(<span class="leaf-atomic-li">\\1</span><br>))
+    |> String.replace(
+      ~r{<h[1-6][^>]*>(.*?)</h[1-6]>\s*}is,
+      ~s(<strong class="leaf-atomic-h">\\1</strong><br>)
+    )
+    |> String.replace(
+      ~r{<li[^>]*>(.*?)</li>\s*}is,
+      ~s(<span class="leaf-atomic-li">\\1</span><br>)
+    )
     |> String.replace(~r{</?(?:ul|ol)[^>]*>\s*}i, "")
     |> String.replace(~r{<blockquote[^>]*>\s*}i, ~s(<span class="leaf-atomic-quote">))
     |> String.replace(~r{\s*</blockquote>\s*}i, "</span><br>")
-    |> String.replace(~r{<pre[^>]*>\s*(?:<code[^>]*>)?(.*?)(?:</code>)?\s*</pre>\s*}is, ~s(<code class="leaf-atomic-pre">\\1</code><br>))
+    |> String.replace(
+      ~r{<pre[^>]*>\s*(?:<code[^>]*>)?(.*?)(?:</code>)?\s*</pre>\s*}is,
+      ~s(<code class="leaf-atomic-pre">\\1</code><br>)
+    )
     |> String.replace(~r{<hr\s*/?>\s*}i, "<br>")
     # A paragraph after a heading or list is not the first or last one, so
     # the unwrapping above never saw it.
@@ -4604,7 +4632,7 @@ defmodule Leaf do
   defp markdown_to_html(markdown) do
     case MDEx.to_html(markdown, render: [hardbreaks: true, unsafe: true]) do
       {:ok, html} ->
-        clean_html(html)
+        html |> Leaf.Sanitizer.html() |> clean_html()
 
       {:error, _} ->
         "<p>" <> Phoenix.HTML.safe_to_string(Phoenix.HTML.html_escape(markdown)) <> "</p>"

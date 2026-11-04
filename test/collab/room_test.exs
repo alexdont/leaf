@@ -32,6 +32,48 @@ defmodule Leaf.Collab.RoomTest do
     %{at: at, remove: remove, insert: insert, revision: revision, base_length: nil}
   end
 
+  # The editor counts in UTF-16 code units — what its strings give it — and
+  # an emoji is two of them. A room counting graphemes was one short for every
+  # offset after the first emoji, so it refused or misplaced every edit.
+  describe "text outside the BMP" do
+    test "an edit after an emoji lands after it", %{room: room} do
+      %{revision: revision} = Room.adopt(room, "A", "😀abc")
+
+      assert %{applied: true, document: "😀Xabc"} =
+               Room.apply_operation(room, "A", %{
+                 at: 2,
+                 remove: 0,
+                 insert: "X",
+                 revision: revision,
+                 base_length: 5
+               })
+    end
+
+    test "the editor's length is the room's length", %{room: room} do
+      %{revision: revision} = Room.adopt(room, "A", "e\u0301 😀")
+
+      assert %{applied: true} =
+               Room.apply_operation(room, "A", %{
+                 at: 5,
+                 remove: 0,
+                 insert: "!",
+                 revision: revision,
+                 base_length: 5
+               })
+    end
+
+    test "an edit that would cut a character in half is refused", %{room: room} do
+      %{revision: revision} = Room.adopt(room, "A", "😀abc")
+
+      assert %{applied: false, document: "😀abc"} =
+               Room.apply_operation(room, "A", op(1, 0, "X", revision))
+    end
+
+    test "rebasing over an emoji moves by two", %{room: _room} do
+      assert %{at: 5} = Room.rebase(op(3, 0, "x", 0), op(0, 0, "😀", 0))
+    end
+  end
+
   describe "rebase/2" do
     test "an edit before ours moves everything we point at" do
       assert %{at: 14} = Room.rebase(op(10, 0, "x", 0), op(0, 0, "abcd", 0))

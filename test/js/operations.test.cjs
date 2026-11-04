@@ -248,3 +248,26 @@ test("nothing is emitted when the host has not opted in", () => {
 
   assert.equal(e.sent.length, 0);
 });
+
+// A splice boundary inside a surrogate pair would send half an emoji. The
+// scans compare code units, and 😀 / 😁 share their first one.
+test("a splice never cuts a surrogate pair", () => {
+  for (const [before, after] of [
+    ["a\u{1F600}", "a\u{1F601}"],
+    ["\u{1F600}", "\u{1F640}"],
+    ["😀", "🨀"],
+    ["x\u{1F600}y", "x\u{1F601}y"],
+    ["\u{1F600}\u{1F600}", "\u{1F600}\u{1F601}"],
+  ]) {
+    const s = splice(before, after);
+    assert.equal(apply(before, s), after, `${before} → ${after}`);
+    assert.ok(s.insert.isWellFormed(), `insert for ${before} → ${after} is well formed`);
+    const removed = before.slice(s.at, s.at + s.remove);
+    assert.ok(removed.isWellFormed(), `removed for ${before} → ${after} is well formed`);
+  }
+});
+
+test("a splice on plain text is still the minimal one", () => {
+  assert.deepEqual(splice("hello world", "hello there world"), { at: 6, remove: 0, insert: "there " });
+  assert.deepEqual(splice("a\u{1F600}b", "a\u{1F600}c"), { at: 3, remove: 1, insert: "c" });
+});

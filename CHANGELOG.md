@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Raw HTML in a document reached the page unfiltered.** Markdown may
+  carry HTML, and Leaf writes some itself, so it was rendered with raw HTML
+  allowed — and nothing was removed afterwards. A `<script>`, an `onerror`
+  or a `javascript:` link typed into a document ran on reload, and with live
+  editing in every collaborator's browser. Rendered HTML now passes an
+  allow-list (`Leaf.Sanitizer`) of the tags, attributes and URL schemes
+  Leaf's own markup uses. The link prompts, the link popover, the image URL
+  dialog and `insert_image` refuse `javascript:`, `data:` pages and the like;
+  pasted markup is stripped of event handlers, embeds and such URLs; image
+  markup written into the markdown has its attribute values escaped.
+- **One emoji broke live editing.** The editor counts offsets in UTF-16
+  code units, the room counted graphemes, so every offset after an emoji
+  (or a combining mark) was off by one: the room refused the edit, the
+  editor was told to resync, and every keystroke replaced the whole document
+  for everyone. The room now measures and cuts in the editor's unit
+  (`Leaf.Collab.Text`), and the debug digest matches the client's.
+- **Half an emoji could be sent.** Backspace or Delete over an emoji in a
+  hybrid source block removed one code unit of its two, and a change from
+  one emoji to a near twin was diffed down to the second unit alone. The
+  resulting string is not valid JSON, so the push was refused and the edit
+  lost. Deletes step over the whole character; a splice never cuts a pair.
+- **A LiveView patch forgot the edits still in flight.** `updated()` reset
+  the unacknowledged-edit list and re-read the revision from the markup on
+  every patch — a host answering a suggestion request was enough — so the
+  next incoming operation was rebased against the wrong document.
+- **`mode_changed` or `insert_request` with an unexpected value crashed the
+  LiveView** (`String.to_existing_atom` on a client string, then a function
+  clause). Both now accept only the values Leaf's own client sends and
+  ignore anything else. `mode_changed` also sanitizes the content it carries
+  under `deny`, like every other client path.
+- **`deny: [:links]` was bypassed by paste** — a bare URL and a copied
+  single line were inserted without the deny applied.
+- **Four `document` listeners were never removed.** Every mount of an editor
+  (every `live_patch` onto a page with one) left the toolbar menu closers
+  and the source-block tracker running against a detached editor.
+
 ## 0.9.0 — 2026-11-01
 
 ### Added

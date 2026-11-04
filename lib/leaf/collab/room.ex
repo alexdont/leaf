@@ -29,6 +29,8 @@ defmodule Leaf.Collab.Room do
 
   require Logger
 
+  alias Leaf.Collab.Text
+
   @log_limit 40
 
   # How far back an edit may be rebased from. An editor further behind than
@@ -290,13 +292,14 @@ defmodule Leaf.Collab.Room do
     # when nothing crossed it on the wire, since crossing legitimately changes
     # the length. And can the result actually be placed in the text we hold.
     recognized? = concurrent != [] or not diverged?(state.document, op)
-    placeable? = placeable?(state.document, rebased)
 
-    if recognized? and placeable? do
-      apply_op(state, session_id, rebased)
+    with true <- recognized?,
+         {:ok, document} <- splice(state.document, rebased) do
+      apply_op(state, session_id, rebased, document)
     else
-      {:reply, %{applied: false, document: state.document, entry: nil, diverged: true},
-       %{state | diverged: true}}
+      _ ->
+        {:reply, %{applied: false, document: state.document, entry: nil, diverged: true},
+         %{state | diverged: true}}
     end
   end
 
@@ -304,7 +307,7 @@ defmodule Leaf.Collab.Room do
     entry = %{
       session: session_id,
       at: 0,
-      remove: String.length(state.document),
+      remove: Text.length(state.document),
       insert: markdown,
       rendered: nil,
       adopted: true
@@ -675,9 +678,7 @@ defmodule Leaf.Collab.Room do
     end
   end
 
-  defp apply_op(state, session_id, op) do
-    document = splice(state.document, op)
-
+  defp apply_op(state, session_id, op, document) do
     entry = %{
       session: session_id,
       at: op.at,
@@ -764,7 +765,7 @@ defmodule Leaf.Collab.Room do
   """
   def rebase(op, applied) do
     applied_end = applied.at + applied.remove
-    shift = String.length(applied.insert) - applied.remove
+    shift = Text.length(applied.insert) - applied.remove
 
     cond do
       # Entirely before us: everything we point at has moved.
@@ -792,24 +793,16 @@ defmodule Leaf.Collab.Room do
   # to trailing whitespace is a representation detail rather than two sessions
   # disagreeing about the text.
   defp diverged?(text, op) do
-    length = String.length(text)
-    op[:base_length] not in [nil, length, String.length(String.trim_trailing(text))]
+    op[:base_length] not in [nil, Text.length(text), Text.length(String.trim_trailing(text))]
   end
 
   # Rebasing can only do so much: overlapping edits, or an editor further behind
-  # than the history reaches, can produce a splice that points outside the text.
-  # Applying it anyway would scatter characters, so it is refused and the
-  # session settled up from the room's copy instead.
-  defp placeable?(text, %{at: at, remove: remove}) do
-    at >= 0 and remove >= 0 and at + remove <= String.length(text)
-  end
+  # than the history reaches, can produce a splice that points outside the text
+  # or into the middle of a character. Applying it anyway would scatter
+  # characters, so it is refused and the session settled up from the room's
+  # copy instead.
+  defp splice(text, %{at: at, remove: remove, insert: insert}),
+    do: Text.splice(text, at, remove, insert)
 
-  defp placeable?(_text, _op), do: false
-
-  defp splice(text, %{at: at, remove: remove, insert: insert}) do
-    length = String.length(text)
-
-    String.slice(text, 0, at) <>
-      insert <> String.slice(text, at + remove, max(length - at - remove, 0))
-  end
+  defp splice(_text, _op), do: :error
 end

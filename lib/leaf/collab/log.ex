@@ -19,20 +19,18 @@ defmodule Leaf.Collab.Log do
   """
   require Logger
 
-  @doc """
-  FNV-1a, 32 bit, over the document's code points.
+  alias Leaf.Collab.Text
 
-  Matches the editor's `_digest` exactly, so the same text produces the same
-  eight characters on both sides. Text outside the Basic Multilingual Plane
-  hashes differently here than in the browser, which is a limitation of
-  comparing UTF-16 code units with code points and not worth more than a note.
+  @doc """
+  FNV-1a, 32 bit, over the document's UTF-16 code units.
+
+  Matches the editor's `_digest` exactly — it walks `charCodeAt`, so the same
+  text produces the same eight characters on both sides, emoji included.
   """
   def digest(text) when is_binary(text) do
-    text
-    |> String.to_charlist()
-    |> Enum.reduce(0x811C9DC5, fn char, hash ->
-      Bitwise.band(Bitwise.bxor(hash, char) * 0x01000193, 0xFFFFFFFF)
-    end)
+    for <<unit::16 <- Text.utf16(text)>>, reduce: 0x811C9DC5 do
+      hash -> Bitwise.band(Bitwise.bxor(hash, unit) * 0x01000193, 0xFFFFFFFF)
+    end
     |> Integer.to_string(16)
     |> String.downcase()
     |> String.pad_leading(8, "0")
@@ -80,7 +78,7 @@ defmodule Leaf.Collab.Log do
             fields([
               {"session", session},
               {"rev", room_revision},
-              {"len", String.length(room_document)},
+              {"len", Text.length(room_document)},
               {"digest", room}
             ])
         )
@@ -93,7 +91,7 @@ defmodule Leaf.Collab.Log do
             fields([
               {"session", session},
               {"rev", room_revision},
-              {"room_len", String.length(room_document)},
+              {"room_len", Text.length(room_document)},
               {"room_digest", room},
               {"editor_len", Map.get(debug, :length)},
               {"editor_digest", Map.get(debug, :digest)},
