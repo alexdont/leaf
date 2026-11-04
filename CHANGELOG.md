@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- **A `toolbar_extra` button marked `collapse: false` was gone on a phone.**
+  Under 480px the desktop row is replaced by the mobile toolbar, which never
+  drew the pinned buttons, so the one button a host wanted always in reach
+  was only in the ⋯ menu. Pinned buttons are on the mobile toolbar now,
+  before the menu, and the menu lists only the collapsible ones.
 - **Typed text came back as formatting.** `price *is* 5` written in visual
   mode was italic after a reload; `# todo` at the start of a line became a
   heading, `- note` a list, `[x]` the start of a link. The serializers now

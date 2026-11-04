@@ -123,6 +123,49 @@ defmodule Leaf.HostIntegrationTest do
       assert html =~ ~s(data-host-action="hero")
       assert html =~ ~s(data-host-action="note")
     end
+
+    # Under 480px the desktop row is hidden and the mobile toolbar shown. A
+    # pinned button that lived only on the desktop row vanished with it and
+    # turned up in the ⋯ menu — the one place `collapse: false` says it must
+    # not be.
+    test "a pinned button is a button on the mobile toolbar too, and not in its menu" do
+      html =
+        editor_html(
+          content: "",
+          toolbar_extra: [
+            %{id: "hero", label: "Hero", collapse: false},
+            %{id: "note", label: "Note"}
+          ]
+        )
+
+      [_, row, menu] =
+        Regex.run(
+          ~r/data-mobile-toolbar(.*?)<details class="relative" data-mobile-tools-menu>(.*?)<\/details>/s,
+          html
+        )
+
+      assert row =~ "data-toolbar-extra-pinned"
+      assert row =~ ~s(data-host-action="hero")
+      refute row =~ ~s(data-host-action="note")
+
+      refute menu =~ ~s(data-host-action="hero")
+      assert menu =~ ~s(data-host-action="note")
+    end
+
+    test "the mobile toolbar has no pinned group when nothing is pinned, and none when readonly" do
+      plain = editor_html(content: "", toolbar_extra: [%{id: "note", label: "Note"}])
+      [_, row] = Regex.run(~r/data-mobile-toolbar(.*?)<details/s, plain)
+      refute row =~ "data-toolbar-extra-pinned"
+
+      locked =
+        editor_html(
+          content: "",
+          readonly: true,
+          toolbar_extra: [%{id: "hero", label: "Hero", collapse: false}]
+        )
+
+      refute locked =~ "data-toolbar-extra-pinned"
+    end
   end
 
   describe "hashtag decoration" do

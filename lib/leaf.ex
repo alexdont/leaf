@@ -2020,6 +2020,15 @@ defmodule Leaf do
             </svg>
           </button>
 
+          <%!-- A host button marked `collapse: false` is one the documents are
+               built from. It stays a button here too, before the menu, rather
+               than disappearing with the desktop row at this width. --%>
+          <%= if @pinned_extra != [] and not @readonly do %>
+            <div class="flex items-center gap-0.5" data-toolbar-extra data-toolbar-extra-pinned>
+              <.toolbar_extra_button :for={btn <- @pinned_extra} btn={btn} class="btn-sm px-2.5" />
+            </div>
+          <% end %>
+
           <details class="relative" data-mobile-tools-menu>
             <summary
               class="btn btn-sm btn-ghost px-2.5 cursor-pointer"
@@ -2097,9 +2106,10 @@ defmodule Leaf do
                   </li>
                 <% end %>
               <% end %>
-              <%= if @toolbar_extra != [] and not @readonly do %>
+              <%!-- Only the collapsible buttons: the pinned ones are on the row. --%>
+              <%= if @overflow_extra != [] and not @readonly do %>
                 <li class="menu-title text-xs px-2 pt-1">{t("Components")}</li>
-                <%= for btn <- @toolbar_extra do %>
+                <%= for btn <- @overflow_extra do %>
                   <li>
                     <button type="button" data-host-action={efetch(btn, :id)}>
                       <.tool_icon name={efetch(btn, :glyph) || "squares-plus"} />
@@ -2393,13 +2403,14 @@ defmodule Leaf do
   # pass an inline `<svg>` — see the `toolbar_extra` attr docs; that makes
   # it trusted markup and never safe to build from user input.
   attr(:btn, :map, required: true)
+  attr(:class, :string, default: "btn-xs px-2")
 
   defp toolbar_extra_button(assigns) do
     ~H"""
     <button
       type="button"
       data-host-action={efetch(@btn, :id)}
-      class={["btn btn-xs btn-ghost px-2", efetch(@btn, :class)]}
+      class={["btn btn-ghost", @class, efetch(@btn, :class)]}
       title={efetch(@btn, :title)}
       aria-label={efetch(@btn, :title)}
     >
