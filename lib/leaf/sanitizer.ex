@@ -1,12 +1,17 @@
 defmodule Leaf.Sanitizer do
-  @moduledoc false
+  @moduledoc """
+  The allow-list rendered markdown passes before it reaches a page.
 
-  # Rendered markdown passes an allow-list before it reaches a page. Markdown
-  # may carry raw HTML, and Leaf writes some itself (figures, details, sized
-  # images), so the renderer runs with `unsafe: true` — which would also let
-  # through a `<script>`, an `onerror` or a `javascript:` link typed by whoever
-  # wrote the document; with live editing that is a collaborator's browser.
-  # Everything Leaf emits is on the list, nothing that runs code is.
+  Markdown may carry raw HTML, and Leaf writes some itself (figures, details,
+  sized images), so the renderer runs with `unsafe: true` — which would also
+  let through a `<script>`, an `onerror` or a `javascript:` link typed by
+  whoever wrote the document; with live editing that is a collaborator's
+  browser. Everything Leaf emits is on the list, nothing that runs code is.
+
+  A host rendering the saved markdown itself can reuse the same list:
+
+      MDEx.to_html!(markdown, render: [unsafe: true], sanitize: Leaf.Sanitizer.options())
+  """
 
   @tags ~w(figure figcaption details summary u mark kbd video audio source span div)
 
