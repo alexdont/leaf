@@ -4,6 +4,38 @@
 
 ### Fixed
 
+- **Typed text came back as formatting.** `price *is* 5` written in visual
+  mode was italic after a reload; `# todo` at the start of a line became a
+  heading, `- note` a list, `[x]` the start of a link. The serializers now
+  escape what markdown would read as syntax, and the hybrid editor hides the
+  backslashes again: a faded marker while a block shows its source, nothing
+  at all once it is rendered. Code, a block being edited as source, chips
+  and wiki links are untouched.
+- **Enter inside bold, italic or a link left the line behind.** It opened an
+  empty paragraph below; now it divides the paragraph at the caret, the
+  formatting split along with the text. In a list the new block is an item.
+- **Delete at the end of a list item being edited as source flattened the
+  next one** — `- a` + Delete before `**b** c` gave `- ab c`. The next item
+  is merged as source now, formatting intact. The same for a quoted paragraph.
+- **A picture dropped from the desktop was swallowed.** The drop was
+  cancelled and nothing happened; it now goes the way a pasted picture does —
+  to the host's upload flow, or inline — at the point it was let go.
+- **"Insert image by URL" did nothing in hybrid (the default) and HTML
+  modes**, and the host's `insert_image` always wrote into the hidden visual
+  surface. Both now follow the mode, like `insert_markdown` does.
+- **The block menu poured a list into a paragraph** (`<p><li>…`). A list
+  converts to one block per item, nested lists kept; a table, figure or rule
+  offers only Duplicate and Delete.
+- **Underline, mark and kbd were dropped on save**; a line break inside a
+  table cell broke the table; a backtick inside inline code, a parenthesis in
+  a link, a bracket in link text or alt text came out as broken syntax; a
+  second paragraph in a list item left the list.
+- **A `>` inside a preserved tag's attribute ended the tag** (`<Hero
+  title="a > b"/>`), so the tag was declared, not warned about, and
+  flattened to prose. A tag inside a code span or fence is now a sample and
+  left as code rather than turned into a chip.
+- README: the assigns table now lists `tag_previews`, `media_url` and the
+  other assigns it had skipped; the messages and commands are complete.
 - **Raw HTML in a document reached the page unfiltered.** Markdown may
   carry HTML, and Leaf writes some itself, so it was rendered with raw HTML
   allowed — and nothing was removed afterwards. A `<script>`, an `onerror`

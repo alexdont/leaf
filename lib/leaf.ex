@@ -38,6 +38,22 @@ defmodule Leaf do
   - `{:leaf_mode_changed, %{editor_id, mode: :visual | :markdown}}` — Mode switched
   - `{:leaf_suggest, %{editor_id, trigger, query, seq}}` — Inline suggestion
     requested (only when `suggestions` is configured; see below)
+  - `{:leaf_toolbar_action, %{editor_id, id, selection}}` — A `toolbar_extra`
+    button was pressed
+  - `{:leaf_paste_image, %{editor_id, data_url, name, mime}}` — A picture was
+    pasted or dropped (`upload_handler` and `emit_events` set)
+  - `{:leaf_focus, …}`, `{:leaf_blur, …}`, `{:leaf_selection_changed, %{text,
+    range}}` — with `emit_events`
+  - `{:leaf_resolve_links, %{editor_id, targets, seq}}` and
+    `{:leaf_link_clicked, %{editor_id, target, heading, href, modifier}}` —
+    with `wiki_links`
+  - `{:leaf_ready, …}`, `{:leaf_operation, …}`, `{:leaf_awareness, …}`,
+    `{:leaf_resync, …}` — live editing; `Leaf.Collab.join/2` handles them
+
+  Commands (`send_update(Leaf, id: …, action: …)`): `:set_content`,
+  `:set_mode`, `:insert_image`, `:insert_markdown`, `:flush`, `:mark_saved`,
+  `:suggestions`, `:link_targets`, and for live editing `:apply_operation`,
+  `:revision`, `:peer_cursors`.
 
   ## Flushing (save before navigate)
 
@@ -3997,13 +4013,29 @@ defmodule Leaf do
   # outer match without its source to find — the Gallery's own tags were
   # then handed to the markdown parser, which swallowed them. A tag inside
   # another is part of that tag's source and travels with it.
+  # Attributes up to the tag's own `>`: a quoted value may hold one
+  # (`title="a > b"`), and stopping at it dropped the tag.
+  @tag_attrs ~S{(?:[^>"']|"[^"]*"|'[^']*')*?}
+
   defp extract_preserved_tags(markdown, preserve_tags) do
+    # A tag inside a code span or fence is a sample, not a component.
+    code_ranges =
+      ~r/```.*?```|`[^`\n]*`/s
+      |> Regex.scan(markdown, return: :index)
+      |> Enum.map(&hd/1)
+
     ranges =
       preserve_tags
       |> Enum.flat_map(fn tag ->
         t = Regex.escape(to_string(tag))
-        {:ok, re} = Regex.compile("<#{t}\\b[^>]*?/>|<#{t}\\b[^>]*?>.*?</#{t}>", "is")
+
+        {:ok, re} =
+          Regex.compile("<#{t}\\b#{@tag_attrs}/>|<#{t}\\b#{@tag_attrs}>.*?</#{t}>", "is")
+
         re |> Regex.scan(markdown, return: :index) |> Enum.map(&hd/1)
+      end)
+      |> Enum.reject(fn {start, _len} ->
+        Enum.any?(code_ranges, fn {cs, cl} -> start >= cs and start < cs + cl end)
       end)
       |> Enum.sort_by(fn {start, len} -> {start, -len} end)
       |> outermost_ranges()
@@ -4420,7 +4452,7 @@ defmodule Leaf do
       end
 
     open_tag =
-      case Regex.run(~r/^\s*<[^>]*>/s, raw) do
+      case Regex.run(~r/^\s*<(?:[^>"']|"[^"]*"|'[^']*')*>/s, raw) do
         [tag] -> tag
         _ -> raw
       end
@@ -4428,7 +4460,10 @@ defmodule Leaf do
     attrs = parse_attr_source(open_tag)
 
     inner =
-      case Regex.run(~r/^\s*<[^>]*[^\/]>(.*)<\/[A-Za-z][\w.-]*\s*>\s*$/s, raw) do
+      case Regex.run(
+             ~r/^\s*<(?:[^>"']|"[^"]*"|'[^']*')*(?<!\/)>(.*)<\/[A-Za-z][\w.-]*\s*>\s*$/s,
+             raw
+           ) do
         [_, body] -> body
         _ -> ""
       end

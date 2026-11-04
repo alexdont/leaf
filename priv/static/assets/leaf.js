@@ -919,6 +919,13 @@
       // newline would otherwise serialize as a second break on the way back.
       if (isHardBreak(node.previousSibling)) text = text.replace(/^\n/, "");
 
+      // Content, not syntax — see "Markdown escaping". Code, a block in
+      // source form and the markup Leaf writes itself are left alone.
+      if (!inRawContext(node)) {
+        text = escapeInlineMarkdown(text, hasAncestorTag(node, "a"));
+        if (atLineStart(node)) text = escapeLineStart(text);
+      }
+
       return text;
     }
 
@@ -997,6 +1004,15 @@
       case "sub":
         return "<sub>" + inner + "</sub>";
 
+      case "u":
+        return "<u>" + inner + "</u>";
+
+      case "mark":
+        return "<mark>" + inner + "</mark>";
+
+      case "kbd":
+        return "<kbd>" + inner + "</kbd>";
+
       case "code":
         if (
           node.parentElement &&
@@ -1005,7 +1021,7 @@
           return inner;
         }
         if (hasSourceMarkerChild(node)) return inner;
-        return "`" + inner + "`";
+        return codeSpan(inner);
 
       case "pre":
         var preLang = node.getAttribute("data-language") || "";
@@ -1029,7 +1045,7 @@
         }
 
         var href = node.getAttribute("href") || "";
-        return "[" + inner + "](" + href + ")";
+        return "[" + inner + "](" + linkDestination(href) + ")";
 
       case "img":
         var src = node.getAttribute("src") || "";
@@ -1045,7 +1061,7 @@
           tag += ' />';
           return tag;
         }
-        return "![" + alt + "](" + src + ")";
+        return "![" + alt.replace(/[\[\]\\]/g, "\\$&") + "](" + linkDestination(src) + ")";
 
       case "figure":
         var fimg = node.querySelector("img");
@@ -1231,7 +1247,9 @@
         }
       }
 
-      var content = nodeToMarkdown(li).trim();
+      // A second paragraph in the item stays in it only when it is indented
+      // past the marker; the blank line itself is left blank.
+      var content = nodeToMarkdown(li).trim().replace(/\n(?!\n)/g, "\n" + childIndent);
       var prefix;
       if (hasListMarkerChild(child)) {
         prefix = "";
@@ -1259,7 +1277,11 @@
       var cells = rows[i].querySelectorAll("th, td");
       var parts = [];
       for (var j = 0; j < cells.length; j++) {
-        parts.push(nodeToMarkdown(cells[j]).trim().replace(/\|/g, "\\|"));
+        // A cell is one line of the table; a line break inside it is
+        // written as the tag, which the host renders back into one.
+        parts.push(
+          nodeToMarkdown(cells[j]).trim().replace(/\n+/g, "<br>").replace(/\|/g, "\\|")
+        );
         // Capture per-column alignment from the header row (data-align, or
         // an inline text-align style left by Earmark).
         if (i === 0) {
@@ -1722,6 +1744,179 @@
       isLowSurrogate(text.charCodeAt(offset + 1))
       ? 2
       : 1;
+  }
+
+  // ---- Markdown escaping ----------------------------------------------------
+  //
+  // Text in a rendered block is content, not syntax: a writer who typed
+  // `price *is* 5` meant the asterisks. Written back as they are, the host
+  // reads them as emphasis on the next load, and `# todo` at the start of a
+  // line becomes a heading. The serializers escape what markdown would read
+  // as syntax, and the hybrid renderer hides the backslashes again — as a
+  // faded marker in source form, not at all in rendered form — so what is
+  // shown stays what was typed.
+
+  var ASCII_PUNCT = "[!-\\/:-@\\[-`{-~]";
+  var ESCAPE_RE = new RegExp("\\\\(" + ASCII_PUNCT + ")", "g");
+  var BACKSLASH_BEFORE_PUNCT_RE = new RegExp("\\\\(?=" + ASCII_PUNCT + ")", "g");
+  var WORD_CHAR = /[A-Za-z0-9]/;
+
+  function escapeInlineMarkdown(text, inLink) {
+    if (!text) return text;
+    var out = text
+      .replace(BACKSLASH_BEFORE_PUNCT_RE, "\\\\")
+      .replace(/`/g, "\\`")
+      .replace(/\*/g, "\\*")
+      .replace(/~~/g, "\\~\\~")
+      .replace(/\[/g, "\\[")
+      .replace(/<(?=[A-Za-z\/!?])/g, "\\<")
+      .replace(/&(?=#?[A-Za-z0-9]+;)/g, "\\&")
+      // An underscore inside a word (snake_case) is not emphasis; one at a
+      // word boundary can be.
+      .replace(/_+/g, function (run, index, whole) {
+        var before = index > 0 ? whole.charAt(index - 1) : "";
+        var after = whole.charAt(index + run.length);
+        if (before && after && WORD_CHAR.test(before) && WORD_CHAR.test(after)) return run;
+        return run.replace(/_/g, "\\_");
+      });
+    if (inLink) out = out.replace(/\]/g, "\\]");
+    return out;
+  }
+
+  // What starts a block when it starts a line: a heading, a quote, a list
+  // item, a thematic break, a setext underline. Applied after the inline
+  // pass, which has already dealt with `*`, `_` and backticks.
+  function escapeLineStart(text) {
+    return text
+      .replace(/^([ \t]*)(#{1,6})(?=[ \t]|$)/, "$1\\$2")
+      .replace(/^([ \t]*)>/, "$1\\>")
+      .replace(/^([ \t]*)([-+])(?=[ \t]|$)/, "$1\\$2")
+      .replace(/^([ \t]*)(\d{1,9})([.)])(?=[ \t]|$)/, "$1$2\\$3")
+      .replace(/^([ \t]*)(-(?:[ \t]*-){2,})[ \t]*$/, "$1\\$2")
+      .replace(/^([ \t]*)(=+)[ \t]*$/, "$1\\$2");
+  }
+
+  var BLOCK_LEVEL_RE = /^(p|h[1-6]|li|td|th|blockquote|div|figcaption|summary|details|section|article|body)$/;
+
+  function meaningfulText(text) {
+    return /[^\s\u200B\uFEFF]/.test(text || "");
+  }
+
+  // Whether a text node is the first thing on its line: nothing but
+  // whitespace and empty inline elements between it and the start of its
+  // block or the last line break.
+  function atLineStart(node) {
+    var cur = node;
+    while (cur) {
+      var prev = cur.previousSibling;
+      while (prev) {
+        if (prev.nodeType === Node.TEXT_NODE) {
+          if (meaningfulText(prev.nodeValue)) return false;
+        } else if (prev.nodeType === Node.ELEMENT_NODE) {
+          var t = prev.tagName.toLowerCase();
+          if (t === "br" || BLOCK_LEVEL_RE.test(t)) return true;
+          if (t === "img" || meaningfulText(prev.textContent)) return false;
+        }
+        prev = prev.previousSibling;
+      }
+      var parent = cur.parentNode;
+      if (!parent || parent.nodeType !== Node.ELEMENT_NODE) return true;
+      if (BLOCK_LEVEL_RE.test(parent.tagName.toLowerCase())) return true;
+      cur = parent;
+    }
+    return true;
+  }
+
+  function hasAncestorTag(node, tag) {
+    var el = node.parentNode;
+    while (el && el.nodeType === Node.ELEMENT_NODE) {
+      if (el.tagName.toLowerCase() === tag) return true;
+      el = el.parentNode;
+    }
+    return false;
+  }
+
+  // Text that is already syntax, or already raw: code, a block in source
+  // form (its text IS markdown), a marker, a chip, a wiki link.
+  function inRawContext(node) {
+    var el = node.parentNode;
+    while (el && el.nodeType === Node.ELEMENT_NODE) {
+      var tag = el.tagName.toLowerCase();
+      if (tag === "code" || tag === "pre") return true;
+      if (el.hasAttribute("data-leaf-source")) return true;
+      if (
+        el.classList &&
+        (el.classList.contains("leaf-source-marker") ||
+          el.classList.contains("leaf-atomic") ||
+          el.classList.contains("leaf-wikilink"))
+      ) {
+        return true;
+      }
+      el = el.parentNode;
+    }
+    return false;
+  }
+
+  // A code span whose text may itself hold backticks: fenced by one more
+  // backtick than its longest run, padded when it begins or ends with one.
+  function codeSpan(text) {
+    var longest = 0;
+    var runs = text.match(/`+/g) || [];
+    for (var i = 0; i < runs.length; i++) longest = Math.max(longest, runs[i].length);
+    var fence = new Array(longest + 2).join("`");
+    var pad = /^`|`$/.test(text) ? " " : "";
+    return fence + pad + text + pad + fence;
+  }
+
+  // A link destination with a space or a parenthesis in it goes in angle
+  // brackets, which is the one form markdown reads whole.
+  function linkDestination(url) {
+    if (/[\s()<>]/.test(url)) return "<" + url.replace(/[<>]/g, "\\$&") + ">";
+    return url;
+  }
+
+  // Escapes hidden from the inline scanner. `\\*` becomes two private-use
+  // characters of the same length, so every pattern sees neither a
+  // backslash nor an asterisk and every offset stays valid; `unmaskEscapes`
+  // turns them back, with the backslash (source form) or without (rendered).
+  function maskEscapes(text) {
+    if (!text || text.indexOf("\\") === -1) return text;
+    return text.replace(ESCAPE_RE, function (_m, ch) {
+      return "\uE000" + String.fromCharCode(0xe100 + ch.charCodeAt(0));
+    });
+  }
+
+  function unmaskEscapes(text, keepBackslash) {
+    if (!text || !/[\uE000\uE121-\uE17E]/.test(text)) return text;
+    return text
+      .replace(/\uE000/g, keepBackslash ? "\\" : "")
+      .replace(/[\uE121-\uE17E]/g, function (c) {
+        return String.fromCharCode(c.charCodeAt(0) - 0xe100);
+      });
+  }
+
+  function unmaskNode(node, keepBackslash) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      node.nodeValue = unmaskEscapes(node.nodeValue, keepBackslash);
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    var attrs = node.attributes;
+    for (var a = 0; a < attrs.length; a++) {
+      var value = attrs[a].value;
+      if (/[\uE000\uE121-\uE17E]/.test(value)) {
+        node.setAttribute(
+          attrs[a].name,
+          unmaskEscapes(value, attrs[a].name === "data-leaf-wikilink-raw")
+        );
+      }
+    }
+    for (var i = 0; i < node.childNodes.length; i++) unmaskNode(node.childNodes[i], keepBackslash);
+  }
+
+  function unmaskTree(nodes, keepBackslash) {
+    for (var i = 0; i < nodes.length; i++) unmaskNode(nodes[i], keepBackslash);
+    return nodes;
   }
 
   // =========================================================================
@@ -3065,16 +3260,38 @@
           var fmt = this._inlineFormattingAncestor(sel.anchorNode);
           if (fmt) {
             var blockOfFmt = this._getCurrentBlock();
+            var inSource =
+              this._sourceBlock && this._sourceBlock.contains(sel.anchorNode);
             if (blockOfFmt && blockOfFmt.parentNode) {
               e.preventDefault();
-              var newP = document.createElement("p");
-              newP.appendChild(document.createElement("br"));
+              var newP = document.createElement(
+                blockOfFmt.tagName.toLowerCase() === "li" ? "li" : "p"
+              );
+              if (!inSource) {
+                // What follows the caret moves to the new block, its
+                // wrappers split along with it, so Enter in the middle of a
+                // bold run divides the paragraph instead of leaving the
+                // rest of the line behind.
+                var tail = sel.getRangeAt(0).cloneRange();
+                tail.setEndAfter(blockOfFmt.lastChild);
+                newP.appendChild(tail.extractContents());
+                this._dropEmptyInlines(blockOfFmt);
+                this._dropEmptyInlines(newP);
+                if (!meaningfulText(blockOfFmt.textContent) && !blockOfFmt.querySelector("img")) {
+                  blockOfFmt.innerHTML = "<br>";
+                }
+              }
+              if (!meaningfulText(newP.textContent) && !newP.querySelector("img")) {
+                newP.innerHTML = "<br>";
+              }
               blockOfFmt.parentNode.insertBefore(
                 newP,
                 blockOfFmt.nextSibling
               );
               var nr = document.createRange();
-              nr.setStart(newP, 0);
+              var firstText = this._firstTextNode(newP);
+              if (firstText) nr.setStart(firstText, 0);
+              else nr.setStart(newP, 0);
               nr.collapse(true);
               sel.removeAllRanges();
               sel.addRange(nr);
@@ -3749,6 +3966,67 @@
     // Read a pasted image to a data URL, then either hand it to the host
     // (so its upload_handler can persist it and swap in a real URL via
     // send_update(:insert_image)) or insert it inline as a fallback.
+    _draggedFiles: function (e) {
+      var types = e.dataTransfer && e.dataTransfer.types;
+      return !!types && Array.prototype.indexOf.call(types, "Files") !== -1;
+    },
+
+    // A picture dropped from the desktop goes the way a pasted one does: to
+    // the host's upload flow, or inline. The caret moves to the drop point
+    // first, so the picture lands where it was let go.
+    _dropFiles: function (e) {
+      if (this._readonly || this._denyImages) return;
+      var files = e.dataTransfer && e.dataTransfer.files;
+      if (!files || !files.length) return;
+      var image = null;
+      for (var i = 0; i < files.length; i++) {
+        if (files[i].type && files[i].type.indexOf("image/") === 0) {
+          image = files[i];
+          break;
+        }
+      }
+      if (!image) return;
+      this._placeCaretAtPoint(e.clientX, e.clientY);
+      this._handlePastedImage(image);
+    },
+
+    _placeCaretAtPoint: function (x, y) {
+      var range = null;
+      if (document.caretRangeFromPoint) {
+        range = document.caretRangeFromPoint(x, y);
+      } else if (document.caretPositionFromPoint) {
+        var pos = document.caretPositionFromPoint(x, y);
+        if (pos) {
+          range = document.createRange();
+          range.setStart(pos.offsetNode, pos.offset);
+          range.collapse(true);
+        }
+      }
+      if (!range || !this._visualEl || !this._visualEl.contains(range.startContainer)) return;
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      this._visualEl.focus();
+    },
+
+    // Inline wrappers left with nothing in them after a split.
+    _dropEmptyInlines: function (root) {
+      var hollow = root.querySelectorAll(
+        "strong, b, em, i, s, del, strike, code, u, sub, sup, mark, a, span.leaf-spoiler"
+      );
+      for (var i = hollow.length - 1; i >= 0; i--) {
+        var el = hollow[i];
+        if (!meaningfulText(el.textContent) && !el.querySelector("img, br") && el.parentNode) {
+          el.parentNode.removeChild(el);
+        }
+      }
+    },
+
+    _firstTextNode: function (root) {
+      var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+      return walker.nextNode();
+    },
+
     _handlePastedImage: function (file) {
       var self = this;
       var reader = new FileReader();
@@ -5428,8 +5706,9 @@
       var name = m[1];
       if (this._preserveTags.indexOf(name.toLowerCase()) === -1) return null;
 
+      // An attribute value may hold a `>`: `title="a > b"`.
       var whole = new RegExp(
-        "^<" + name + "\\b[^>]*?(?:/>|>[\\s\\S]*</" + name + ">)$"
+        "^<" + name + "\\b(?:[^>\"']|\"[^\"]*\"|'[^']*')*?(?:/>|>[\\s\\S]*</" + name + ">)$"
       );
       if (!whole.test(trimmed)) return null;
 
@@ -7486,9 +7765,17 @@
       });
     },
 
+    // Returns an array of DOM nodes representing `text` with every matched
+    // delimiter pair wrapped in its corresponding element. Escaped
+    // characters are hidden from the patterns while the nodes are built and
+    // shown without their backslashes once they are: rendered form shows
+    // the character, not the escape.
     _buildFormattedFragment: function (text) {
-      // Returns an array of DOM nodes representing `text` with every
-      // matched delimiter pair wrapped in its corresponding element.
+      if (!text) return [];
+      return unmaskTree(this._buildFormattedMasked(maskEscapes(text)), false);
+    },
+
+    _buildFormattedMasked: function (text) {
       // Recursive — supports arbitrary depth (e.g., `~~**`code`**~~`).
       if (!text) return [];
 
@@ -7517,24 +7804,24 @@
       var wrapper;
       if (earliestPattern.type === "link") {
         wrapper = document.createElement("a");
-        wrapper.setAttribute("href", safeUrl(earliest[2], "link") || "");
+        wrapper.setAttribute("href", safeUrl(unmaskEscapes(earliest[2], false), "link") || "");
       } else {
         wrapper = this._createAutoFormatWrapper(earliestPattern);
       }
       var innerHost =
         earliestPattern.type === "boldItalic" ? wrapper.firstChild : wrapper;
-      var innerNodes = this._buildFormattedFragment(innerText);
+      var innerNodes = this._buildFormattedMasked(innerText);
       for (var j = 0; j < innerNodes.length; j++) {
         innerHost.appendChild(innerNodes[j]);
       }
 
       var result = [];
       if (beforeText) {
-        result = result.concat(this._buildFormattedFragment(beforeText));
+        result = result.concat(this._buildFormattedMasked(beforeText));
       }
       result.push(wrapper);
       if (afterText) {
-        result = result.concat(this._buildFormattedFragment(afterText));
+        result = result.concat(this._buildFormattedMasked(afterText));
       }
       return result;
     },
@@ -10486,8 +10773,10 @@
               // source block, then drop the now-empty sibling.
               this._syntaxMutating = true;
               try {
+                // The next item is in rendered form: its text alone would
+                // drop its formatting, so it is taken as source.
                 var delMergedSource =
-                  sourceText + (delNext.textContent || "");
+                  sourceText + this._serializeBlockInline(delNext).source;
                 while (this._sourceBlock.firstChild) {
                   this._sourceBlock.removeChild(this._sourceBlock.firstChild);
                 }
@@ -11086,7 +11375,7 @@
         if (caretTarget === null) caretTarget = { node: node, offset: offset };
       }
 
-      function appendPlain(host, text, sourceStart) {
+      function appendText(host, text, sourceStart) {
         if (text.length === 0) return;
         var node = document.createTextNode(text);
         host.appendChild(node);
@@ -11097,6 +11386,22 @@
         ) {
           noteCaret(node, caretOffset - sourceStart);
         }
+      }
+
+      // Plain text, with each escape's backslash set apart as a marker: it
+      // is syntax, shown faded like `**`, and like them it is not part of
+      // the text the sessions share.
+      function appendPlain(host, text, sourceStart) {
+        var re = new RegExp(ESCAPE_RE.source, "g");
+        var last = 0;
+        var m;
+        while ((m = re.exec(text)) !== null) {
+          appendText(host, text.slice(last, m.index), sourceStart + last);
+          appendMarker(host, "\\", sourceStart + m.index, "leaf-escape-marker");
+          appendText(host, m[1], sourceStart + m.index + 1);
+          last = m.index + m[0].length;
+        }
+        appendText(host, text.slice(last), sourceStart + last);
       }
 
       function appendMarker(host, text, sourceStart, extraClass) {
@@ -12105,6 +12410,9 @@
     // to render the match either as source-with-markers (when active)
     // or as the formatted element (when inactive).
     _scanInlineMatches: function (text) {
+      // An escaped character is content: hidden from every pattern here,
+      // at the same offset, and put back in what the matches carry.
+      text = maskEscapes(text);
       var candidates = [];
       var patterns = this._autoFormatPatterns;
       // Wiki links first. In hybrid source mode a `[[Target|Alias]]` token
@@ -12192,8 +12500,15 @@
       var lastEnd = 0;
       for (var k = 0; k < candidates.length; k++) {
         if (candidates[k].start >= lastEnd) {
-          out.push(candidates[k]);
-          lastEnd = candidates[k].end;
+          var c = candidates[k];
+          if (c.href) c.href = unmaskEscapes(c.href, false);
+          if (c.body) c.body = unmaskEscapes(c.body, true);
+          if (c.raw) c.raw = unmaskEscapes(c.raw, true);
+          if (c.wikiTarget) c.wikiTarget = unmaskEscapes(c.wikiTarget, false);
+          if (c.wikiHeading) c.wikiHeading = unmaskEscapes(c.wikiHeading, false);
+          if (c.wikiAlias) c.wikiAlias = unmaskEscapes(c.wikiAlias, false);
+          out.push(c);
+          lastEnd = c.end;
         }
       }
       return out;
@@ -12223,6 +12538,11 @@
       var markers = [];
       var cursorAt = -1;
       var self = this;
+      // A block already in source form holds markdown; a rendered one holds
+      // content, whose syntax characters have to be escaped on the way out.
+      var escaping = !(block.hasAttribute && block.hasAttribute("data-leaf-source"));
+      var codeDepth = 0;
+      var linkDepth = 0;
 
       function noteCursor(absOffset) {
         if (cursorAt < 0) cursorAt = absOffset;
@@ -12266,6 +12586,12 @@
             // round-trip). Same guard as nodeToMarkdown's.
             if (prevWasBr) {
               textPiece = textPiece.replace(/^[\n\r\t]+/, "");
+            }
+            if (escaping && codeDepth === 0) {
+              textPiece = escapeInlineMarkdown(textPiece, linkDepth > 0);
+              if (source.length === 0 || /\n$/.test(source)) {
+                textPiece = escapeLineStart(textPiece);
+              }
             }
             source += textPiece;
             prevWasBr = false;
@@ -12316,6 +12642,7 @@
             // via pushMarker would double up. Bare `<a>` (Earmark, or
             // `execCommand("createLink")`) has no marker children, so
             // we synthesize them.
+            linkDepth++;
             if (self._hasMarkerChildren(c)) {
               walk(c);
             } else {
@@ -12323,6 +12650,7 @@
               walk(c);
               pushMarker("](" + href + ")");
             }
+            linkDepth--;
             continue;
           }
 
@@ -12344,6 +12672,7 @@
 
           var delim = self._delimiterFor(c);
           if (delim) {
+            if (delim === "`") codeDepth++;
             if (self._hasMarkerChildren(c)) {
               walk(c);
             } else {
@@ -12351,6 +12680,7 @@
               walk(c);
               pushMarker(delim);
             }
+            if (delim === "`") codeDepth--;
             continue;
           }
 
@@ -16009,7 +16339,7 @@
 
       // Save selection so we can restore it before inserting
       var savedRange = null;
-      if (this._mode === "visual" && this._visualEl) {
+      if ((this._mode === "visual" || this._mode === "hybrid") && this._visualEl) {
         var sel = window.getSelection();
         if (sel.rangeCount > 0) {
           savedRange = sel.getRangeAt(0).cloneRange();
@@ -16116,7 +16446,7 @@
     _insertImageByUrl: function (url, alt, savedRange) {
       var escapedAlt = escapeAttr(alt);
 
-      if (this._mode === "visual" && this._visualEl) {
+      if ((this._mode === "visual" || this._mode === "hybrid") && this._visualEl) {
         this._visualEl.focus();
         // Restore saved selection
         if (savedRange) {
@@ -16126,6 +16456,7 @@
         }
         var imgHtml = '<img src="' + escapeAttr(url) + '" alt="' + escapedAlt + '" draggable="true" />';
         document.execCommand("insertHTML", false, imgHtml);
+        if (this._mode === "hybrid") this._refreshSourceBlock();
         this._debouncedPushVisualChange();
       } else if (this._mode === "markdown") {
         var gid = this._editorId.replace(/-/g, "_") + "_markdown";
@@ -16133,6 +16464,16 @@
         if (ins) {
           var md = "![" + (alt || "") + "](" + url + ")";
           ins(md);
+        }
+      } else if (this._mode === "html") {
+        var imgTa = this._getHtmlTextarea();
+        if (imgTa) {
+          this._insertAtTextarea(
+            imgTa,
+            '<img src="' + escapeAttr(url) + '" alt="' + escapedAlt + '" />'
+          );
+          this._debouncedPushHtmlChange(imgTa.value);
+          this._updateCounts();
         }
       }
     },
@@ -16662,7 +17003,15 @@
 
       // -- Image native drag: dragover/drop/dragleave/dragend --
       this._visualEl.addEventListener("dragover", function (e) {
-        if (!self._dragSourceBlock) return;
+        if (!self._dragSourceBlock) {
+          // A file from outside: the browser lets it drop only where the
+          // default is prevented, and would otherwise open it as a page.
+          if (self._draggedFiles(e) && !self._readonly) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+          }
+          return;
+        }
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
 
@@ -16682,7 +17031,12 @@
 
       this._visualEl.addEventListener("drop", function (e) {
         e.preventDefault();
-        if (!self._dragSourceBlock || !self._dragDropTarget) {
+        if (!self._dragSourceBlock) {
+          self._cleanupDrag();
+          self._dropFiles(e);
+          return;
+        }
+        if (!self._dragDropTarget) {
           self._cleanupDrag();
           return;
         }
@@ -17133,6 +17487,12 @@
         { label: "Duplicate", fn: function () { self._duplicateBlock(block); } },
         { label: "Delete", danger: true, fn: function () { self._deleteBlock(block); } },
       ];
+      // Nothing to convert a table, figure or rule into.
+      if (/^(table|figure|hr|details)$/.test(block.tagName.toLowerCase())) {
+        items = items.filter(function (item) {
+          return item.label === "Duplicate" || item.label === "Delete";
+        });
+      }
 
       items.forEach(function (item) {
         if (item.divider) {
@@ -17208,7 +17568,55 @@
       if (!block || !block.parentNode) return;
       var cur = block.tagName.toLowerCase();
       if (cur === tag) return;
+      // A list becomes one block per item; a table, figure or rule has no
+      // text form to convert into and is left alone.
+      if (cur === "ul" || cur === "ol") {
+        this._convertListItems(block, tag);
+        return;
+      }
+      if (cur === "table" || cur === "figure" || cur === "hr" || cur === "details") return;
 
+      var el = this._blockFrom(block, tag);
+      block.parentNode.replaceChild(el, block);
+      this._dragHandleBlock = null;
+    },
+
+    _convertListItems: function (list, tag) {
+      var parent = list.parentNode;
+      var items = Array.prototype.slice.call(list.childNodes);
+      for (var i = 0; i < items.length; i++) {
+        var li = items[i];
+        if (li.nodeType !== Node.ELEMENT_NODE) continue;
+        if (li.tagName.toLowerCase() !== "li") {
+          parent.insertBefore(li, list);
+          continue;
+        }
+        var nested = [];
+        var chrome = [];
+        for (var c = 0; c < li.childNodes.length; c++) {
+          var kid = li.childNodes[c];
+          if (kid.nodeType !== Node.ELEMENT_NODE) continue;
+          var kidTag = kid.tagName.toLowerCase();
+          if (kidTag === "ul" || kidTag === "ol") nested.push(kid);
+          else if (
+            kid.classList &&
+            (kid.classList.contains("leaf-task-box") || kid.classList.contains("leaf-source-marker"))
+          ) {
+            chrome.push(kid);
+          }
+        }
+        for (var n = 0; n < nested.length; n++) li.removeChild(nested[n]);
+        for (var k = 0; k < chrome.length; k++) li.removeChild(chrome[k]);
+        parent.insertBefore(this._blockFrom(li, tag), list);
+        for (n = 0; n < nested.length; n++) parent.insertBefore(nested[n], list);
+      }
+      parent.removeChild(list);
+      this._dragHandleBlock = null;
+    },
+
+    // A new block of `tag` holding `block`'s content.
+    _blockFrom: function (block, tag) {
+      var cur = block.tagName.toLowerCase();
       var el;
       if (tag === "blockquote") {
         el = document.createElement("blockquote");
@@ -17232,8 +17640,7 @@
         }
       }
       if (el.innerHTML.trim() === "") el.innerHTML = "<br>";
-      block.parentNode.replaceChild(el, block);
-      this._dragHandleBlock = null;
+      return el;
     },
 
     _duplicateBlock: function (block) {
@@ -17423,16 +17830,10 @@
       switch (payload.action) {
         case "insert_image":
           var imageUrl = safeUrl(payload.url, "image");
-          if (this._visualEl && imageUrl) {
-            this._visualEl.focus();
-            var imgHtml =
-              '<img src="' +
-              escapeAttr(imageUrl) +
-              '" alt="' +
-              escapeAttr(payload.alt) +
-              '" draggable="true" />';
-            document.execCommand("insertHTML", false, imgHtml);
-            this._debouncedPushVisualChange();
+          if (imageUrl) {
+            // Into whichever surface is showing, like insert_markdown.
+            this._insertImageByUrl(imageUrl, payload.alt || "", null);
+            this._updateCounts();
           }
           break;
 

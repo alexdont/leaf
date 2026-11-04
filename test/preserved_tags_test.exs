@@ -201,6 +201,45 @@ defmodule Leaf.PreservedTagsTest do
     end
   end
 
+  describe "tags that are hard to find" do
+    test "a > inside an attribute value does not end the tag" do
+      html = visual_html(content: ~s(<Hero title="a > b"/>), preserve_tags: ["Hero"])
+
+      assert html =~ "leaf-atomic"
+      assert html =~ ~s(data-leaf-raw="&lt;Hero title=&quot;a &gt; b&quot;/&gt;")
+      refute html =~ ~r/<p>[^<]*b"\/&gt;/, "nothing of the tag is left as prose"
+    end
+
+    test "the paired form is read whole too, attributes and body" do
+      html =
+        visual_html(
+          content: ~s(<Note title="x > y" kind='a>b'>body text</Note>),
+          preserve_tags: ["Note"]
+        )
+
+      assert html =~ "leaf-atomic"
+      assert html =~ "body text"
+      assert html =~ ~s(x &gt; y)
+    end
+
+    test "a tag inside a code span is a sample, not a component" do
+      html = visual_html(content: "Write `<Hero/>` to get one.", preserve_tags: ["Hero"])
+
+      refute html =~ "leaf-atomic"
+      assert html =~ "<code>&lt;Hero/&gt;</code>"
+    end
+
+    test "a tag inside a code fence is a sample too" do
+      content = "```html\n<Hero title=\"x\"/>\n```\n\n<Hero title=\"real\"/>"
+      html = visual_html(content: content, preserve_tags: ["Hero"])
+
+      # The HTML-mode textarea carries an escaped copy of the surface, so
+      # only the unescaped chip markup is counted.
+      assert length(Regex.scan(~r/<span class="leaf-atomic leaf-atomic-block"/, html)) == 1
+      assert html =~ "real"
+    end
+  end
+
   describe "unpreserved-tag warning" do
     test "names the undeclared tags and how to declare them" do
       log =

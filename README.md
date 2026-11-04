@@ -124,11 +124,29 @@ Then use it in your templates:
 | `toolbar` | list | `[]` | Extra toolbar buttons (`:image`, `:video`) |
 | `deny` | list | `[]` | Disallowed features (`:links`, `:images`, `:video`, `:visual_mode`, `:hybrid_mode`, `:markdown_mode`, `:html_mode`); denied controls are hidden from the UI — see [Denying features](#denying-features) |
 | `preserve_tags` | list | `[]` | Custom component tag names to protect from the HTML round-trip — **required** for content using them, see [Custom component tags](#custom-component-tags) |
+| `tag_previews` | map | `%{}` | How a preserved tag is drawn: `%{"Headline" => :headline, "Showcase" => :split, "Cta" => :button, "Embed" => :frame, "Track" => :audio}`. A tag with no entry keeps the generic box |
+| `media_url` | function | `nil` | `(tag_name, attrs) -> url \| nil`: which picture a preserved tag stands for (`<Image file_uuid=…/>`, a `<Gallery>` of them). Asked while the document is drawn and when a tag is inserted, so keep it cheap; a raise counts as `nil` |
+| `toolbar_layout` | `:fixed` \| `:floating` \| `:both` | `:fixed` | The toolbar above the editor, a bubble over the selection, or both |
+| `maxlength` | integer | `nil` | Character cap, enforced while typing and pasting |
 | `toolbar_extra` | list | `[]` | Host-defined toolbar buttons — see [Host toolbar buttons](#host-toolbar-buttons) |
 | `placeholder` | string | `"Write something..."` | Placeholder text shown when the editor is empty |
 | `readonly` | boolean | `false` | Read-only mode |
 | `height` | string | `"480px"` | Editor height (the body resizes from this baseline) |
+| `min_height`, `max_height` | string | `nil` | Bounds for that resizing |
 | `debounce` | integer | `400` | Debounce interval in ms for content-change events |
+| `flush_on_blur` | boolean | `true` | Push the pending keystrokes when the editor loses focus, not only when the debounce fires |
+| `emit_events` | boolean | `false` | Also send `{:leaf_focus, …}`, `{:leaf_blur, …}`, `{:leaf_selection_changed, …}` and, with `upload_handler`, `{:leaf_paste_image, …}` |
+| `sync_input_name` | string | `nil` | Name of a hidden `<input>` kept equal to the markdown, for a plain form submit |
+| `export` | boolean | `false` | A toolbar button that downloads the document as a `.md` file |
+| `protect_navigation` | boolean | `false` | Ask before the page is left with unsaved changes (`action: :mark_saved` and `:set_content` re-baseline) |
+| `save_status` | `:saved` \| `:saving` \| `:unsaved` \| `nil` | `nil` | An indicator in the toolbar, set by the host as it saves |
+| `smart_typography` | boolean | `false` | Straight quotes and `--` become typographic as you type |
+| `spellcheck` | boolean | `true` | The browser's spell checker on the visual surface |
+| `dir` | `"ltr"` \| `"rtl"` \| `"auto"` | `"ltr"` | Text direction |
+| `wiki_links` | map | `nil` | `%{resolve: true}` decorates `[[Target]]` links and asks the host which exist (`{:leaf_resolve_links, …}`, answered with `action: :link_targets`); `follow: :click \| :modifier` picks how they open |
+| `collaboration` | map | `nil` | `%{operations: true, awareness: true}` — live editing; see [Live editing](#live-editing) |
+| `gettext_backend` | module | `nil` | Per-editor override of `config :leaf, :gettext_backend` |
+| `debug_typing` | boolean | `false` | Diagnostics panel for dead keystrokes; a debugging aid, not a switch to ship |
 | `loading_preset` | atom | `:random` | Pre-mount loading label preset: `:random` picks from `:unpuzzling`, `:brewing`, `:polishing`, `:composing`, `:crafting`, `:tidying`. `:default` shows plain `"Loading…"` |
 | `loading_text` | string | `nil` | Custom loading label; takes precedence over `loading_preset` when set |
 | `upload_handler` | any | `nil` | Hint that the consumer supports uploads. When set, the main image button asks the parent for an upload via `:leaf_insert_request`; when `nil`, it opens the by-URL dialog directly |
@@ -354,6 +372,17 @@ def handle_info({:leaf_flushed, %{editor_id: id, ref: ref, markdown: md}}, socke
 end
 ```
 
+Other messages, each with `editor_id`:
+
+| Message | When |
+|---|---|
+| `{:leaf_toolbar_action, %{id, selection: %{text, range}}}` | A `toolbar_extra` button was pressed |
+| `{:leaf_paste_image, %{data_url, name, mime}}` | A picture was pasted or dropped, with `upload_handler` and `emit_events` set — store it and answer with `action: :insert_image` |
+| `{:leaf_focus, …}`, `{:leaf_blur, …}` | With `emit_events` |
+| `{:leaf_selection_changed, %{text, range}}` | With `emit_events` |
+| `{:leaf_resolve_links, %{targets, seq}}` | With `wiki_links`; answer with `action: :link_targets` |
+| `{:leaf_link_clicked, %{target, heading, href, modifier}}` | A wiki link was followed |
+
 Live editing adds `{:leaf_operation, …}`, `{:leaf_awareness, …}`,
 `{:leaf_ready, …}` and `{:leaf_resync, …}`, answered with the `:apply_operation`,
 `:peer_cursors` and `:revision` commands. `Leaf.Collab.join/2` handles all of
@@ -400,6 +429,16 @@ send_update(Leaf, id: "my-editor", action: :flush, ref: "save-42")
 
 # Mark the current content as the clean baseline
 send_update(Leaf, id: "my-editor", action: :mark_saved)
+
+# Insert markdown at the caret (a block when the text ends in a line break; a
+# preserved tag arrives as its finished chip)
+send_update(Leaf, id: "my-editor", action: :insert_markdown, text: "<Note>…</Note>\n\n")
+
+# Answer an inline-suggestion request
+send_update(Leaf, id: "my-editor", action: :suggestions, trigger: "#", query: q, seq: seq, results: results)
+
+# Answer a wiki-link resolution request
+send_update(Leaf, id: "my-editor", action: :link_targets, targets: %{"Ideas" => "/notes/ideas"}, seq: seq)
 
 # Answer a {:leaf_suggest, …} request (echo trigger/query/seq back unchanged)
 send_update(Leaf,
