@@ -366,12 +366,20 @@ defmodule Leaf.Collab.Room do
   end
 
   def handle_call({:join, session_id, pid, identity}, _from, state) do
-    Process.monitor(pid)
+    # A session that joins again (a reconnect, a document switched and
+    # switched back) must not leave its earlier monitor behind.
+    case state.people do
+      %{^session_id => %{monitor: ref}} when is_reference(ref) -> Process.demonitor(ref, [:flush])
+      _ -> :ok
+    end
+
+    monitor = Process.monitor(pid)
     state = cancel_idle(state)
 
     person = %{
       session: session_id,
       pid: pid,
+      monitor: monitor,
       offset: nil,
       anchor: nil,
       # What the host calls this person, falling back to the session id. A

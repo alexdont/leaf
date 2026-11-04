@@ -485,7 +485,11 @@ def mount(%{"id" => id}, _session, socket) do
 end
 ```
 
-and hand the editor what `join/2` gave you:
+If the editor has a `deny` list, give `join/2` the same list as `deny:` — an
+editor that shows the document without its links holds a different text from
+the room's, and without it that would be taken for a rewrite and adopted.
+
+Then hand the editor what `join/2` gave you:
 
 ```heex
 <.leaf_editor

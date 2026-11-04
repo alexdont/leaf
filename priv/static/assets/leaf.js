@@ -1919,6 +1919,18 @@
     return nodes;
   }
 
+  // A pattern that cannot use lookbehind — Safari before 16.4 rejects the
+  // whole bundle for one — captures the character before its delimiter
+  // instead, and the match is handed on as if it had not.
+  function withoutLead(m, pattern) {
+    if (!m || !pattern.lead) return m;
+    var lead = m[1] || "";
+    var out = [m[0].slice(lead.length), m[2]];
+    out.index = m.index + lead.length;
+    out.input = m.input;
+    return out;
+  }
+
   // =========================================================================
   // LiveView Hook
   // =========================================================================
@@ -2395,6 +2407,10 @@
 
     destroyed() {
       this._unlistenDocument();
+      if (this._resyncFallbackTimer) {
+        clearTimeout(this._resyncFallbackTimer);
+        this._resyncFallbackTimer = null;
+      }
       if (this._closeTextPrompt) {
         this._closeTextPrompt();
       }
@@ -2737,16 +2753,15 @@
     },
 
     _debouncedPushHtmlChange: function (content) {
-      this._syncFormInput(htmlToMarkdown(content || ""));
+      if (this._syncInputName) this._syncFormInput(htmlToMarkdown(content || ""));
       if (this._htmlDebounceTimer)
         clearTimeout(this._htmlDebounceTimer);
       var self = this;
-      var hmd = htmlToMarkdown(content || "");
       this._htmlDebounceTimer = setTimeout(function () {
         self.pushEventTo(self.el, "html_content_changed", {
           editor_id: self._editorId,
           content: content,
-          dirty: self._computeDirty(hmd),
+          dirty: self._computeDirty(htmlToMarkdown(content || "")),
         });
       }, this._debounceMs);
     },
@@ -4056,7 +4071,9 @@
 
     _debouncedPushVisualChange: function () {
       if (this._debounceTimer) clearTimeout(this._debounceTimer);
-      if (this._visualEl) {
+      // Serializing the whole document on every keystroke is only worth it
+      // when a form field has to hold the result at all times.
+      if (this._visualEl && this._syncInputName) {
         this._syncFormInput(htmlToMarkdown(this._visualEl.innerHTML));
       }
       this._scheduleOperation();
@@ -7331,7 +7348,7 @@
 
       var patterns = this._autoFormatPatterns;
       for (var i = 0; i < patterns.length; i++) {
-        var m = before.match(patterns[i].regexAt);
+        var m = withoutLead(before.match(patterns[i].regexAt), patterns[i]);
         if (m) {
           // Defer when an outer delimiter is still open — typing
           // `~~**word**` shouldn't auto-format the inner `**word**` while
@@ -7367,13 +7384,15 @@
         type: "boldItalic",
       },
       {
-        // Lookbehind/lookahead so `**...**` doesn't match the inner part
+        // The lead group and the lookahead keep `**...**` from matching the inner part
         // of `***...***` (triple → bold-italic) before the user finishes
-        // the closing pair. `(?<!\*)` keeps the opening `**` from being
+        // the closing pair. `(^|[^*])` keeps the opening `**` from being
         // adjacent to another `*`; `(?!\*)` keeps the closing `**` from
         // being followed by one.
-        regexAt: /(?<!\*)\*\*([^*\n]+?)\*\*(?!\*)$/,
-        regexAny: /(?<!\*)\*\*([^*\n]+?)\*\*(?!\*)/,
+        regexAt: /(^|[^*])\*\*([^*\n]+?)\*\*(?!\*)$/,
+        regexAny: /(^|[^*])\*\*([^*\n]+?)\*\*(?!\*)/,
+        // The leading group stands in for a lookbehind; see `withoutLead`.
+        lead: true,
         tag: "strong",
         delim: "**",
       },
@@ -7391,8 +7410,9 @@
         isSpoiler: true,
       },
       {
-        regexAt: /(?<!\*)\*([^*\n]+?)\*$/,
-        regexAny: /(?<!\*)\*([^*\n]+?)\*(?!\*)/,
+        regexAt: /(^|[^*])\*([^*\n]+?)\*$/,
+        regexAny: /(^|[^*])\*([^*\n]+?)\*(?!\*)/,
+        lead: true,
         tag: "em",
         delim: "*",
       },
@@ -7616,6 +7636,7 @@
       if (!pending.length) return;
 
       this._wikiLinkSeq = (this._wikiLinkSeq || 0) + 1;
+      this._wikiLinkAsked = pending;
       this.pushEventTo(this.el, "resolve_links", {
         editor_id: this._editorId,
         targets: pending,
@@ -7652,6 +7673,18 @@
         if (Object.prototype.hasOwnProperty.call(targets, key)) {
           this._wikiLinkTargets[key] = targets[key];
         }
+      }
+      // A target the host left out of its answer does not exist as far as
+      // the host knows. Remembered as such, or it would be asked about again
+      // on every render.
+      if (payload.seq === this._wikiLinkSeq && this._wikiLinkAsked) {
+        for (var a = 0; a < this._wikiLinkAsked.length; a++) {
+          var asked = this._wikiLinkAsked[a];
+          if (!Object.prototype.hasOwnProperty.call(this._wikiLinkTargets, asked)) {
+            this._wikiLinkTargets[asked] = { exists: false };
+          }
+        }
+        this._wikiLinkAsked = null;
       }
 
       if (!this._visualEl) return;
@@ -7787,7 +7820,7 @@
           patterns[i].regexAny.source,
           patterns[i].regexAny.flags,
         );
-        var m = re.exec(text);
+        var m = withoutLead(re.exec(text), patterns[i]);
         if (m && (earliest === null || m.index < earliest.index)) {
           earliest = m;
           earliestPattern = patterns[i];
@@ -8836,6 +8869,7 @@
       // wait until ours are acknowledged and settle it from the host then.
       if (!payload.resync && !placeable && this._pending && this._pending.length) {
         this._needsResync = true;
+        this._armResyncFallback();
         if (typeof payload.revision === "number") this._collabRevision = payload.revision;
         return;
       }
@@ -9090,17 +9124,6 @@
       return out;
     },
 
-    // Zero-width placeholders are scaffolding, not text. An empty list item
-    // gets one so the caret has somewhere to sit, and whether a given item has
-    // one depends on what that session has been doing — so counting them makes
-    // two people looking at the same document disagree about where a character
-    // is. That misplaces their carets and, worse, makes an edit apply at the
-    // wrong offset on the other side.
-    _visibleChars: function (text) {
-      if (!text) return "";
-      return text.replace(/[\u200B\uFEFF]/g, "");
-    },
-
     _inSourceMarker: function (node, root) {
       var el = node.parentNode;
       var stop = root || this._visualEl;
@@ -9297,9 +9320,15 @@
       return at + insert;
     },
 
+    // `start` and `end` are offsets into the visible text — what
+    // `_visibleOffset` measured — so they are turned back into positions by
+    // the same bookkeeping (one break per block boundary, placeholders and
+    // trailing whitespace not counted). The history index counts text nodes
+    // only, and restoring through it drifted a character per preceding block.
     _restoreVisualCaret: function (start, end) {
-      var startPoint = this._historyNodeAt(start);
-      var endPoint = end === start ? startPoint : this._historyNodeAt(end);
+      var startPoint = this._visibleNodeAt(start) || this._historyNodeAt(start);
+      var endPoint =
+        end === start ? startPoint : this._visibleNodeAt(end) || this._historyNodeAt(end);
       if (!startPoint) return;
 
       try {
@@ -9450,9 +9479,30 @@
       // Whatever we could not apply while our own edits were in the air can be
       // settled now, from the host's copy.
       if (!this._pending.length && this._needsResync) {
-        this._needsResync = false;
-        this.pushEventTo(this.el, "resync", { editor_id: this._editorId });
+        this._requestResync();
       }
+    },
+
+    _requestResync: function () {
+      this._needsResync = false;
+      if (this._resyncFallbackTimer) {
+        clearTimeout(this._resyncFallbackTimer);
+        this._resyncFallbackTimer = null;
+      }
+      this.pushEventTo(this.el, "resync", { editor_id: this._editorId });
+    },
+
+    // The acknowledgement that drains the pending list is the normal way out
+    // of a deferred resync. A host that never acknowledges would leave every
+    // later edit from a peer dropped on the floor, so after a while the
+    // host's copy is asked for regardless.
+    _armResyncFallback: function () {
+      if (this._resyncFallbackTimer) return;
+      var self = this;
+      this._resyncFallbackTimer = setTimeout(function () {
+        self._resyncFallbackTimer = null;
+        if (self._needsResync) self._requestResync();
+      }, this._resyncFallbackMs || 2000);
     },
 
     _emitOperation: function (markdown) {
@@ -12478,14 +12528,15 @@
             re.lastIndex++;
             continue;
           }
+          var nm = withoutLead(m, p);
           candidates.push({
-            start: m.index,
-            end: m.index + m[0].length,
+            start: nm.index,
+            end: nm.index + nm[0].length,
             delim: delim,
             openLen: delim.length,
             closeLen: delim.length,
             pattern: p,
-            body: m[1]
+            body: nm[1]
           });
         }
       }

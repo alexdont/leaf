@@ -507,7 +507,15 @@ defmodule Leaf do
     """
   )
 
-  attr(:maxlength, :integer, default: nil)
+  attr(:maxlength, :integer,
+    default: nil,
+    doc: """
+    Character cap, kept by the browser while typing and pasting. It is a
+    courtesy to the writer, not a guarantee: a host that must enforce a
+    length validates the text it saves.
+    """
+  )
+
   attr(:spellcheck, :boolean, default: true)
   attr(:dir, :string, default: "ltr", values: ["ltr", "rtl", "auto"])
   attr(:smart_typography, :boolean, default: false)
@@ -828,11 +836,15 @@ defmodule Leaf do
 
   def update(assigns, socket) do
     {parent_mode, assigns} = Map.pop(assigns, :mode, :hybrid)
+    assigns = keep_live_content(assigns, socket)
 
     socket =
       socket
       |> assign(assigns)
       |> assign_new(:mode, fn -> parent_mode end)
+      # Read by the hook once, when it mounts. Rendered from the live content
+      # it would ride the whole document down in every diff after every edit.
+      |> then(&assign_new(&1, :initial_markdown, fn -> &1.assigns.content end))
 
     deny = Map.get(socket.assigns, :deny, [])
     validate_deny!(deny)
@@ -852,6 +864,23 @@ defmodule Leaf do
 
     {:ok, socket}
   end
+
+  # A parent that re-renders passes `content` again. Unchanged, it is the
+  # document the editor started from, not the one it holds now — taking it
+  # would make the next `{:leaf_changed, …}` report text the writer has long
+  # since typed over. A changed value is a new document and is taken.
+  defp keep_live_content(%{content: content} = assigns, socket) do
+    case socket.assigns do
+      %{host_content: ^content} -> Map.delete(assigns, :content)
+      _ -> Map.put(assigns, :host_content, content)
+    end
+  end
+
+  defp keep_live_content(assigns, _socket), do: assigns
+
+  @doc false
+  def strip_denied(markdown, deny) when is_binary(markdown) and is_list(deny),
+    do: sanitize_markdown(markdown, deny)
 
   @impl true
   def render(assigns) do
@@ -884,7 +913,7 @@ defmodule Leaf do
       data-editor-id={@id}
       data-mode={to_string(@mode)}
       data-placeholder={@placeholder}
-      data-initial-markdown={@content}
+      data-initial-markdown={@initial_markdown}
       data-debounce={@debounce}
       data-flush-on-blur={to_string(@flush_on_blur)}
       data-emit-events={to_string(@emit_events)}
@@ -2853,7 +2882,7 @@ defmodule Leaf do
     html =
       markdown
       |> sanitize_markdown(socket.assigns.deny)
-      |> markdown_to_html()
+      |> markdown_to_html(render_opts(socket))
       |> sanitize_html(socket.assigns.deny)
 
     {:noreply, push_event(socket, "leaf-set-html-textarea:#{socket.assigns.id}", %{html: html})}
@@ -4032,7 +4061,9 @@ defmodule Leaf do
         {:ok, re} =
           Regex.compile("<#{t}\\b#{@tag_attrs}/>|<#{t}\\b#{@tag_attrs}>.*?</#{t}>", "is")
 
-        re |> Regex.scan(markdown, return: :index) |> Enum.map(&hd/1)
+        re
+        |> Regex.scan(markdown, return: :index)
+        |> Enum.map(fn [range | _] -> balance_range(markdown, t, range) end)
       end)
       |> Enum.reject(fn {start, _len} ->
         Enum.any?(code_ranges, fn {cs, cl} -> start >= cs and start < cs + cl end)
@@ -4053,6 +4084,27 @@ defmodule Leaf do
       end)
 
     {protected, store}
+  end
+
+  # A tag inside a tag of the same name (`<Note><Note>x</Note></Note>`): the
+  # lazy match ends at the inner close. Walk the opens and closes from the
+  # start and stop where the depth returns to zero.
+  defp balance_range(markdown, t, {start, len} = range) do
+    {:ok, re} = Regex.compile("<#{t}\\b|</#{t}\\s*>", "i")
+    rest = binary_part(markdown, start, byte_size(markdown) - start)
+
+    re
+    |> Regex.scan(rest, return: :index)
+    |> Enum.map(&hd/1)
+    |> Enum.reduce_while(0, fn {at, l}, depth ->
+      closing? = binary_part(rest, at, 2) == "</"
+      depth = if closing?, do: depth - 1, else: depth + 1
+      if depth == 0, do: {:halt, {:done, at + l}}, else: {:cont, depth}
+    end)
+    |> case do
+      {:done, stop} when stop > len -> {start, stop}
+      _ -> range
+    end
   end
 
   # Ranges sorted by start (longest first on a tie), keeping those that do

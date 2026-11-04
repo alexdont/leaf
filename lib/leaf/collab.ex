@@ -77,6 +77,10 @@ defmodule Leaf.Collab do
     * `:identity` — `%{name:, color:}`, both optional. A host with signed-in
       users passes theirs so everyone sees a name rather than an identifier.
     * `:awareness` — show other people's carets and selections. Defaults true.
+    * `:deny` — the editor's `deny` list, when it has one. An editor that
+      shows the document without its links holds a different text from the
+      room's; without this it would be taken for a rewrite and adopted, and
+      the links would be gone for everyone.
     * `:debug` — diagnostics. Defaults false; see `Leaf.Collab.Log`.
   """
   def join(socket, opts) do
@@ -101,6 +105,7 @@ defmodule Leaf.Collab do
       topic: info.topic,
       pubsub: info.pubsub,
       debug: Keyword.get(opts, :debug, false),
+      deny: Keyword.get(opts, :deny, []),
       content: snapshot.document,
       revision: snapshot.revision,
       people: Room.cursors(room, session_id),
@@ -303,6 +308,10 @@ defmodule Leaf.Collab do
 
     cond do
       markdown == snapshot.document ->
+        {:halt, socket}
+
+      # The same document, minus what this editor is not allowed to show.
+      markdown == Leaf.strip_denied(snapshot.document, Map.get(state, :deny, [])) ->
         {:halt, socket}
 
       # The room went past what this editor last heard, so the room is newer.

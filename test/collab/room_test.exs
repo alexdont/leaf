@@ -145,6 +145,17 @@ defmodule Leaf.Collab.RoomTest do
   # LiveView that outlives its stay — one that switches documents without
   # remounting keeps its pid alive, so without a goodbye the person lingers
   # as a ghost caret in the document they left.
+  describe "joining again" do
+    test "does not stack a monitor per join", %{room: room} do
+      Room.join(room, "A", self())
+      Room.join(room, "A", self())
+      Room.join(room, "A", self())
+
+      {:monitors, monitors} = Process.info(Process.whereis(room), :monitors)
+      assert Enum.count(monitors, fn {:process, pid} -> pid == self() end) == 1
+    end
+  end
+
   describe "leaving deliberately" do
     test "the caret is gone for everyone else", %{room: room} do
       Room.join(room, "A", self())

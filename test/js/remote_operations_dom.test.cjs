@@ -213,11 +213,13 @@ test("hybrid source markers do not drag the caret", { skip: dom.skip }, () => {
     { at: 15, remove: 0, insert: "\n- next", content: "# Title\n\n- what\n- next" }
   );
 
-  assert.equal(
-    caretOffset(e),
-    10,
-    "caret must stay at the end of 'what', not be pulled back by the marker"
-  );
+  // "Title" + "what": the end of the item, in text-node terms. (Not 10 —
+  // that was one character INTO "next", a drift of one per preceding block
+  // from restoring a visible offset through the text-node index.)
+  assert.equal(caretOffset(e), 9, "caret must stay at the end of 'what', not be pulled back by the marker");
+  const after = window.getSelection().getRangeAt(0);
+  assert.equal(after.startContainer.textContent, "what");
+  assert.equal(after.startOffset, 4);
 
   e.cleanup();
 });

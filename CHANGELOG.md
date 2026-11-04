@@ -36,6 +36,30 @@
   left as code rather than turned into a chip.
 - README: the assigns table now lists `tag_previews`, `media_url` and the
   other assigns it had skipped; the messages and commands are complete.
+- **Live editing: the caret drifted after a peer's edit** in a document of
+  more than one paragraph — one character per paragraph before it, because
+  the caret was measured with line breaks and put back without them.
+- **Live editing with `deny`: the links vanished for everyone.** An editor
+  that shows the document without its links holds a different text from the
+  room's, and on arrival the room took that for a rewrite and adopted it.
+  `Leaf.Collab.join/2` takes `deny:` and tells the two apart.
+- **A parent re-render passed the original `content` back** and the editor
+  took it, so the next `{:leaf_changed, …}` could report text the writer had
+  long since typed over. Unchanged content is now left alone; a changed value
+  is still a new document.
+- **A tag inside a tag of the same name** (`<Note><Note>…</Note></Note>`) was
+  cut at the inner close and the rest handed to the markdown parser.
+- **A deferred resync could wait forever** behind an edit a host never
+  acknowledged; after two seconds the host's copy is asked for regardless.
+- **A wiki link the host did not answer for was asked about on every
+  render.** It is remembered as unknown until the next answer.
+- **The whole document was serialized to markdown on every keystroke** even
+  with nothing to put it in; it now is only with `sync_input_name` set. The
+  markdown no longer rides down in every LiveView diff either.
+- **Safari before 16.4 refused the whole bundle** over two regex lookbehinds
+  in the auto-format patterns.
+- A session joining a room again no longer stacks a monitor per join;
+  `mix test.js` says loudly when the DOM tests were skipped for want of jsdom.
 - **Raw HTML in a document reached the page unfiltered.** Markdown may
   carry HTML, and Leaf writes some itself, so it was rendered with raw HTML
   allowed — and nothing was removed afterwards. A `<script>`, an `onerror`

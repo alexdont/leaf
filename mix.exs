@@ -62,6 +62,18 @@ defmodule Leaf.MixProject do
         {output, status} = System.cmd("node", ["--test" | files], stderr_to_stdout: true)
         IO.puts(output)
         if status != 0, do: Mix.raise("JS tests failed")
+
+        # A skipped DOM test is a test that did not run. Green without jsdom
+        # is the floor, not the gate — say so where it will be seen.
+        case Regex.run(~r/^# skipped ([1-9]\d*)/m, output) do
+          [_, n] ->
+            Mix.shell().error(
+              "[test.js] #{n} DOM tests were SKIPPED (jsdom not installed). Run `npm install` in #{File.cwd!()} — the skipped ones are the tests that catch DOM bugs."
+            )
+
+          _ ->
+            :ok
+        end
     end
   end
 

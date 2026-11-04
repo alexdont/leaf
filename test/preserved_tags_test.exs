@@ -222,6 +222,21 @@ defmodule Leaf.PreservedTagsTest do
       assert html =~ ~s(x &gt; y)
     end
 
+    test "a tag inside a tag of the same name is one chip" do
+      html =
+        visual_html(
+          content: "<Note>outer <Note>inner</Note> after</Note>",
+          preserve_tags: ["Note"]
+        )
+
+      assert length(Regex.scan(~r/<span class="leaf-atomic leaf-atomic-block"/, html)) == 1
+      assert html =~ "after"
+      refute html =~ ~r/<p>[^<]*after<\/p>/, "the tail of the outer tag is not prose"
+
+      assert html =~ ~s(&lt;/Note&gt;&lt;/Note&gt;) or
+               html =~ ~s(&lt;/Note&gt; after&lt;/Note&gt;)
+    end
+
     test "a tag inside a code span is a sample, not a component" do
       html = visual_html(content: "Write `<Hero/>` to get one.", preserve_tags: ["Hero"])
 

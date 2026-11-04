@@ -430,6 +430,41 @@ defmodule LeafTest do
     end
   end
 
+  describe "a parent that re-renders" do
+    test "passing the original content again does not overwrite what the editor holds" do
+      {:ok, socket} = Leaf.mount(%Socket{assigns: %{__changed__: %{}}})
+      {:ok, socket} = Leaf.update(%{id: "editor-1", content: "original"}, socket)
+      assert socket.assigns.content == "original"
+
+      {:noreply, socket} =
+        Leaf.handle_event(
+          "content_changed",
+          %{"markdown" => "typed since", "html" => "<p>typed since</p>"},
+          socket
+        )
+
+      {:ok, socket} = Leaf.update(%{id: "editor-1", content: "original"}, socket)
+      assert socket.assigns.content == "typed since"
+
+      {:ok, socket} = Leaf.update(%{id: "editor-1", content: "a new document"}, socket)
+      assert socket.assigns.content == "a new document"
+    end
+
+    test "the markup the hook reads at mount does not follow every edit" do
+      {:ok, socket} = Leaf.mount(%Socket{assigns: %{__changed__: %{}}})
+      {:ok, socket} = Leaf.update(%{id: "editor-1", content: "original"}, socket)
+
+      {:noreply, socket} =
+        Leaf.handle_event(
+          "content_changed",
+          %{"markdown" => "edited", "html" => "<p>edited</p>"},
+          socket
+        )
+
+      assert socket.assigns.initial_markdown == "original"
+    end
+  end
+
   describe "a client that is not ours" do
     test "mode_changed with a mode that is not one of the four is ignored" do
       socket = base_socket(mode: :visual)
