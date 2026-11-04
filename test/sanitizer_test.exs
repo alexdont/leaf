@@ -12,6 +12,14 @@ defmodule Leaf.SanitizerTest do
   alias Leaf.Sanitizer
   alias Phoenix.LiveView.Socket
 
+  # Raw HTML rendered the way the editor renders it: raw HTML allowed, the
+  # allow-list applied.
+  defp cleaned(html) do
+    html
+    |> MDEx.to_html!(render: [unsafe: true], sanitize: Sanitizer.options())
+    |> String.trim()
+  end
+
   # The editing surface alone: the markdown itself rides along in a data
   # attribute, so the whole page would still contain the attack as text.
   defp surface(markdown) do
@@ -20,10 +28,10 @@ defmodule Leaf.SanitizerTest do
     inner
   end
 
-  describe "html/1" do
+  describe "the allow-list" do
     test "drops scripts, handlers and executable URLs" do
       out =
-        Sanitizer.html(
+        cleaned(
           ~s|<p><script>x()</script><img src="x" onerror="alert(1)"><a href="javascript:alert(1)">j</a><a href="data:text/html,x">d</a></p>|
         )
 
@@ -37,7 +45,7 @@ defmodule Leaf.SanitizerTest do
 
     test "keeps what Leaf writes itself" do
       out =
-        Sanitizer.html(
+        cleaned(
           ~s(<figure data-align="left"><img src="/a.png" width="20" height="10" data-align="left" draggable="true"><figcaption>c</figcaption></figure>) <>
             ~s(<details open><summary>s</summary>b</details><p><sup>1</sup><sub>2</sub><u>u</u><mark>m</mark><kbd>k</kbd>) <>
             ~s(<span class="leaf-spoiler" contenteditable="false" data-leaf-raw="&lt;Hero/&gt;">sp</span></p>) <>
@@ -72,7 +80,7 @@ defmodule Leaf.SanitizerTest do
     end
 
     test "leaves text, entities and curly braces alone" do
-      assert Sanitizer.html("<p>a &amp; b &lt;c&gt; {x} é 😀</p><code>{:ok}</code>") ==
+      assert cleaned("<p>a &amp; b &lt;c&gt; {x} é 😀</p><code>{:ok}</code>") ==
                "<p>a &amp; b &lt;c&gt; {x} é 😀</p><code>{:ok}</code>"
     end
   end

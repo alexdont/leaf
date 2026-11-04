@@ -4630,9 +4630,12 @@ defmodule Leaf do
   defp markdown_to_html(""), do: "<p><br></p>"
 
   defp markdown_to_html(markdown) do
-    case MDEx.to_html(markdown, render: [hardbreaks: true, unsafe: true]) do
+    case MDEx.to_html(markdown,
+           render: [hardbreaks: true, unsafe: true],
+           sanitize: Leaf.Sanitizer.options()
+         ) do
       {:ok, html} ->
-        html |> Leaf.Sanitizer.html() |> clean_html()
+        clean_html(html)
 
       {:error, _} ->
         "<p>" <> Phoenix.HTML.safe_to_string(Phoenix.HTML.html_escape(markdown)) <> "</p>"

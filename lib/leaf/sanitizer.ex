@@ -19,19 +19,19 @@ defmodule Leaf.Sanitizer do
     "source" => ~w(src type)
   }
 
-  @doc "HTML with only the tags, attributes and URL schemes Leaf's own markup uses."
-  @spec html(String.t()) :: String.t()
-  def html(html) when is_binary(html) do
-    MDEx.safe_html(html,
-      escape: [content: false, curly_braces_in_code: false],
-      sanitize: [
-        add_tags: @tags,
-        add_tag_attributes: @tag_attributes,
-        add_generic_attributes: ~w(class contenteditable),
-        add_generic_attribute_prefixes: ["data-"],
-        add_url_schemes: ~w(mailto tel),
-        link_rel: nil
-      ]
-    )
+  @doc """
+  MDEx's `sanitize:` option, extended with the tags, attributes and URL
+  schemes Leaf's own markup uses.
+  """
+  @spec options() :: keyword()
+  def options do
+    [
+      add_tags: @tags,
+      add_tag_attributes: @tag_attributes,
+      add_generic_attributes: ~w(class contenteditable),
+      add_generic_attribute_prefixes: ["data-"],
+      add_url_schemes: ~w(mailto tel),
+      link_rel: nil
+    ]
   end
 end
