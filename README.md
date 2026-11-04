@@ -25,7 +25,7 @@ Add `leaf` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:leaf, "~> 0.5"}
+    {:leaf, "~> 0.10"}
   ]
 end
 ```
