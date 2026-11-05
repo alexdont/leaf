@@ -12,8 +12,8 @@ defmodule Leaf.ShippedArtifactsTest do
   @pot_path "priv/gettext/leaf.pot"
 
   describe "gettext catalog template" do
-    test "is up to date with the t(\"…\") calls in lib/leaf.ex" do
-      expected = Pot.render(File.read!("lib/leaf.ex"))
+    test "is up to date with the t(\"…\") calls in Leaf's source" do
+      expected = Pot.render(Pot.source())
 
       assert File.read!(@pot_path) == expected, """
       #{@pot_path} is out of date — a UI string was added, changed or removed \
@@ -24,7 +24,7 @@ defmodule Leaf.ShippedArtifactsTest do
     end
 
     test "carries the strings a translator would look for" do
-      msgids = Pot.msgids(File.read!("lib/leaf.ex"))
+      msgids = Pot.msgids(Pot.source())
 
       for expected <- ["Bold", "Italic", "Markdown mode", "Searching…", "Unsaved changes"] do
         assert expected in msgids

@@ -28,6 +28,20 @@ defmodule Leaf.Gettext.Pot do
   """
 
   @doc """
+  The source the catalog is built from: `lib/leaf.ex` and everything under
+  `lib/leaf/`, where the component's strings and the chip renderer's live.
+  Not the tooling — this module and the mix task — whose docs talk about
+  translated calls without being any.
+  """
+  @spec source() :: String.t()
+  def source do
+    ["lib/leaf.ex" | Path.wildcard("lib/leaf/**/*.ex")]
+    |> Enum.reject(&String.starts_with?(&1, "lib/leaf/gettext/"))
+    |> Enum.sort()
+    |> Enum.map_join("\n", &File.read!/1)
+  end
+
+  @doc """
   The full `.pot` contents for the given Elixir source.
   """
   @spec render(String.t()) :: String.t()

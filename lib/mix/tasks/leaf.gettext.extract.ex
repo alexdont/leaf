@@ -1,5 +1,5 @@
 defmodule Mix.Tasks.Leaf.Gettext.Extract do
-  @shortdoc "Regenerate priv/gettext/leaf.pot from the t(\"…\") calls in lib/leaf.ex"
+  @shortdoc "Regenerate priv/gettext/leaf.pot from the t(\"…\") calls in Leaf's source"
 
   @moduledoc """
   Regenerates `priv/gettext/leaf.pot`.
@@ -7,7 +7,7 @@ defmodule Mix.Tasks.Leaf.Gettext.Extract do
   Leaf's translatable strings go through a bare `t/1` rather than a Gettext
   macro, so `mix gettext.extract` has nothing to hook into — and a host app
   can't extract msgids out of a dependency's source anyway. This scans
-  `lib/leaf.ex` for `t("…")` calls and writes the catalog template hosts
+  `lib/leaf.ex` and `lib/leaf/` for `t("…")` calls and writes the catalog template hosts
   merge into their own.
 
       mix leaf.gettext.extract
@@ -20,13 +20,12 @@ defmodule Mix.Tasks.Leaf.Gettext.Extract do
 
   alias Leaf.Gettext.Pot
 
-  @source "lib/leaf.ex"
   @target "priv/gettext/leaf.pot"
 
   @impl Mix.Task
   def run(_args) do
     File.mkdir_p!(Path.dirname(@target))
-    File.write!(@target, Pot.render(File.read!(@source)))
+    File.write!(@target, Pot.render(Pot.source()))
     Mix.shell().info("Wrote #{@target}")
   end
 end

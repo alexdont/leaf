@@ -2,6 +2,8 @@ defmodule Leaf.ClientStringsTest do
   # The strings leaf.js draws itself reach it translated, as `data-leaf-i18n`.
   use ExUnit.Case, async: false
 
+  alias Leaf.Gettext.Pot
+
   defmodule Backend do
     use Gettext.Backend, otp_app: :leaf, priv: "test/fixtures/gettext"
   end
@@ -36,7 +38,7 @@ defmodule Leaf.ClientStringsTest do
   end
 
   test "the client strings are in the catalog template" do
-    msgids = Leaf.Gettext.Pot.msgids(File.read!("lib/leaf.ex"))
+    msgids = Pot.msgids(Pot.source())
 
     for s <- ["Edit <{tag}> source", "Insert date", "Remove link", "Search emoji..."] do
       assert s in msgids
