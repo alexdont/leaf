@@ -12,6 +12,16 @@
   target or alias was dropped the same way. A link in source form is now
   serialized from its text, and a caret inside its alias stays where it was
   put instead of jumping to the start of the link.
+- **Fixing the end of a bold word or a link threw the caret out.** Typing just
+  before a closing `**` or `]]` moved the caret past the run after the first
+  character, so the second landed outside it: `[[Boe]]` came out `[[Bo]]e`. The
+  snap that steps an arrow-key caret over hidden markers mistook the edit for
+  the caret arriving, and now runs only when the caret moved.
+- **Clicking into a paragraph with literal `*`, `[`, `#`… put the caret short
+  of where it was clicked.** Since 0.10.0 such characters get a backslash when
+  the paragraph turns into source, and the caret was placed by the text before
+  the backslashes went in: one character early for each one in front of it,
+  so typing at the end of `price *is* 5 [x]` went in three characters early.
 
 ## 0.10.0 — 2026-11-04
 

@@ -1789,6 +1789,20 @@
     return out;
   }
 
+  // Where `offset` into `text` lands in `escaped`, the same text after
+  // `escapeInlineMarkdown` / `escapeLineStart`. Both only insert backslashes,
+  // so walking the two together and skipping what was inserted maps it
+  // exactly; the caret lands before an inserted backslash, i.e. before the
+  // escaped character it belongs to.
+  function escapedOffset(text, escaped, offset) {
+    var i = 0;
+    for (var j = 0; j < offset && j < text.length; j++) {
+      while (i < escaped.length && escaped.charAt(i) !== text.charAt(j)) i++;
+      i++;
+    }
+    return Math.min(i, escaped.length);
+  }
+
   // What starts a block when it starts a line: a heading, a quote, a list
   // item, a thematic break, a setext underline. Applied after the inline
   // pass, which has already dealt with `*`, `_` and backticks.
@@ -12170,9 +12184,17 @@
       // too (so a cursor anywhere in `~~..~~` shows both `~~` and the
       // inner `**`), which means cursor moves within the same group
       // don't churn the DOM.
+      //
+      // Only for a caret that MOVED. Typing inside a run changes its offsets
+      // too, so the key changes on an edit as well — and a character typed
+      // just before a closer (`**bol|**`, `[[Bo|]]`) left the caret on the
+      // body's edge, got snapped out, and the next keystroke landed after
+      // the run. The source text changing is what tells an edit apart.
       var outermost = activePath.length > 0 ? activePath[0] : null;
       var activeKey = outermost ? outermost.start + "-" + outermost.end : "";
-      if (activePath.length > 0 && activeKey !== this._activeMatchKey) {
+      var edited =
+        this._lastSourceStateKey != null && sourceText !== this._lastSourceText;
+      if (activePath.length > 0 && activeKey !== this._activeMatchKey && !edited) {
         var innermost = activePath[activePath.length - 1];
         var innerOpen = innermost.openLen != null
           ? innermost.openLen
@@ -12278,6 +12300,7 @@
       // Cursor moves within a single segment land here every time.
       if (!willRebuild) return;
       this._lastSourceStateKey = stateKey;
+      this._lastSourceText = sourceText;
 
       this._syntaxMutating = true;
       try {
@@ -12625,9 +12648,6 @@
           var c = children[i];
 
           if (c.nodeType === Node.TEXT_NODE) {
-            if (c === cursorNode) {
-              noteCursor(source.length + cursorOffset);
-            }
             // Strip cursor-anchoring ZWSPs but preserve NBSPs verbatim —
             // `_refreshSourceBlock` rebuilds text nodes from this source
             // and Chrome needs NBSPs (not regular spaces) at trailing
@@ -12644,11 +12664,22 @@
             if (prevWasBr) {
               textPiece = textPiece.replace(/^[\n\r\t]+/, "");
             }
+            var unescaped = textPiece;
             if (escaping && codeDepth === 0) {
               textPiece = escapeInlineMarkdown(textPiece, linkDepth > 0);
               if (source.length === 0 || /\n$/.test(source)) {
                 textPiece = escapeLineStart(textPiece);
               }
+            }
+            if (c === cursorNode) {
+              // The caret's offset is in the text as it is shown; escaping
+              // has put backslashes in front of it since.
+              noteCursor(
+                source.length +
+                  (textPiece === unescaped
+                    ? cursorOffset
+                    : escapedOffset(unescaped, textPiece, cursorOffset))
+              );
             }
             source += textPiece;
             prevWasBr = false;
