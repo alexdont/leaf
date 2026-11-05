@@ -8950,7 +8950,7 @@
         if (this._mode === "markdown") {
           this._applyRemoteToTextarea(this._getMarkdownTextarea(), payload);
         } else if (this._mode !== "html") {
-          if (placeable && this._applyRemoteFastPath(local)) {
+          if (placeable && this._applyRemoteFastPath(local, true)) {
             // The caret moved itself: replaceData adjusts live ranges, so this
             // user's selection is already where it should be.
             visual = rendered;
@@ -9301,9 +9301,11 @@
       return this._fullyVisible(point.node);
     },
 
-    _applyRemoteFastPath: function (payload) {
+    // `checked`: the caller has just asked `_canFastPath` itself, with nothing
+    // changed in between — asking again would walk the document twice.
+    _applyRemoteFastPath: function (payload, checked) {
       var rendered = payload && payload.rendered;
-      if (!this._canFastPath(rendered)) return false;
+      if (!checked && !this._canFastPath(rendered)) return false;
 
       var insert = rendered.insert || "";
       var remove = rendered.remove || 0;
