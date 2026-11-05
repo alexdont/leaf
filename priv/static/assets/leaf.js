@@ -1159,7 +1159,13 @@
         // which is what an undecorated span does, and what a hashtag relies on
         // — would write the label back and lose the link. Emit the source it
         // carries instead.
+        //
+        // In source form the span holds the whole source as text, marker
+        // spans included, and that text is the live one: anything typed into
+        // an active link since it was built is only there, not in the raw
+        // attribute (see `_serializeBlockInline`).
         if (node.classList && node.classList.contains("leaf-wikilink")) {
+          if (hasSourceMarkerChild(node)) return inner;
           return node.getAttribute("data-leaf-wikilink-raw") || inner;
         }
         if (
@@ -12708,11 +12714,32 @@
           // A wiki link's SOURCE is `[[Target|Alias]]`, while its text is the
           // label. Walking it would put the label into the source and lose the
           // link — the same trap as in `convertNode`. Emit what it carries.
+          //
+          // Except in source form: there every character of the source sits
+          // in the span as text (`[[`, the target and `|` in marker spans),
+          // and it is the LIVE source — the caret is inside it, and closing a
+          // link with `]]` leaves the caret at the end of the closing marker,
+          // so the next keystrokes land in the span. The stored raw is the
+          // source as it was when the span was built; emitting it dropped
+          // everything typed since (`A [[B]] C` saved as `A [[B]]`). Walk it,
+          // verbatim, which also keeps the caret where it was typed.
+          if (
+            c.classList &&
+            c.classList.contains("leaf-wikilink") &&
+            self._hasMarkerChildren(c)
+          ) {
+            var wasEscaping = escaping;
+            escaping = false;
+            walk(c);
+            escaping = wasEscaping;
+            continue;
+          }
           if (c.classList && c.classList.contains("leaf-wikilink")) {
-            // A caret inside the chip (a click on a source-mode alias) maps
-            // to the token's START — the next rebuild then renders the token
-            // active with the caret at its front, instead of losing the
-            // caret to the end of the block.
+            // A rendered chip carries no markers, so a caret inside its label
+            // has no source position of its own: it maps to the token's
+            // START — the next rebuild then renders the token active with the
+            // caret at its front, instead of losing the caret to the end of
+            // the block.
             if (c === cursorNode || (c.contains && c.contains(cursorNode))) {
               noteCursor(source.length);
             }

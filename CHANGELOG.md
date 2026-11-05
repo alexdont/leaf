@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Text typed right after a wiki link was lost.** Closing a link with `]]`
+  in hybrid mode left the caret at the end of the closing marker, inside the
+  link's span, so the next characters went into the span — and both
+  serializers wrote a link out from the source it was built with, not from
+  what it held. `A [[B]] C` was saved as `A [[B]]`; editing an open link's
+  target or alias was dropped the same way. A link in source form is now
+  serialized from its text, and a caret inside its alias stays where it was
+  put instead of jumping to the start of the link.
+
 ## 0.10.0 — 2026-11-04
 
 ### Fixed

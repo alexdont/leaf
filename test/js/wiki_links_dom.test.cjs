@@ -537,7 +537,10 @@ test("a source-mode chip serializes back to its raw token", { skip }, () => {
   e.cleanup();
 });
 
-test("a caret inside the chip maps to the token start", { skip }, () => {
+test("a caret inside the chip stays where it was put", { skip }, () => {
+  // A click on a source-form alias ("My P|ost") reveals the source with the
+  // caret still between the same two characters — the span is walked, so the
+  // offset maps exactly instead of being pushed to the token's start.
   const e = wikiEditor();
   const text = "see [[post:abc|My Post]] here";
   const parent = sourceFragment(e, text, 0);
@@ -547,7 +550,22 @@ test("a caret inside the chip maps to the token start", { skip }, () => {
   );
 
   const trace = e._serializeBlockInline(parent, aliasNode, 3);
-  assert.equal(trace.cursorOffset, text.indexOf("[["));
+  assert.equal(trace.source, text);
+  assert.equal(trace.cursorOffset, text.indexOf("My Post") + 3);
+  e.cleanup();
+});
+
+test("a caret inside a chip with no source markers maps to the token start", { skip }, () => {
+  const e = wikiEditor();
+  const parent = document.createElement("p");
+  parent.innerHTML =
+    'see <span class="leaf-wikilink" data-leaf-wikilink="post:abc" ' +
+    'data-leaf-wikilink-raw="[[post:abc|My Post]]">My Post</span> here';
+  const label = parent.querySelector(".leaf-wikilink").firstChild;
+
+  const trace = e._serializeBlockInline(parent, label, 3);
+  assert.equal(trace.source, "see [[post:abc|My Post]] here");
+  assert.equal(trace.cursorOffset, "see ".length);
   e.cleanup();
 });
 
