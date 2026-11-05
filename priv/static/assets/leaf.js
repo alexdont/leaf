@@ -1752,6 +1752,44 @@
       : 1;
   }
 
+  // ---- Translations ----------------------------------------------------------
+  //
+  // The strings leaf.js draws itself (dialogs, popovers, the block menu) come
+  // translated from the server as `data-leaf-i18n`, keyed by their English,
+  // which is also what is shown without a translation. Page-wide rather than
+  // per editor: the last editor mounted wins, which only matters on a page
+  // mixing editors in different languages.
+
+  var TRANSLATIONS = {};
+
+  function tr(text, vars) {
+    var out = Object.prototype.hasOwnProperty.call(TRANSLATIONS, text)
+      ? TRANSLATIONS[text]
+      : text;
+    if (vars) {
+      // `{name}`, not gettext's `%{name}`: the server would try to fill
+      // that in itself, and log every string it could not.
+      out = out.replace(/\{(\w+)\}/g, function (whole, key) {
+        return vars[key] != null ? String(vars[key]) : whole;
+      });
+    }
+    return out;
+  }
+
+  function loadTranslations(json) {
+    if (!json) return;
+    try {
+      var parsed = JSON.parse(json);
+      if (parsed && typeof parsed === "object") {
+        for (var key in parsed) {
+          if (typeof parsed[key] === "string") TRANSLATIONS[key] = parsed[key];
+        }
+      }
+    } catch (e) {
+      // A malformed attribute leaves the English in place.
+    }
+  }
+
   // ---- Markdown escaping ----------------------------------------------------
   //
   // Text in a rendered block is content, not syntax: a writer who typed
@@ -1957,6 +1995,7 @@
 
   window.LeafHooks.Leaf = {
     mounted() {
+      loadTranslations(this.el.dataset.leafI18n);
       injectStyles();
       this.el.dataset.leafMountState = "ready";
 
@@ -2704,7 +2743,7 @@
         if (tooltip) return tooltip;
         tooltip = document.createElement("div");
         tooltip.className = "leaf-grip-tooltip";
-        tooltip.textContent = "Drag to resize · Double-click to fit content";
+        tooltip.textContent = tr("Drag to resize · Double-click to fit content");
         document.body.appendChild(tooltip);
         return tooltip;
       };
@@ -6142,7 +6181,7 @@
       var raw = chip.getAttribute("data-leaf-raw") || "";
 
       this._openTextPrompt({
-        label: "Edit <" + (chip.getAttribute("data-leaf-tag") || "block") + "> source",
+        label: tr("Edit <{tag}> source", { tag: chip.getAttribute("data-leaf-tag") || "block" }),
         value: raw,
         multiline: true,
         placeholder: '<Component attr="value" />',
@@ -13068,12 +13107,12 @@
 
       if (on) {
         this.el.setAttribute("data-leaf-fullscreen", "true");
-        if (btn) btn.title = "Exit fullscreen";
+        if (btn) btn.title = tr("Exit fullscreen");
         if (enterIcon) enterIcon.style.display = "none";
         if (exitIcon) exitIcon.style.display = "";
       } else {
         this.el.removeAttribute("data-leaf-fullscreen");
-        if (btn) btn.title = "Toggle fullscreen";
+        if (btn) btn.title = tr("Toggle fullscreen");
         if (enterIcon) enterIcon.style.display = "";
         if (exitIcon) exitIcon.style.display = "none";
       }
@@ -13693,7 +13732,7 @@
         case "link":
           if (lnk && !this._denyLinks) {
             this._openTextPrompt({
-              label: "Link URL",
+              label: tr("Link URL"),
               value: "https://",
               anchor: this._toolbarAnchor("link"),
               onSubmit: function (url) {
@@ -14834,7 +14873,7 @@
       var details = document.createElement("details");
       details.setAttribute("open", "");
       var summary = document.createElement("summary");
-      summary.textContent = "Summary";
+      summary.textContent = tr("Summary");
       var body = document.createElement("p");
       body.appendChild(document.createElement("br"));
       details.appendChild(summary);
@@ -14973,7 +15012,7 @@
         "display:flex;justify-content:flex-end;gap:0.375rem;margin-top:0.45rem;";
       var cancel = document.createElement("button");
       cancel.type = "button";
-      cancel.textContent = "Cancel";
+      cancel.textContent = tr("Cancel");
       cancel.className = "btn btn-xs";
       var ok = document.createElement("button");
       ok.type = "button";
@@ -15110,7 +15149,7 @@
       searchWrap.style.cssText = "margin-bottom:0.375rem;";
       var searchInput = document.createElement("input");
       searchInput.type = "text";
-      searchInput.placeholder = "Search emoji...";
+      searchInput.placeholder = tr("Search emoji...");
       searchInput.className = "input input-xs input-bordered w-full";
       searchInput.style.cssText = "font-size:0.8rem;";
       searchWrap.appendChild(searchInput);
@@ -15275,8 +15314,8 @@
       var dtRow = document.createElement("div");
       dtRow.style.cssText = "display:flex;gap:4px;margin-bottom:0.4rem;";
       [
-        ["Insert date", function () { return new Date().toLocaleDateString(); }],
-        ["Insert time", function () { return new Date().toLocaleTimeString(); }],
+        [tr("Insert date"), function () { return new Date().toLocaleDateString(); }],
+        [tr("Insert time"), function () { return new Date().toLocaleTimeString(); }],
       ].forEach(function (d) {
         var b = document.createElement("button");
         b.type = "button";
@@ -15535,7 +15574,7 @@
       var saved = this._captureEditorSelection();
 
       this._openTextPrompt({
-        label: "Link URL",
+        label: tr("Link URL"),
         value: currentHref || "https://",
         anchor: this._toolbarAnchor("link"),
         onSubmit: function (url) {
@@ -16256,7 +16295,7 @@
       } else if (action === "link") {
         var saved = this._captureEditorSelection();
         this._openTextPrompt({
-          label: "Link URL",
+          label: tr("Link URL"),
           value: "https://",
           anchor: this._toolbarAnchor("link"),
           onSubmit: function (url) {
@@ -16385,14 +16424,14 @@
       // Edit button
       var editBtn = document.createElement("button");
       editBtn.type = "button";
-      editBtn.title = "Edit link";
+      editBtn.title = tr("Edit link");
       editBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="13" height="13"><path d="M13.488 2.513a1.75 1.75 0 0 0-2.475 0L3.05 10.476a.75.75 0 0 0-.188.335l-.95 3.507a.75.75 0 0 0 .92.92l3.507-.95a.75.75 0 0 0 .335-.188l7.963-7.963a1.75 1.75 0 0 0 0-2.475l-.149-.149ZM11.72 3.22a.25.25 0 0 1 .354 0l.149.149a.25.25 0 0 1 0 .354L5.106 10.84l-1.575.427.427-1.575 7.11-7.11.652-.362Z"/></svg>';
       editBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
       editBtn.addEventListener("click", function (e) {
         e.preventDefault();
         e.stopPropagation();
         self._openTextPrompt({
-          label: "Edit link URL",
+          label: tr("Edit link URL"),
           value: href,
           anchor: editBtn,
           onSubmit: function (newUrl) {
@@ -16421,7 +16460,7 @@
       // Remove button
       var removeBtn = document.createElement("button");
       removeBtn.type = "button";
-      removeBtn.title = "Remove link";
+      removeBtn.title = tr("Remove link");
       removeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="13" height="13"><path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L6.94 8l-1.72 1.72a.75.75 0 1 0 1.06 1.06L8 9.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L9.06 8l1.72-1.72a.75.75 0 0 0-1.06-1.06L8 6.94 6.28 5.22Z"/></svg>';
       removeBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
       removeBtn.addEventListener("click", function (e) {
@@ -16483,7 +16522,7 @@
       dialog.className = "leaf-image-url-dialog";
 
       var urlLabel = document.createElement("label");
-      urlLabel.textContent = "Image URL";
+      urlLabel.textContent = tr("Image URL");
       dialog.appendChild(urlLabel);
 
       var urlInput = document.createElement("input");
@@ -16493,12 +16532,12 @@
       dialog.appendChild(urlInput);
 
       var altLabel = document.createElement("label");
-      altLabel.textContent = "Alt text (optional)";
+      altLabel.textContent = tr("Alt text (optional)");
       dialog.appendChild(altLabel);
 
       var altInput = document.createElement("input");
       altInput.type = "text";
-      altInput.placeholder = "Describe the image";
+      altInput.placeholder = tr("Describe the image");
       altInput.addEventListener("mousedown", function (e) { e.stopPropagation(); });
       dialog.appendChild(altInput);
 
@@ -16508,7 +16547,7 @@
       var cancelBtn = document.createElement("button");
       cancelBtn.type = "button";
       cancelBtn.className = "leaf-image-url-cancel";
-      cancelBtn.textContent = "Cancel";
+      cancelBtn.textContent = tr("Cancel");
       cancelBtn.addEventListener("click", function () {
         self._dismissImageUrlDialog();
       });
@@ -16517,7 +16556,7 @@
       var insertBtn = document.createElement("button");
       insertBtn.type = "button";
       insertBtn.className = "leaf-image-url-insert";
-      insertBtn.textContent = "Insert";
+      insertBtn.textContent = tr("Insert");
       insertBtn.addEventListener("click", function () {
         var url = safeUrl(urlInput.value, "image");
         if (!url) return;
@@ -16715,8 +16754,8 @@
       var altInput = document.createElement("input");
       altInput.type = "text";
       altInput.value = alt;
-      altInput.placeholder = "Alt text...";
-      altInput.title = "Image alt text";
+      altInput.placeholder = tr("Alt text...");
+      altInput.title = tr("Image alt text");
       altInput.style.cssText = [
         "background: color-mix(in oklab, var(--color-base-content, #1f2937) 8%, transparent);",
         "border: none; border-radius: 0.25rem; padding: 0.2rem 0.4rem;",
@@ -16737,8 +16776,8 @@
       var capInput = document.createElement("input");
       capInput.type = "text";
       capInput.value = self._imageCaption(imgEl);
-      capInput.placeholder = "Caption...";
-      capInput.title = "Image caption";
+      capInput.placeholder = tr("Caption...");
+      capInput.title = tr("Image caption");
       capInput.style.cssText = [
         "background: color-mix(in oklab, var(--color-base-content, #1f2937) 8%, transparent);",
         "border: none; border-radius: 0.25rem; padding: 0.2rem 0.4rem;",
@@ -16756,10 +16795,10 @@
       // Alignment buttons (left / center / right; click active to clear).
       var alignWrap = document.createElement("span");
       alignWrap.style.cssText = "display:inline-flex;gap:2px;";
-      [["left", "L"], ["center", "C"], ["right", "R"]].forEach(function (a) {
+      [["left", "L", tr("Align left")], ["center", "C", tr("Align center")], ["right", "R", tr("Align right")]].forEach(function (a) {
         var ab = document.createElement("button");
         ab.type = "button";
-        ab.title = "Align " + a[0];
+        ab.title = a[2];
         ab.textContent = a[1];
         ab.style.cssText =
           "border:none;background:none;cursor:pointer;color:inherit;font-size:0.7rem;font-weight:700;padding:0.125rem 0.3rem;border-radius:0.25rem;";
@@ -16783,7 +16822,7 @@
       // Open in new tab button
       var openBtn = document.createElement("button");
       openBtn.type = "button";
-      openBtn.title = "Open image";
+      openBtn.title = tr("Open image");
       openBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="13" height="13"><path d="M8.22 2.97a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06l2.97-2.97H3.75a.75.75 0 0 1 0-1.5h7.44L8.22 4.03a.75.75 0 0 1 0-1.06Z"/></svg>';
       openBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
       openBtn.addEventListener("click", function (e) {
@@ -16796,14 +16835,14 @@
       // Edit src button
       var editSrcBtn = document.createElement("button");
       editSrcBtn.type = "button";
-      editSrcBtn.title = "Edit image URL";
+      editSrcBtn.title = tr("Edit image URL");
       editSrcBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="13" height="13"><path d="M13.488 2.513a1.75 1.75 0 0 0-2.475 0L3.05 10.476a.75.75 0 0 0-.188.335l-.95 3.507a.75.75 0 0 0 .92.92l3.507-.95a.75.75 0 0 0 .335-.188l7.963-7.963a1.75 1.75 0 0 0 0-2.475l-.149-.149ZM11.72 3.22a.25.25 0 0 1 .354 0l.149.149a.25.25 0 0 1 0 .354L5.106 10.84l-1.575.427.427-1.575 7.11-7.11.652-.362Z"/></svg>';
       editSrcBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
       editSrcBtn.addEventListener("click", function (e) {
         e.preventDefault();
         e.stopPropagation();
         self._openTextPrompt({
-          label: "Image URL",
+          label: tr("Image URL"),
           value: src,
           anchor: editSrcBtn,
           onSubmit: function (newSrc) {
@@ -16830,7 +16869,7 @@
       // Remove button
       var removeBtn = document.createElement("button");
       removeBtn.type = "button";
-      removeBtn.title = "Remove image";
+      removeBtn.title = tr("Remove image");
       removeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="13" height="13"><path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L6.94 8l-1.72 1.72a.75.75 0 1 0 1.06 1.06L8 9.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L9.06 8l1.72-1.72a.75.75 0 0 0-1.06-1.06L8 6.94 6.28 5.22Z"/></svg>';
       removeBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
       removeBtn.addEventListener("click", function (e) {
@@ -17351,7 +17390,7 @@
 
       var label = document.createElement("button");
       label.type = "button";
-      label.title = "Set language";
+      label.title = tr("Set language");
       label.style.cssText =
         "border:none;background:none;cursor:pointer;color:inherit;opacity:0.7;text-transform:uppercase;letter-spacing:0.03em;font-size:0.7rem;padding:0;";
       label.addEventListener("mousedown", function (e) {
@@ -17366,7 +17405,7 @@
         var pre = self._codeToolsPre;
         var cur = pre.getAttribute("data-language") || "";
         self._openTextPrompt({
-          label: "Code language",
+          label: tr("Code language"),
           value: cur,
           placeholder: "e.g. javascript",
           anchor: label,
@@ -17384,7 +17423,7 @@
 
       var copy = document.createElement("button");
       copy.type = "button";
-      copy.textContent = "Copy";
+      copy.textContent = tr("Copy");
       copy.style.cssText =
         "border:none;background:none;cursor:pointer;color:inherit;font-size:0.7rem;padding:0.125rem 0.25rem;border-radius:0.25rem;";
       copy.addEventListener("mousedown", function (e) {
@@ -17395,9 +17434,9 @@
         e.stopPropagation();
         if (self._codeToolsPre) {
           self._copyText(self._codeToolsPre.textContent || "");
-          copy.textContent = "Copied";
+          copy.textContent = tr("Copied");
           setTimeout(function () {
-            copy.textContent = "Copy";
+            copy.textContent = tr("Copy");
           }, 1200);
         }
       });
@@ -17616,20 +17655,21 @@
         "position:absolute;z-index:60;background:var(--color-base-100,#fff);color:var(--color-base-content,#1f2937);border:1px solid var(--color-base-300,#d1d5db);border-radius:0.5rem;box-shadow:0 6px 20px rgba(0,0,0,0.18),0 1px 4px rgba(0,0,0,0.10);padding:0.25rem;min-width:160px;font-size:0.8rem;";
 
       var items = [
-        { label: "Text", fn: function () { self._convertBlock(block, "p"); } },
-        { label: "Heading 1", fn: function () { self._convertBlock(block, "h1"); } },
-        { label: "Heading 2", fn: function () { self._convertBlock(block, "h2"); } },
-        { label: "Heading 3", fn: function () { self._convertBlock(block, "h3"); } },
-        { label: "Quote", fn: function () { self._convertBlock(block, "blockquote"); } },
-        { label: "Code block", fn: function () { self._convertBlock(block, "pre"); } },
+        { label: tr("Text"), convert: true, fn: function () { self._convertBlock(block, "p"); } },
+        { label: tr("Heading 1"), convert: true, fn: function () { self._convertBlock(block, "h1"); } },
+        { label: tr("Heading 2"), convert: true, fn: function () { self._convertBlock(block, "h2"); } },
+        { label: tr("Heading 3"), convert: true, fn: function () { self._convertBlock(block, "h3"); } },
+        { label: tr("Quote"), convert: true, fn: function () { self._convertBlock(block, "blockquote"); } },
+        { label: tr("Code block"), convert: true, fn: function () { self._convertBlock(block, "pre"); } },
         { divider: true },
-        { label: "Duplicate", fn: function () { self._duplicateBlock(block); } },
-        { label: "Delete", danger: true, fn: function () { self._deleteBlock(block); } },
+        { label: tr("Duplicate"), fn: function () { self._duplicateBlock(block); } },
+        { label: tr("Delete"), danger: true, fn: function () { self._deleteBlock(block); } },
       ];
-      // Nothing to convert a table, figure or rule into.
+      // Nothing to convert a table, figure or rule into. By flag, not by
+      // label: the labels are translated.
       if (/^(table|figure|hr|details)$/.test(block.tagName.toLowerCase())) {
         items = items.filter(function (item) {
-          return item.label === "Duplicate" || item.label === "Delete";
+          return !item.convert && !item.divider;
         });
       }
 

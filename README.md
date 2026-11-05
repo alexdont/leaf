@@ -646,6 +646,12 @@ Then translate `priv/gettext/<locale>/LC_MESSAGES/leaf.po`. Lookups try the
 `"leaf"` domain first and fall back to `"default"`, so you can also paste the
 msgids into `default.po` and skip the extra domain.
 
+The catalog covers the strings the browser draws too — the link and image
+popovers, the image-URL dialog, the block menu, the emoji search. The server
+sends their translations to the editor as `data-leaf-i18n`; a string with no
+translation shows in English. One `{tag}` placeholder (`Edit <{tag}> source`)
+is filled in by the browser, so keep it as written.
+
 ## Checking the JS bundle is present and current
 
 Leaf does not bundle its JS into the host, and an editor whose hook never

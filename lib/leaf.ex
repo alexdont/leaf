@@ -368,6 +368,9 @@ defmodule Leaf do
   the `"leaf"` domain first and fall back to the `"default"` domain, so
   hosts that would rather keep every string in `default.po` can append the
   msgids there and skip the extra domain.
+
+  The strings leaf.js draws itself (popovers, dialogs, the block menu) are in
+  the catalog too, and reach the browser translated as `data-leaf-i18n`.
   """
 
   use Phoenix.LiveComponent
@@ -912,6 +915,7 @@ defmodule Leaf do
       data-leaf-mount-state="loading"
       data-editor-id={@id}
       data-mode={to_string(@mode)}
+      data-leaf-i18n={client_strings_json()}
       data-placeholder={@placeholder}
       data-initial-markdown={@initial_markdown}
       data-debounce={@debounce}
@@ -3085,6 +3089,64 @@ defmodule Leaf do
     case Map.fetch(map, key) do
       {:ok, value} -> value
       :error -> Map.get(map, Atom.to_string(key))
+    end
+  end
+
+  # The strings leaf.js draws itself — dialogs, popovers, the block menu —
+  # translated here and handed over as `data-leaf-i18n`, keyed by the English
+  # the client falls back to. Literal `t/1` calls so `mix leaf.gettext.extract`
+  # puts them in the catalog template. Only translations that differ are sent;
+  # an editor with no backend gets no attribute at all.
+  defp client_strings do
+    %{
+      "Align center" => t("Align center"),
+      "Align left" => t("Align left"),
+      "Align right" => t("Align right"),
+      "Alt text (optional)" => t("Alt text (optional)"),
+      "Alt text..." => t("Alt text..."),
+      "Cancel" => t("Cancel"),
+      "Caption..." => t("Caption..."),
+      "Code block" => t("Code block"),
+      "Code language" => t("Code language"),
+      "Copied" => t("Copied"),
+      "Copy" => t("Copy"),
+      "Delete" => t("Delete"),
+      "Describe the image" => t("Describe the image"),
+      "Drag to resize · Double-click to fit content" =>
+        t("Drag to resize · Double-click to fit content"),
+      "Duplicate" => t("Duplicate"),
+      "Edit <{tag}> source" => t("Edit <{tag}> source"),
+      "Edit image URL" => t("Edit image URL"),
+      "Edit link" => t("Edit link"),
+      "Edit link URL" => t("Edit link URL"),
+      "Exit fullscreen" => t("Exit fullscreen"),
+      "Heading 1" => t("Heading 1"),
+      "Heading 2" => t("Heading 2"),
+      "Heading 3" => t("Heading 3"),
+      "Image URL" => t("Image URL"),
+      "Image alt text" => t("Image alt text"),
+      "Image caption" => t("Image caption"),
+      "Insert" => t("Insert"),
+      "Insert date" => t("Insert date"),
+      "Insert time" => t("Insert time"),
+      "Link URL" => t("Link URL"),
+      "Open image" => t("Open image"),
+      "Quote" => t("Quote"),
+      "Remove image" => t("Remove image"),
+      "Remove link" => t("Remove link"),
+      "Search emoji..." => t("Search emoji..."),
+      "Set language" => t("Set language"),
+      "Summary" => t("Summary"),
+      "Text" => t("Text"),
+      "Toggle fullscreen" => t("Toggle fullscreen")
+    }
+  end
+
+  @doc false
+  def client_strings_json do
+    case client_strings() |> Enum.reject(fn {english, shown} -> english == shown end) do
+      [] -> nil
+      changed -> changed |> Map.new() |> Phoenix.json_library().encode!()
     end
   end
 

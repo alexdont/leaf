@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- **The editor's own UI strings are translatable.** The link and image
+  popovers, the image-URL dialog, the block menu, the emoji search and the
+  code-block copy button were English whatever the host's locale. They are in
+  `priv/gettext/leaf.pot` now and reach the browser translated, as
+  `data-leaf-i18n`, through the same `gettext_backend` the rest of Leaf uses.
+
 ### Fixed
 
 - **Text typed right after a wiki link was lost.** Closing a link with `]]`
