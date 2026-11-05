@@ -22,6 +22,17 @@
   the paragraph turns into source, and the caret was placed by the text before
   the backslashes went in: one character early for each one in front of it,
   so typing at the end of `price *is* 5 [x]` went in three characters early.
+- **Markdown inserted into a hybrid line that had not opened yet was escaped.**
+  A line switches to source form when the caret reports in; text that landed
+  before that — `insert_markdown` right after the editor took the focus, or
+  any script writing into it — was read as rendered content and escaped on the
+  switch, so a host inserting `[[A]] x` got `\[\[A]] x`. The line now switches
+  before anything is inserted into it.
+- **A collapsible (`<details>`) block could not be dragged.** It never showed
+  the drag handle and was never a drop target.
+- **Opening the image-URL dialog told the host `media_ui_closed` first.** The
+  dialog dismisses any earlier one before opening, and that sent "closed" even
+  when nothing was open.
 
 ## 0.10.0 — 2026-11-04
 

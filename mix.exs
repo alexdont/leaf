@@ -65,11 +65,19 @@ defmodule Leaf.MixProject do
 
         # A skipped DOM test is a test that did not run. Green without jsdom
         # is the floor, not the gate — say so where it will be seen.
+        # With jsdom present, a skip is one a test asked for, not a missing
+        # dependency.
         case Regex.run(~r/^# skipped ([1-9]\d*)/m, output) do
           [_, n] ->
-            Mix.shell().error(
-              "[test.js] #{n} DOM tests were SKIPPED (jsdom not installed). Run `npm install` in #{File.cwd!()} — the skipped ones are the tests that catch DOM bugs."
-            )
+            if File.dir?("node_modules/jsdom") do
+              Mix.shell().error(
+                "[test.js] #{n} tests were skipped (marked skip in the test files)."
+              )
+            else
+              Mix.shell().error(
+                "[test.js] #{n} DOM tests were SKIPPED (jsdom not installed). Run `npm install` in #{File.cwd!()} — the skipped ones are the tests that catch DOM bugs."
+              )
+            end
 
           _ ->
             :ok

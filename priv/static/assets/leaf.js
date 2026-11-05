@@ -10644,6 +10644,20 @@
       );
     },
 
+    // Put the caret's block into source form now, if hybrid mode would but
+    // `selectionchange` has not run yet. Text inserted before the switch is
+    // taken as content and escaped (see the `beforeinput` handler).
+    _ensureSourceBlock: function () {
+      if (this._mode !== "hybrid" || this._syntaxMutating) return;
+      var sel = window.getSelection();
+      if (!sel.rangeCount || !sel.isCollapsed) return;
+      if (!this._visualEl.contains(sel.anchorNode)) return;
+      var block = this._getCurrentBlock();
+      if (!block || block === this._sourceBlock) return;
+      if (!this._isSourceModeBlock(block)) return;
+      this._updateSourceBlock();
+    },
+
     _updateSourceBlock: function () {
       if (this._mode !== "hybrid") {
         this._exitAllSourceMode();
@@ -13973,6 +13987,16 @@
       this._visualEl.addEventListener("beforeinput", function (e) {
         self._typingCommandOpen = true;
 
+        // Text arriving in a hybrid block that is not in source form yet.
+        // The block switches when `selectionchange` reports the caret in it,
+        // and anything inserted before that is read as rendered CONTENT when
+        // it does switch — `[` becomes `\[`. A keystroke always comes after
+        // its caret move, but a programmatic insert right after a focus (a
+        // host's `insert_markdown`, a script) does not. Switch first.
+        if (e.inputType && e.inputType.indexOf("insert") === 0) {
+          self._ensureSourceBlock();
+        }
+
         // Typing over a selection that swallowed a task box. The box is
         // contenteditable=false, and some engines start such an insertText
         // and abandon it — the reporter's panel read "NO INPUT FOLLOWED".
@@ -16540,6 +16564,10 @@
     },
 
     _dismissImageUrlDialog: function () {
+      // Opening the dialog dismisses any previous one first; telling the host
+      // the media UI closed when none was open sent it "closed" right before
+      // "opened".
+      var wasOpen = !!(this._imageUrlDialog || this._imageUrlBackdrop);
       if (this._imageUrlDialog) {
         this._imageUrlDialog.remove();
         this._imageUrlDialog = null;
@@ -16548,7 +16576,9 @@
         this._imageUrlBackdrop.remove();
         this._imageUrlBackdrop = null;
       }
-      this.pushEventTo(this.el, "media_ui_closed", { editor_id: this._editorId });
+      if (wasOpen) {
+        this.pushEventTo(this.el, "media_ui_closed", { editor_id: this._editorId });
+      }
     },
 
 
@@ -17215,7 +17245,7 @@
       var BLOCK_TAGS = {
         p: true, h1: true, h2: true, h3: true, h4: true, h5: true, h6: true,
         blockquote: true, pre: true, ul: true, ol: true, hr: true, img: true,
-        div: true, figure: true, table: true
+        div: true, figure: true, table: true, details: true
       };
       return el && el.tagName && BLOCK_TAGS[el.tagName.toLowerCase()];
     },
@@ -18043,6 +18073,9 @@
                 this._insertChipBlock(chip);
               }
             } else {
+              // Markdown, not content: the caret's block has to be in source
+              // form before the text lands, or it is escaped on the switch.
+              this._ensureSourceBlock();
               document.execCommand("insertText", false, text);
               if (this._mode === "hybrid") this._refreshSourceBlock();
             }
