@@ -136,6 +136,7 @@ Then use it in your templates:
 | `debounce` | integer | `400` | Debounce interval in ms for content-change events |
 | `flush_on_blur` | boolean | `true` | Push the pending keystrokes when the editor loses focus, not only when the debounce fires |
 | `emit_events` | boolean | `false` | Also send `{:leaf_focus, …}`, `{:leaf_blur, …}`, `{:leaf_selection_changed, …}` and, with `upload_handler`, `{:leaf_paste_image, …}` |
+| `notify` | `{module, id}` \| `nil` | `nil` | Send Leaf's messages to that LiveComponent instead of the LiveView — see "An editor inside a component" |
 | `sync_input_name` | string | `nil` | Name of a hidden `<input>` kept equal to the markdown, for a plain form submit |
 | `export` | boolean | `false` | A toolbar button that downloads the document as a `.md` file |
 | `protect_navigation` | boolean | `false` | Ask before the page is left with unsaved changes (`action: :mark_saved` and `:set_content` re-baseline) |
@@ -390,6 +391,33 @@ them — see "Live editing". Handle them yourself only if you are replacing that
 wholesale; placing edits that crossed on the wire is harder than it looks, and
 getting it slightly wrong shows up as somebody's typing landing a character or
 two from where they put it.
+
+### An editor inside a component
+
+A LiveComponent shares its LiveView's process, so the messages above would go to
+the page hosting it — which never asked for them, and crashes on them unless it
+has a catch-all `handle_info`. Name the component instead:
+
+```heex
+<.live_component module={Leaf} id={"note-#{@note.id}"} content={@note.body}
+  notify={{__MODULE__, @id}} />
+```
+
+Each message then arrives in that component's `update/2`, under `:leaf`:
+
+```elixir
+def update(%{leaf: {:leaf_changed, %{markdown: md}}}, socket) do
+  {:ok, save(socket, md)}
+end
+
+def update(%{leaf: _other}, socket), do: {:ok, socket}
+
+def update(assigns, socket), do: {:ok, assign(socket, assigns)}
+```
+
+The messages are the same ones, unchanged. Commands still go to the editor with
+`send_update(Leaf, id: …, action: …)`. Live editing (`Leaf.Collab.join/2`) runs in a
+LiveView and is not available to an editor that notifies a component.
 
 ### Flushing (save before navigate)
 

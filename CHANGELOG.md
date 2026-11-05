@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`notify`: an editor inside a LiveComponent.** Leaf sent every message
+  (`{:leaf_changed, …}` and the rest) to `self()`, which inside a component is the
+  LiveView hosting it — the component never saw its own editor's changes, and a
+  host page without a catch-all `handle_info` crashed on the first keystroke.
+  `notify: {module, id}` sends them to that component instead, as
+  `send_update(module, id: id, leaf: message)`; without it nothing changes. A
+  malformed value is refused when the editor is set up. Live editing still needs a
+  LiveView.
+
 ## 0.10.1 — 2026-11-05
 
 ### Added

@@ -31,6 +31,9 @@ defmodule Leaf do
 
   ## Messages Sent to Parent
 
+  To the LiveView by default; with `notify: {module, id}`, to that LiveComponent
+  instead, as `send_update(module, id: id, leaf: message)`.
+
   - `{:leaf_changed, %{editor_id, markdown, html}}` — Content updated
   - `{:leaf_flushed, %{editor_id, ref, markdown, html}}` — Reply to an
     explicit `action: :flush` that carried a `ref` (see "Flushing" below)
@@ -458,6 +461,16 @@ defmodule Leaf do
   attr(:flush_on_blur, :boolean, default: true)
   attr(:emit_events, :boolean, default: false)
 
+  attr(:notify, :any,
+    default: nil,
+    doc: """
+    Where Leaf's messages go. `nil` sends them to the LiveView, as always.
+    `{module, id}` sends each one to that LiveComponent instead, as
+    `send_update(module, id: id, leaf: message)` — for an editor inside a
+    component, which shares the LiveView's process and has no `handle_info`.
+    """
+  )
+
   attr(:toolbar_extra, :list,
     default: [],
     doc: """
@@ -868,6 +881,7 @@ defmodule Leaf do
 
     deny = Map.get(socket.assigns, :deny, [])
     validate_deny!(deny)
+    validate_notify!(Map.get(socket.assigns, :notify))
     mode = normalize_mode(socket.assigns.mode, deny)
 
     socket = assign(socket, :mode, mode)
@@ -2621,8 +2635,8 @@ defmodule Leaf do
     sanitized_markdown = sanitize_markdown(markdown, socket.assigns.deny)
     sanitized_html = sanitize_html(html, socket.assigns.deny)
 
-    send(
-      self(),
+    notify(
+      socket,
       {:leaf_changed,
        %{
          editor_id: socket.assigns.id,
@@ -2657,8 +2671,8 @@ defmodule Leaf do
     markdown = sanitize_markdown(Map.get(params, "markdown", ""), socket.assigns.deny)
     html = sanitize_html(Map.get(params, "html", ""), socket.assigns.deny)
 
-    send(
-      self(),
+    notify(
+      socket,
       {:leaf_flushed,
        %{
          editor_id: socket.assigns.id,
@@ -2692,8 +2706,8 @@ defmodule Leaf do
       |> markdown_to_html(render_opts(socket))
       |> sanitize_html(socket.assigns.deny)
 
-    send(
-      self(),
+    notify(
+      socket,
       {:leaf_changed,
        %{
          editor_id: socket.assigns.id,
@@ -2717,8 +2731,8 @@ defmodule Leaf do
         _ -> socket.assigns.content
       end
 
-    send(
-      self(),
+    notify(
+      socket,
       {:leaf_mode_changed,
        %{
          editor_id: socket.assigns.id,
@@ -2741,8 +2755,8 @@ defmodule Leaf do
   # document of a different length can tell it has diverged instead of applying
   # an offset that no longer means what it meant.
   def handle_event("ready", params, socket) do
-    send(
-      self(),
+    notify(
+      socket,
       {:leaf_ready,
        %{
          editor_id: socket.assigns.id,
@@ -2755,18 +2769,18 @@ defmodule Leaf do
   end
 
   def handle_event("debug_state", params, socket) do
-    send(self(), {:leaf_debug_state, atomize_debug(params)})
+    notify(socket, {:leaf_debug_state, atomize_debug(params)})
     {:noreply, socket}
   end
 
   def handle_event("resync", _params, socket) do
-    send(self(), {:leaf_resync, %{editor_id: socket.assigns.id}})
+    notify(socket, {:leaf_resync, %{editor_id: socket.assigns.id}})
     {:noreply, socket}
   end
 
   def handle_event("awareness", params, socket) do
-    send(
-      self(),
+    notify(
+      socket,
       {:leaf_awareness,
        %{
          editor_id: socket.assigns.id,
@@ -2785,8 +2799,8 @@ defmodule Leaf do
 
   def handle_event("operation", %{"at" => at, "remove" => remove} = params, socket)
       when is_integer(at) and is_integer(remove) do
-    send(
-      self(),
+    notify(
+      socket,
       {:leaf_operation,
        %{
          editor_id: socket.assigns.id,
@@ -2814,8 +2828,8 @@ defmodule Leaf do
   # `action: :link_targets`.
   def handle_event("resolve_links", %{"targets" => targets} = params, socket)
       when is_list(targets) do
-    send(
-      self(),
+    notify(
+      socket,
       {:leaf_resolve_links,
        %{
          editor_id: socket.assigns.id,
@@ -2832,8 +2846,8 @@ defmodule Leaf do
   # flow instead of a plain navigation.
   def handle_event("link_clicked", %{"target" => target} = params, socket)
       when is_binary(target) do
-    send(
-      self(),
+    notify(
+      socket,
       {:leaf_link_clicked,
        %{
          editor_id: socket.assigns.id,
@@ -2848,8 +2862,8 @@ defmodule Leaf do
   end
 
   def handle_event("suggest", %{"trigger" => trigger, "query" => query} = params, socket) do
-    send(
-      self(),
+    notify(
+      socket,
       {:leaf_suggest,
        %{
          editor_id: socket.assigns.id,
@@ -2863,8 +2877,8 @@ defmodule Leaf do
   end
 
   def handle_event("insert_request", %{"type" => type}, socket) when type in ["image", "video"] do
-    send(
-      self(),
+    notify(
+      socket,
       {:leaf_insert_request,
        %{
          editor_id: socket.assigns.id,
@@ -2880,8 +2894,8 @@ defmodule Leaf do
   def handle_event("html_content_changed", %{"content" => html} = params, socket) do
     sanitized_html = sanitize_html(html, socket.assigns.deny)
 
-    send(
-      self(),
+    notify(
+      socket,
       {:leaf_changed,
        %{
          editor_id: socket.assigns.id,
@@ -2921,18 +2935,18 @@ defmodule Leaf do
   end
 
   def handle_event("focus", _params, socket) do
-    send(self(), {:leaf_focus, %{editor_id: socket.assigns.id}})
+    notify(socket, {:leaf_focus, %{editor_id: socket.assigns.id}})
     {:noreply, socket}
   end
 
   def handle_event("blur", _params, socket) do
-    send(self(), {:leaf_blur, %{editor_id: socket.assigns.id}})
+    notify(socket, {:leaf_blur, %{editor_id: socket.assigns.id}})
     {:noreply, socket}
   end
 
   def handle_event("selection_changed", params, socket) do
-    send(
-      self(),
+    notify(
+      socket,
       {:leaf_selection_changed,
        %{
          editor_id: socket.assigns.id,
@@ -2945,8 +2959,8 @@ defmodule Leaf do
   end
 
   def handle_event("paste_image", params, socket) do
-    send(
-      self(),
+    notify(
+      socket,
       {:leaf_paste_image,
        %{
          editor_id: socket.assigns.id,
@@ -2960,8 +2974,8 @@ defmodule Leaf do
   end
 
   def handle_event("toolbar_action", %{"id" => id} = params, socket) do
-    send(
-      self(),
+    notify(
+      socket,
       {:leaf_toolbar_action,
        %{
          editor_id: socket.assigns.id,
@@ -3475,6 +3489,25 @@ defmodule Leaf do
 
     Silence this warning with: config :leaf, warn_unpreserved_tags: false
     """
+  end
+
+  # Every message to the host goes through here. A LiveComponent shares its
+  # LiveView's process, so `send(self(), …)` from an editor inside one lands in
+  # the host page — which never asked for it, and crashes on it without a
+  # catch-all `handle_info`. `notify: {module, id}` routes it to the component.
+  defp notify(socket, message) do
+    case socket.assigns[:notify] do
+      {module, id} -> Phoenix.LiveView.send_update(module, id: id, leaf: message)
+      _ -> send(self(), message)
+    end
+  end
+
+  defp validate_notify!(nil), do: :ok
+  defp validate_notify!({module, _id}) when is_atom(module) and not is_nil(module), do: :ok
+
+  defp validate_notify!(other) do
+    raise ArgumentError,
+          "Leaf `notify` must be nil or {LiveComponentModule, id}, got: #{inspect(other)}"
   end
 
   defp validate_deny!(deny) when is_list(deny) do
