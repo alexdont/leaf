@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **The counters under the editor were always English.** "3 words · 12 chars
+  · 1 min read" was put together in the browser from fixed English, outside
+  the translated strings. They are in the catalogue now (`{count} words` and
+  the rest), rendered translated from the server and kept translated as you
+  type. A translation words them so one form fits every number ("Слов: 3"),
+  since the browser's strings carry no plural rules; English keeps "1 word".
+
 ## 0.11.0 — 2026-11-06
 
 ### Added

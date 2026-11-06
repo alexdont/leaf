@@ -386,3 +386,18 @@ msgstr ""
 
 msgid "stretch"
 msgstr ""
+
+msgid "{count} char"
+msgstr ""
+
+msgid "{count} chars"
+msgstr ""
+
+msgid "{count} min read"
+msgstr ""
+
+msgid "{count} word"
+msgstr ""
+
+msgid "{count} words"
+msgstr ""

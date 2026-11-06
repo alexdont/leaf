@@ -11,3 +11,6 @@ msgstr "Löschen"
 
 msgid "Edit <{tag}> source"
 msgstr "Quelle von <{tag}> bearbeiten"
+
+msgid "{count} words"
+msgstr "{count} Wörter"

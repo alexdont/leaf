@@ -2341,9 +2341,9 @@ defmodule Leaf do
           </span>
           <span :if={!@save_status}></span>
           <div id={"#{@id}-footer"} phx-update="ignore" data-editor-footer class="flex gap-4">
-            <span data-word-count>0 words</span>
-            <span data-char-count>0 chars</span>
-            <span data-reading-time>0 min read</span>
+            <span data-word-count>{String.replace(t("{count} words"), "{count}", "0")}</span>
+            <span data-char-count>{String.replace(t("{count} chars"), "{count}", "0")}</span>
+            <span data-reading-time>{String.replace(t("{count} min read"), "{count}", "0")}</span>
             <span data-maxlength-count></span>
           </div>
         </div>
@@ -3177,7 +3177,15 @@ defmodule Leaf do
       "Set language" => t("Set language"),
       "Summary" => t("Summary"),
       "Text" => t("Text"),
-      "Toggle fullscreen" => t("Toggle fullscreen")
+      "Toggle fullscreen" => t("Toggle fullscreen"),
+      # The counters under the editor. `{count}`, not gettext's `%{count}`: the
+      # browser fills it, and a translation words it so one form fits every
+      # number ("Слов: {count}").
+      "{count} word" => t("{count} word"),
+      "{count} words" => t("{count} words"),
+      "{count} char" => t("{count} char"),
+      "{count} chars" => t("{count} chars"),
+      "{count} min read" => t("{count} min read")
     }
   end
 

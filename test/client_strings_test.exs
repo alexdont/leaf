@@ -33,8 +33,18 @@ defmodule Leaf.ClientStringsTest do
     assert Jason.decode!(Leaf.client_strings_json()) == %{
              "Cancel" => "Abbrechen",
              "Delete" => "Löschen",
-             "Edit <{tag}> source" => "Quelle von <{tag}> bearbeiten"
+             "Edit <{tag}> source" => "Quelle von <{tag}> bearbeiten",
+             "{count} words" => "{count} Wörter"
            }
+  end
+
+  test "the counters' first render is translated too" do
+    import Phoenix.LiveViewTest
+
+    assert render_component(Leaf, id: "e1") =~ "0 words"
+
+    Gettext.put_locale(Backend, "de")
+    assert render_component(Leaf, id: "e1", gettext_backend: Backend) =~ "0 Wörter"
   end
 
   test "the client strings are in the catalog template" do

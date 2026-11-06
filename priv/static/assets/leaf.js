@@ -1776,6 +1776,13 @@
     return out;
   }
 
+  // A count with its noun. English picks singular or plural; a translation
+  // gets both keys and words them so the number does not need a plural form
+  // ("Слов: 3"), since the strings here carry no plural rules.
+  function countLabel(count, one, many) {
+    return tr(count === 1 ? one : many, { count: count });
+  }
+
   function loadTranslations(json) {
     if (!json) return;
     try {
@@ -2880,14 +2887,14 @@
       var words = trimmed === "" ? 0 : trimmed.split(/\s+/).length;
       var chars = trimmed.length;
 
-      this._wordCountEl.textContent = words + (words === 1 ? " word" : " words");
-      this._charCountEl.textContent = chars + (chars === 1 ? " char" : " chars");
+      this._wordCountEl.textContent = countLabel(words, "{count} word", "{count} words");
+      this._charCountEl.textContent = countLabel(chars, "{count} char", "{count} chars");
 
       // Reading time at ~200 wpm — a blank doc reads as "0 min read",
       // anything non-empty rounds up to at least 1.
       if (this._readingTimeEl) {
         var mins = words === 0 ? 0 : Math.max(1, Math.ceil(words / 200));
-        this._readingTimeEl.textContent = mins + " min read";
+        this._readingTimeEl.textContent = tr("{count} min read", { count: mins });
       }
 
       // Character limit, when set.
