@@ -4,6 +4,10 @@
 
 ### Added
 
+- **`autofocus`.** The caret goes into the editor, at the end of its text, as
+  soon as it mounts — for an editor opened to be written in straight away (a
+  note just created). Never in a readonly editor.
+
 - **`notify`: an editor inside a LiveComponent.** Leaf sent every message
   (`{:leaf_changed, …}` and the rest) to `self()`, which inside a component is the
   LiveView hosting it — the component never saw its own editor's changes, and a

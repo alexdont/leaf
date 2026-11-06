@@ -461,6 +461,12 @@ defmodule Leaf do
   attr(:flush_on_blur, :boolean, default: true)
   attr(:emit_events, :boolean, default: false)
 
+  attr(:autofocus, :boolean,
+    default: false,
+    doc:
+      "Put the caret in the editor, at the end, as soon as it mounts — for an editor opened to be typed in straight away."
+  )
+
   attr(:notify, :any,
     default: nil,
     doc: """
@@ -642,6 +648,7 @@ defmodule Leaf do
      |> assign_new(:max_height, fn -> nil end)
      |> assign_new(:debounce, fn -> 400 end)
      |> assign_new(:flush_on_blur, fn -> true end)
+     |> assign_new(:autofocus, fn -> false end)
      |> assign_new(:emit_events, fn -> false end)
      |> assign_new(:toolbar_extra, fn -> [] end)
      |> assign_new(:toolbar_layout, fn -> :fixed end)
@@ -951,6 +958,7 @@ defmodule Leaf do
       data-initial-markdown={@initial_markdown}
       data-debounce={@debounce}
       data-flush-on-blur={to_string(@flush_on_blur)}
+      data-autofocus={to_string(@autofocus)}
       data-emit-events={to_string(@emit_events)}
       data-preserve-tags={Enum.map_join(@preserve_tags, ",", &String.downcase(to_string(&1)))}
       data-toolbar-layout={to_string(@toolbar_layout)}

@@ -2341,6 +2341,34 @@
         "webkitfullscreenchange",
         this._fullscreenChangeHandler
       );
+
+      if (this.el.dataset.autofocus === "true") this._autofocus();
+    },
+
+    // `autofocus`: the caret in the editor, at the end of what is there, so a
+    // note opened to be written in can be typed into without a click first.
+    // After a frame, once the surfaces are laid out; never in a readonly editor.
+    _autofocus: function () {
+      if (this._readonly) return;
+      var self = this;
+      requestAnimationFrame(function () {
+        if (self._mode === "markdown") {
+          var ta = self._getMarkdownTextarea();
+          if (!ta) return;
+          ta.focus();
+          ta.selectionStart = ta.selectionEnd = ta.value.length;
+          return;
+        }
+        var surface = self._visualEl;
+        if (!surface || !surface.isConnected) return;
+        surface.focus();
+        var range = document.createRange();
+        range.selectNodeContents(surface.lastElementChild || surface);
+        range.collapse(false);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      });
     },
 
     // The socket dropped and came back. The editor kept on working — its
