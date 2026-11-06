@@ -25,7 +25,7 @@ Add `leaf` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:leaf, "~> 0.10"}
+    {:leaf, "~> 0.11"}
   ]
 end
 ```
@@ -52,7 +52,7 @@ If you prefer not to use the `deps/` import path (e.g., non-standard project str
 ```javascript
 // Load Leaf from CDN
 const script = document.createElement("script");
-script.src = "https://cdn.jsdelivr.net/gh/alexdont/leaf@v0.10.1/priv/static/assets/leaf.js";
+script.src = "https://cdn.jsdelivr.net/gh/alexdont/leaf@v0.11.0/priv/static/assets/leaf.js";
 script.onload = () => {
   // Leaf is now available at window.LeafHooks
 };
