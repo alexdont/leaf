@@ -574,6 +574,14 @@ defmodule Leaf do
   # untouched.
   attr(:wiki_links, :any, default: nil)
 
+  # Mention tokens — `@[type:id|Label]` (a person) and `#[type:id|Label]` (a
+  # record), phoenix_kit's mention grammar — shown as "@Label" / "#Label"
+  # chips instead of their source, and kept byte for byte when the document
+  # is written back (visual mode would otherwise escape the `[`). Leaf only
+  # displays them: what the popup offers, and what a mention links to, are the
+  # host's (`suggestions`). Off by default.
+  attr(:mentions, :boolean, default: false)
+
   # Multi-user editing. `%{operations: true}` makes the editor emit what
   # CHANGED alongside the snapshot it already sends, which is what a host needs
   # to merge two people's edits. `%{awareness: true}` additionally reports
@@ -662,6 +670,7 @@ defmodule Leaf do
      |> assign_new(:save_status, fn -> nil end)
      |> assign_new(:suggestions, fn -> [] end)
      |> assign_new(:wiki_links, fn -> nil end)
+     |> assign_new(:mentions, fn -> false end)
      |> assign_new(:collaboration, fn -> nil end)
      |> assign_new(:debug_typing, fn -> false end)
      |> assign_new(:gettext_backend, fn -> nil end)
@@ -979,6 +988,7 @@ defmodule Leaf do
       data-debug-typing={to_string(@debug_typing == true)}
       data-collab-revision={collab_revision(@collaboration)}
       data-wikilinks={to_string(wiki_links_enabled?(@wiki_links))}
+      data-mentions={to_string(@mentions == true)}
       data-wikilinks-resolve={to_string(wiki_links_resolve?(@wiki_links))}
       data-wikilinks-follow={wiki_links_follow(@wiki_links)}
       data-deny-links={to_string(:links in @deny)}
@@ -3291,7 +3301,8 @@ defmodule Leaf do
         |> Map.get(:suggestions, [])
         |> normalized_suggestions()
         |> hashtag_trigger?(),
-      wiki_links: wiki_links_enabled?(socket.assigns[:wiki_links])
+      wiki_links: wiki_links_enabled?(socket.assigns[:wiki_links]),
+      mentions: socket.assigns[:mentions] == true
     }
   end
 

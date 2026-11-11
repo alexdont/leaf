@@ -310,6 +310,17 @@
     ".content-editor-visual [data-leaf-source] .leaf-wikilink:not(.leaf-source-active) .leaf-source-marker {",
     "  display: none;",
     "}",
+    // Mentions (`mentions` on): `@[type:id|Label]` reads as an "@Label" chip.
+    // In source mode the `[type:id|` and `]` sit in marker spans hidden the
+    // same way a wiki link's are, until the caret is inside.
+    ".content-editor-visual .leaf-mention {",
+    "  color: color-mix(in oklab, var(--color-primary, #3b82f6) 85%, var(--color-base-content, #1f2937));",
+    "  background: color-mix(in oklab, var(--color-primary, #3b82f6) 12%, transparent);",
+    "  border-radius: 0.35em; padding: 0 0.25em; font-weight: 500; white-space: nowrap;",
+    "}",
+    ".content-editor-visual [data-leaf-source] .leaf-mention:not(.leaf-source-active) .leaf-source-marker {",
+    "  display: none;",
+    "}",
 
     ".content-editor-visual .leaf-hashtag {",
     "  font-style: italic; font-weight: 500;",
@@ -1168,6 +1179,13 @@
           if (hasSourceMarkerChild(node)) return inner;
           return node.getAttribute("data-leaf-wikilink-raw") || inner;
         }
+        // A mention chip shows "@Label"; its source is the whole token, which
+        // must come back byte for byte — no escaping of its `[`, no label for
+        // a token. In source form its text is the live source, as above.
+        if (node.classList && node.classList.contains("leaf-mention")) {
+          if (hasSourceMarkerChild(node)) return inner;
+          return node.getAttribute("data-leaf-mention-raw") || inner;
+        }
         if (
           node.classList &&
           node.classList.contains("leaf-spoiler")
@@ -1913,7 +1931,8 @@
         el.classList &&
         (el.classList.contains("leaf-source-marker") ||
           el.classList.contains("leaf-atomic") ||
-          el.classList.contains("leaf-wikilink"))
+          el.classList.contains("leaf-wikilink") ||
+          el.classList.contains("leaf-mention"))
       ) {
         return true;
       }
@@ -1972,7 +1991,10 @@
       if (/[\uE000\uE121-\uE17E]/.test(value)) {
         node.setAttribute(
           attrs[a].name,
-          unmaskEscapes(value, attrs[a].name === "data-leaf-wikilink-raw")
+          unmaskEscapes(
+            value,
+            attrs[a].name === "data-leaf-wikilink-raw" || attrs[a].name === "data-leaf-mention-raw"
+          )
         );
       }
     }
@@ -2022,6 +2044,7 @@
       this._fallbackMode = this.el.dataset.fallbackMode || "hybrid";
       this._hashtags = this.el.dataset.hashtags === "true";
       this._wikiLinks = this.el.dataset.wikilinks === "true";
+      this._mentions = this.el.dataset.mentions === "true";
       this._collabOperations = this.el.dataset.collabOperations === "true";
       this._collabAwareness = this.el.dataset.collabAwareness === "true";
       this._collabDebug = this.el.dataset.collabDebug === "true";
@@ -2445,6 +2468,7 @@
       // decides whether hashtags are decorated at all.
       this._hashtags = this.el.dataset.hashtags === "true";
       this._wikiLinks = this.el.dataset.wikilinks === "true";
+      this._mentions = this.el.dataset.mentions === "true";
       this._collabOperations = this.el.dataset.collabOperations === "true";
       this._collabAwareness = this.el.dataset.collabAwareness === "true";
       this._collabDebug = this.el.dataset.collabDebug === "true";
@@ -5580,6 +5604,10 @@
           sel.addRange(range);
         }
 
+        // A mention token becomes its chip where it landed (visual mode).
+        var landed = window.getSelection().anchorNode;
+        if (landed && landed.nodeType === Node.TEXT_NODE) this._chipMentionsIn(landed);
+
         this._debouncedPushVisualChange();
         this._updateCounts();
       }
@@ -7594,7 +7622,17 @@
     // tokenise the heading part of `[[Note#Section]]` as a tag and leave the
     // link unmatched.
     _textWithDecorations: function (text) {
-      var nodes = this._textWithWikiLinks(text);
+      // Mentions before wiki links and hashtags: a `#[project:…|Q3]` token
+      // must not be read as a tag, and its label is the author's words.
+      var mentioned = this._textWithMentions(text);
+      var nodes = [];
+      for (var mi = 0; mi < mentioned.length; mi++) {
+        if (mentioned[mi].nodeType === Node.TEXT_NODE) {
+          nodes = nodes.concat(this._textWithWikiLinks(mentioned[mi].textContent));
+        } else {
+          nodes.push(mentioned[mi]);
+        }
+      }
       var out = [];
 
       for (var i = 0; i < nodes.length; i++) {
@@ -7684,6 +7722,84 @@
 
       if (last < text.length) out.push(document.createTextNode(text.slice(last)));
       return out.length ? out : [document.createTextNode(text)];
+    },
+
+    // `@[type:id|Label]` / `#[type:id|Label]` → an "@Label" chip, when the host
+    // turned `mentions` on (the token is phoenix_kit's mention grammar: a
+    // trigger, a type, a uuid, a label). Not editable from inside: a mention
+    // is one thing, deleted whole, and a label edited in place would no
+    // longer be the token's. Serialized back from `data-leaf-mention-raw`
+    // (see `nodeToMarkdown`), so visual mode never escapes its `[`.
+    _MENTION_RE:
+      /([@#])\[([a-z][a-z0-9_]*):([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\|([^\]\n|]+)\]/g,
+
+    _mentionChip: function (raw, trigger, label) {
+      var span = document.createElement("span");
+      span.className = "leaf-mention";
+      span.setAttribute("contenteditable", "false");
+      span.setAttribute("data-leaf-mention-raw", raw);
+      span.textContent = trigger + label;
+      return span;
+    },
+
+    _textWithMentions: function (text) {
+      if (!this._mentions || !text || (text.indexOf("@[") === -1 && text.indexOf("#[") === -1)) {
+        return text ? [document.createTextNode(text)] : [];
+      }
+
+      var re = new RegExp(this._MENTION_RE.source, "g");
+      var out = [];
+      var last = 0;
+      var m;
+
+      while ((m = re.exec(text)) !== null) {
+        // `\@[…]` is a token written to stay text.
+        if (m.index > 0 && text.charAt(m.index - 1) === "\\") continue;
+        if (m.index > last) out.push(document.createTextNode(text.slice(last, m.index)));
+        out.push(this._mentionChip(m[0], m[1], m[4]));
+        last = m.index + m[0].length;
+      }
+
+      if (last < text.length) out.push(document.createTextNode(text.slice(last)));
+      return out.length ? out : [document.createTextNode(text)];
+    },
+
+    // A pick from the suggestion popup that is a mention token becomes its
+    // chip at once in visual mode (hybrid re-renders the block from source,
+    // and does the same there). `node` is the text node just inserted.
+    _chipMentionsIn: function (node) {
+      if (!this._mentions || this._mode !== "visual" || !node || node.nodeType !== Node.TEXT_NODE) {
+        return;
+      }
+      var parts = this._textWithMentions(node.textContent);
+      if (parts.length < 2 && parts[0] && parts[0].nodeType === Node.TEXT_NODE) return;
+      var parent = node.parentNode;
+      if (!parent) return;
+
+      // The caret stays where it was in the source: walk the parts by the
+      // length of text each stood for (a chip: its whole token).
+      var sel = window.getSelection();
+      var caret = sel.anchorNode === node ? sel.anchorOffset : node.textContent.length;
+      var place = null;
+      var seen = 0;
+      for (var i = 0; i < parts.length; i++) {
+        parent.insertBefore(parts[i], node);
+        if (place) continue;
+        var isText = parts[i].nodeType === Node.TEXT_NODE;
+        var len = isText ? parts[i].textContent.length : parts[i].getAttribute("data-leaf-mention-raw").length;
+        if (caret <= seen + len) {
+          place = isText ? { node: parts[i], offset: caret - seen } : { after: parts[i] };
+        }
+        seen += len;
+      }
+      parent.removeChild(node);
+
+      var range = document.createRange();
+      if (place && place.node) range.setStart(place.node, place.offset);
+      else range.setStartAfter(place ? place.after : parts[parts.length - 1]);
+      range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
     },
 
     // ---- wiki-link resolution ------------------------------------------
@@ -11740,6 +11856,37 @@
             continue;
           }
 
+          // Mention — `@[type:id|Label]` shows "@Label": the trigger and the
+          // label plain, `[type:id|` and `]` in markers hidden while
+          // inactive. Same span and raw attribute as visual mode's chip, so
+          // the serializer's mention branch handles both.
+          if (p.type === "mention") {
+            var mAbsStart = segOffset + match.start;
+            var mAbsEnd = segOffset + match.end;
+            var mActive =
+              ancestorActive ||
+              (caretOffset > mAbsStart && caretOffset < mAbsEnd);
+            var mSpan = document.createElement("span");
+            mSpan.className = "leaf-mention";
+            mSpan.setAttribute("data-leaf-mention-raw", match.raw);
+            if (mActive) mSpan.classList.add("leaf-source-active");
+            appendPlain(mSpan, segText.slice(match.start, match.start + 1), mAbsStart);
+            appendMarker(
+              mSpan,
+              segText.slice(match.start + 1, match.start + match.openLen),
+              mAbsStart + 1
+            );
+            appendPlain(
+              mSpan,
+              segText.slice(match.start + match.openLen, match.end - 1),
+              mAbsStart + match.openLen
+            );
+            appendMarker(mSpan, segText.slice(match.end - 1, match.end), mAbsEnd - 1);
+            host.appendChild(mSpan);
+            pos = match.end;
+            continue;
+          }
+
           var wrapper;
           var bodyHost;
           if (p.type === "link") {
@@ -12606,6 +12753,27 @@
             wikiHeading: wm[2] || "",
             wikiAlias: wm[3] || "",
             raw: wm[0]
+          });
+        }
+      }
+      // Mentions: `@[type:id|Label]` shows as "@Label" — the trigger and the
+      // label plain, `[type:id|` and `]` in marker spans — unless the caret
+      // is inside, like a wiki link. `\@[…]` is masked above, so an escaped
+      // token never matches.
+      if (this._mentions && (text.indexOf("@[") !== -1 || text.indexOf("#[") !== -1)) {
+        var mre = new RegExp(this._MENTION_RE.source, "g");
+        var mm;
+        while ((mm = mre.exec(text)) !== null) {
+          var bar = mm[0].lastIndexOf("|");
+          candidates.push({
+            start: mm.index,
+            end: mm.index + mm[0].length,
+            delim: mm[1] + "[",
+            openLen: bar + 1,
+            closeLen: 1,
+            pattern: { type: "mention" },
+            body: mm[4],
+            raw: mm[0]
           });
         }
       }

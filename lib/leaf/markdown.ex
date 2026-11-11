@@ -35,7 +35,11 @@ defmodule Leaf.Markdown do
       end
 
     html = if Map.get(opts, :hashtags, false), do: decorate_hashtags(html), else: html
-    if Map.get(opts, :wiki_links, false), do: decorate_wiki_links(html), else: html
+    html = if Map.get(opts, :wiki_links, false), do: decorate_wiki_links(html), else: html
+    # Mentions last: their label is text, and the hashtag pass would tag a
+    # `#Q3` inside a chip. The token itself is safe from the passes before
+    # (`#[` is no tag, `[type:…|…]` no wiki link).
+    if Map.get(opts, :mentions, false), do: decorate_mentions(html), else: html
   end
 
   def markdown_to_html(nil), do: "<p><br></p>"
@@ -292,6 +296,50 @@ defmodule Leaf.Markdown do
 
   defp alias_suffix(""), do: ""
   defp alias_suffix(alias_text), do: "|" <> alias_text
+
+  # `@[type:id|Label]` / `#[type:id|Label]` → the chip the client builds
+  # (`_mentionChip`): not editable from inside, its whole source in
+  # `data-leaf-mention-raw`, which the serializer writes back verbatim.
+  # Skips `<pre>`, `<code>` and `<a>` like the other decorations, and a
+  # token escaped with a backslash (`\@[…]`), which MDEx leaves as text.
+  @mention_re ~r/(?<!\\)([@#])\[([a-z][a-z0-9_]*):([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\|([^\]\n|]+)\]/
+
+  @doc false
+  def decorate_mentions(html) do
+    html
+    |> String.split(@wiki_link_skip_re, include_captures: true)
+    |> Enum.map_join("", fn chunk ->
+      if Regex.match?(~r/^<(?:pre|code|a)\b/i, chunk) do
+        chunk
+      else
+        chunk
+        |> String.split(~r/(<[^>]*>)/, include_captures: true)
+        |> Enum.map_join("", &decorate_mentions_text/1)
+      end
+    end)
+  end
+
+  defp decorate_mentions_text("<" <> _ = tag), do: tag
+
+  # The text here is HTML: an `&amp;` in a label is decoded for the raw
+  # source and re-escaped for both the attribute and the visible text.
+  defp decorate_mentions_text(text) do
+    Regex.replace(@mention_re, text, fn whole, trigger, _type, _uuid, label ->
+      raw = unescape_html(whole)
+
+      ~s(<span class="leaf-mention" contenteditable="false" data-leaf-mention-raw="#{escape_attr(raw)}">) <>
+        escape_text(trigger <> unescape_html(label)) <> "</span>"
+    end)
+  end
+
+  defp unescape_html(text) do
+    text
+    |> String.replace("&lt;", "<")
+    |> String.replace("&gt;", ">")
+    |> String.replace("&quot;", "\"")
+    |> String.replace("&#39;", "'")
+    |> String.replace("&amp;", "&")
+  end
 
   defp heading_attr(""), do: ""
   defp heading_attr(heading), do: ~s( data-leaf-wikilink-heading="#{escape_attr(heading)}")
