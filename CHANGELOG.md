@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.12.0 — 2026-11-11
+
+### Added
+
+- **`mentions`: mention tokens shown as chips.** A host that inserts mention
+  tokens — `@[user:<id>|Ada]`, `#[project:<id>|Q3]`, phoenix_kit's grammar —
+  turns on `mentions` and the editor shows each one as "@Ada" / "#Q3" instead
+  of its source. The chip is drawn the same by the server render and the
+  browser (`.leaf-mention`, not editable from inside, the whole token in
+  `data-leaf-mention-raw`); in hybrid source form the `[type:id|` and `]`
+  hide until the caret enters the token, as a wiki link's do; a pick from the
+  suggestion popup becomes its chip where it lands. Off by default.
+
+### Fixed
+
+- **Visual mode no longer breaks a mention token.** It escaped the token's
+  `[` on the way back to markdown (`@\[user:…]`), which turned a mention into
+  plain text. The token is written back byte for byte.
+
 ## 0.11.1 — 2026-11-06
 
 ### Fixed
