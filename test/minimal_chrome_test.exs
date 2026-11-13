@@ -144,4 +144,16 @@ defmodule Leaf.MinimalChromeTest do
 
     refute md =~ "](https://x.test)"
   end
+
+  test "action: :focus pushes a focus command, at the end unless told the start" do
+    socket = %Socket{assigns: %{__changed__: %{}, id: "editor-1"}}
+
+    for {at, expected} <- [{nil, "end"}, {:end, "end"}, {:start, "start"}, {"start", "start"}] do
+      assigns = if at, do: %{action: :focus, at: at}, else: %{action: :focus}
+      assert {:ok, socket} = Leaf.update(assigns, socket)
+
+      assert [["leaf-command:editor-1", %{action: "focus", at: ^expected}] | _] =
+               Enum.reverse(socket.private.live_temp.push_events)
+    end
+  end
 end

@@ -128,6 +128,7 @@ Then use it in your templates:
 | `media_url` | function | `nil` | `(tag_name, attrs) -> url \| nil`: which picture a preserved tag stands for (`<Image file_uuid=…/>`, a `<Gallery>` of them). Asked while the document is drawn and when a tag is inserted, so keep it cheap; a raise counts as `nil` |
 | `chrome` | `:full` \| `:minimal` | `:full` | `:minimal` is a bare hybrid input: no toolbar, switcher, bubble, counters or border — see [Minimal input](#minimal-input) |
 | `badge` | string | `"leaf"` | The small text in the bottom-right corner of a minimal editor; `nil` for none |
+| `inset` | boolean | `true` | Minimal chrome only: `false` drops the surface padding and makes the editor one line tall |
 | `submit_on_enter` | boolean | `nil` | Enter sends `{:leaf_submit, …}` instead of a new paragraph; Shift+Enter breaks the line. `nil` means on with `chrome={:minimal}`, off otherwise |
 | `toolbar_layout` | `:fixed` \| `:floating` \| `:both` | `:fixed` | The toolbar above the editor, a bubble over the selection, or both |
 | `maxlength` | integer | `nil` | Character cap, enforced while typing and pasting |
@@ -232,6 +233,11 @@ end
 
 Leaf does not clear itself, so a host can keep the text when saving fails.
 `submit_on_enter` works with the full chrome too.
+
+The minimal surface's padding has zero specificity, so a rule of yours wins
+without `!important`; `--leaf-minimal-padding` sets it outright, and
+`inset={false}` drops it (one line tall) for an editor inside your own
+padded box. Without a badge there is no right gutter.
 
 ### Denying features
 
@@ -490,6 +496,12 @@ send_update(Leaf, id: "my-editor", action: :flush, ref: "save-42")
 
 # Mark the current content as the clean baseline
 send_update(Leaf, id: "my-editor", action: :mark_saved)
+
+# Focus the editor, caret inside the last block's text (`at: :start` for the
+# first). For a focus that must happen inside a tap — a phone only raises its
+# keyboard then — call `el.leafFocus({at: "end"})` on the editor's element
+# from your own JS instead; a server round trip is too late.
+send_update(Leaf, id: "my-editor", action: :focus, at: :end)
 
 # Insert markdown at the caret (a block when the text ends in a line break; a
 # preserved tag arrives as its finished chip)

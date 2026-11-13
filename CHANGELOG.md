@@ -7,6 +7,10 @@
 - **`inset={false}`** for `chrome={:minimal}`: no surface padding and a
   one-line minimum height, for an editor inside the host's own padded box.
 - **`--leaf-minimal-padding`**: set the minimal surface's padding outright.
+- **`action: :focus`** (`at: :end` or `:start`) and **`el.leafFocus({at})`**
+  on the editor's element, for focusing from a shortcut or a button. The JS
+  handle is synchronous, so a phone raises its keyboard. The caret goes
+  inside the last (first) block's text.
 
 ### Fixed
 
@@ -17,6 +21,9 @@
   the first item. It is now rendered by the server, as a loaded document
   is, and goes in as blocks: replacing an empty line, or after (before) the
   line the caret ends (starts).
+- **`autofocus` put the caret after the last block** when that block was a
+  list with a nested list (after the nested list); it now uses the same
+  placement as `:focus`.
 - **`set_content` kept a trailing space.** "Project: " came back as
   "Project:" and the next word typed ran into it; the trailing spaces are
   now kept (as no-break spaces, which both serializers read as spaces). The

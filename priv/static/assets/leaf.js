@@ -2222,6 +2222,10 @@
       // one instead.
       if (this._visualEl) this._ensureListItemPlaceholders(this._visualEl);
       this._keepTrailingSpaces(this.el.dataset.initialMarkdown);
+      var focusSelf = this;
+      this.el.leafFocus = function (opts) {
+        return focusSelf._focusAt(opts && opts.at);
+      };
       this._resolveWikiLinks();
 
       // After the surfaces exist, so the opening state is step zero and the
@@ -2402,23 +2406,38 @@
       if (this._readonly) return;
       var self = this;
       requestAnimationFrame(function () {
-        if (self._mode === "markdown") {
-          var ta = self._getMarkdownTextarea();
-          if (!ta) return;
-          ta.focus();
-          ta.selectionStart = ta.selectionEnd = ta.value.length;
-          return;
-        }
-        var surface = self._visualEl;
-        if (!surface || !surface.isConnected) return;
-        surface.focus();
-        var range = document.createRange();
-        range.selectNodeContents(surface.lastElementChild || surface);
-        range.collapse(false);
-        var sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
+        self._focusAt("end");
       });
+    },
+
+    // Focus the editor with the caret at the "end" (default) or "start".
+    // Synchronous, so it can run inside a user gesture: a phone only raises
+    // its keyboard for a focus made within the tap. Reached from the server
+    // as `action: :focus` and from host JS as `el.leafFocus({at: "end"})` on
+    // the editor's element. The caret goes inside the last (first) block's
+    // text — not after the block, where the next keystroke would become a
+    // loose text node outside any paragraph.
+    _focusAt: function (at) {
+      if (this._readonly) return false;
+      var atEnd = at !== "start";
+      var ta = this._mode === "markdown" ? this._getMarkdownTextarea()
+        : this._mode === "html" ? this._getHtmlTextarea() : null;
+      if (ta) {
+        ta.focus();
+        ta.selectionStart = ta.selectionEnd = atEnd ? ta.value.length : 0;
+        return true;
+      }
+      var v = this._visualEl;
+      if (!v || !v.isConnected) return false;
+      if (!v.firstElementChild) v.innerHTML = "<p><br></p>";
+      try { v.focus({ preventScroll: true }); } catch (_) { v.focus(); }
+      this._placeCaretAtEdge(atEnd ? v.lastElementChild : v.firstElementChild, atEnd);
+      if (this._mode === "hybrid" && typeof this._updateSourceBlock === "function") {
+        this._updateSourceBlock();
+        // Opening the block as source rebuilt its text; land at the edge again.
+        if (this._sourceBlock) this._placeCaretAtEdge(this._sourceBlock, atEnd);
+      }
+      return true;
     },
 
     // The socket dropped and came back. The editor kept on working — its
@@ -18639,6 +18658,10 @@
 
         case "flush":
           this._flushPending(payload.ref);
+          break;
+
+        case "focus":
+          this._focusAt(payload.at);
           break;
 
         case "mark_saved":

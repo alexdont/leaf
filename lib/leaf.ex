@@ -56,7 +56,7 @@ defmodule Leaf do
     `{:leaf_resync, …}` — live editing; `Leaf.Collab.join/2` handles them
 
   Commands (`send_update(Leaf, id: …, action: …)`): `:set_content`,
-  `:set_mode`, `:insert_image`, `:insert_markdown`, `:flush`, `:mark_saved`,
+  `:set_mode`, `:insert_image`, `:insert_markdown`, `:flush`, `:mark_saved`, `:focus`,
   `:suggestions`, `:link_targets`, and for live editing `:apply_operation`,
   `:revision`, `:peer_cursors`.
 
@@ -337,6 +337,7 @@ defmodule Leaf do
       send_update(Leaf, id: "my-editor", action: :set_mode, mode: :visual)
       send_update(Leaf, id: "my-editor", action: :flush, ref: "save-42")
       send_update(Leaf, id: "my-editor", action: :mark_saved)
+      send_update(Leaf, id: "my-editor", action: :focus, at: :end)
 
   `:set_content` re-baselines the dirty snapshot by default — replacing the
   content programmatically is not a user edit, so an untouched editor still
@@ -957,6 +958,15 @@ defmodule Leaf do
        action: "flush",
        ref: Map.get(assigns, :ref)
      })}
+  end
+
+  # Focus the editor, caret at the end (default) or the start. For a focus
+  # that must happen inside a user gesture (a phone raising its keyboard),
+  # call `el.leafFocus({at: "end"})` on the editor's element from host JS
+  # instead: a server round trip arrives too late.
+  def update(%{action: :focus} = assigns, socket) do
+    at = if Map.get(assigns, :at) in [:start, "start"], do: "start", else: "end"
+    {:ok, push_event(socket, "leaf-command:#{socket.assigns.id}", %{action: "focus", at: at})}
   end
 
   def update(%{action: :mark_saved}, socket) do
