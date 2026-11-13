@@ -526,7 +526,10 @@
     "[data-leaf-chrome='minimal'] [data-drag-handle] { display: none !important; }",
     // Its padding lives here rather than in Tailwind classes, so
     // they don't depend on the host's build scanning leaf's lib/.
-    "[data-leaf-chrome='minimal'] [data-editor-visual] { padding: 0.5rem 3rem 0.5rem 0.75rem !important; }",
+    // One line means one line: no paragraph margin above the first block or
+    // below the last.
+    "[data-leaf-chrome='minimal'] .content-editor-visual > :first-child { margin-top: 0; }",
+    "[data-leaf-chrome='minimal'] .content-editor-visual > :last-child { margin-bottom: 0; }",
     "[data-leaf-chrome='minimal'] [data-leaf-body-wrapper] { position: relative; }",
     ".leaf-selection-toolbar {",
     "  position: absolute; z-index: 60;",
@@ -840,6 +843,14 @@
   // =========================================================================
   // HTML → Markdown converter (pure DOM walking)
   // =========================================================================
+
+  // Plain text that is markdown with block structure: more than one line,
+  // and at least one of them a list item, heading, quote or fence.
+  function looksLikeMarkdownBlocks(text) {
+    if (!text || text.indexOf("\n") === -1) return false;
+    return /^ {0,3}([-*+] |\d{1,9}[.)] |#{1,6} |> ?|```|~~~)/m.test(text) &&
+      text.replace(/\r/g, "").trim().split("\n").length > 1;
+  }
 
   function htmlToMarkdown(html) {
     var container = document.createElement("div");
@@ -2210,6 +2221,7 @@
       // landed in a neighbouring item, and the next keystroke acted on that
       // one instead.
       if (this._visualEl) this._ensureListItemPlaceholders(this._visualEl);
+      this._keepTrailingSpaces(this.el.dataset.initialMarkdown);
       this._resolveWikiLinks();
 
       // After the surfaces exist, so the opening state is step zero and the
@@ -4114,6 +4126,22 @@
         return;
       }
 
+      // 4b. Plain text with markdown block syntax on more than one line — a
+      //     list, headings, a quote, a fence. The browser's paste drops it
+      //     into one block as text, where every line after the first read as
+      //     that block's continuation (a pasted nested list came back with
+      //     its siblings re-indented under the first item). Rendered by the
+      //     server, the same as a loaded document, and inserted as blocks.
+      if (
+        text &&
+        (this._mode === "visual" || this._mode === "hybrid") &&
+        looksLikeMarkdownBlocks(text)
+      ) {
+        e.preventDefault();
+        this._pasteMarkdown(text);
+        return;
+      }
+
       // 5. A bare URL on the clipboard: if text is selected, turn it into a
       //    link to that URL; otherwise drop an autolinked anchor. Anything
       //    else falls through to the browser's native plain-text paste.
@@ -4142,6 +4170,172 @@
         }
         return;
       }
+    },
+
+    // Ask the server to render `text` as markdown, then put the blocks where
+    // the caret was. On an empty line (or an empty editor) the line is
+    // replaced by them; elsewhere they go in through insertHTML, like a rich
+    // paste. No reply (an old server, a dropped socket) pastes the text.
+    _pasteMarkdown: function (text) {
+      var self = this;
+      var sel = window.getSelection();
+      var saved = sel && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+      // Where the caret is, read now: by the reply a hybrid refresh may have
+      // rebuilt the block's text nodes and left `saved` pointing nowhere.
+      var spot = this._pasteSpot(saved);
+      var done = false;
+
+      var fallback = setTimeout(function () {
+        if (done) return;
+        done = true;
+        restore();
+        document.execCommand("insertText", false, text);
+      }, 3000);
+
+      function restore() {
+        if (!saved || !saved.startContainer.isConnected) return;
+        var s2 = window.getSelection();
+        s2.removeAllRanges();
+        s2.addRange(saved);
+      }
+
+      this.pushEventTo(this.el, "render_paste", { text: text }, function (reply) {
+        if (done) return;
+        done = true;
+        clearTimeout(fallback);
+        var html = reply && reply.html;
+        restore();
+        if (!html) {
+          document.execCommand("insertText", false, text);
+          return;
+        }
+        self._insertRenderedBlocks(html, spot);
+      });
+    },
+
+    // The top-level block holding `range`, and whether the caret is at its
+    // start or end (ignoring placeholder characters).
+    _pasteSpot: function (range) {
+      var v = this._visualEl;
+      if (!v || !range || !v.contains(range.startContainer)) return null;
+      var block = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentNode;
+      while (block && block.parentNode !== v) block = block.parentNode;
+      if (!block) return null;
+      var clean = function (t) { return (t || "").replace(/[\u200B\uFEFF]/g, "").replace(/[\s\u00a0]+$/, ""); };
+      var before = document.createRange();
+      before.selectNodeContents(block);
+      before.setEnd(range.startContainer, range.startOffset);
+      var head = clean(before.toString());
+      var all = clean(block.textContent);
+      return { block: block, atStart: head.replace(/^[\s\u00a0]+/, "") === "", atEnd: head.length >= all.length };
+    },
+
+    _insertRenderedBlocks: function (html, spot) {
+      var v = this._visualEl;
+      if (!v) return;
+      this._historyCaptureNow("paste-markdown");
+
+      var container = document.createElement("div");
+      container.innerHTML = html;
+      this._normalizeRenderedHtml(container);
+      var nodes = Array.prototype.slice.call(container.childNodes).filter(function (n) {
+        return n.nodeType === 1 || (n.nodeType === 3 && n.textContent.trim());
+      });
+      if (!nodes.length) return;
+
+      var isBlank = function (el) {
+        return !(el.textContent || "").replace(/[\s\u200B\uFEFF\u00a0]/g, "") &&
+          !el.querySelector("img, video, iframe, hr, table, input");
+      };
+
+      if (spot && !spot.block.isConnected) spot = null;
+      var sel = window.getSelection();
+      if (!spot && sel && sel.rangeCount) spot = this._pasteSpot(sel.getRangeAt(0));
+      var block = spot && spot.block;
+
+      var last = nodes[nodes.length - 1];
+      if (isBlank(v) || !block || isBlank(block)) {
+        if (isBlank(v)) {
+          v.innerHTML = "";
+          nodes.forEach(function (n) { v.appendChild(n); });
+        } else if (block) {
+          nodes.forEach(function (n) { v.insertBefore(n, block); });
+          v.removeChild(block);
+        } else {
+          nodes.forEach(function (n) { v.appendChild(n); });
+        }
+        if (this._sourceBlock && !this._sourceBlock.isConnected) this._sourceBlock = null;
+        this._ensureListItemPlaceholders(v);
+        this._placeCaretAtEdge(last, true);
+      } else if (spot.atEnd || spot.atStart) {
+        // After (or before) the line the caret was on, which stays as it is.
+        var ref = spot.atEnd ? block.nextSibling : block;
+        nodes.forEach(function (n) { v.insertBefore(n, ref); });
+        if (this._sourceBlock && !this._sourceBlock.isConnected) this._sourceBlock = null;
+        this._ensureListItemPlaceholders(v);
+        this._placeCaretAtEdge(last, true);
+      } else {
+        var wrap = document.createElement("div");
+        nodes.forEach(function (n) { wrap.appendChild(n); });
+        document.execCommand("insertHTML", false, wrap.innerHTML);
+        if (this._sourceBlock && !this._sourceBlock.isConnected) this._sourceBlock = null;
+        this._ensureListItemPlaceholders(v);
+      }
+
+      this._lastSourceStateKey = null;
+      this._updateSourceBlock();
+      this._debouncedPushVisualChange();
+      this._updateCounts();
+    },
+
+    // Markdown rendering trims the spaces at the end of the text, so a host's
+    // "Project: " came back as "Project:" and the next word typed ran into
+    // it. Put them back as no-break spaces, the form a browser itself uses
+    // for a trailing space; both serializers read them as plain spaces.
+    _keepTrailingSpaces: function (markdown) {
+      var m = / +$/.exec(markdown || "");
+      var v = this._visualEl;
+      if (!m || !v || !/\S/.test(markdown)) return;
+      var walker = document.createTreeWalker(v, NodeFilter.SHOW_TEXT, null);
+      var lastText = null;
+      while (walker.nextNode()) {
+        if (walker.currentNode.textContent.replace(/[\u200B\uFEFF]/g, "").length) lastText = walker.currentNode;
+      }
+      if (!lastText) return;
+      var pad = "";
+      for (var i = 0; i < m[0].length; i++) pad += "\u00a0";
+      lastText.textContent = lastText.textContent.replace(/[ \u00a0]+$/, "") + pad;
+    },
+
+    // The caret at the very end (or start) of `el`'s text: inside its last
+    // (first) text node, never after a nested list or outside the block. A
+    // block with no text gets it in front of its placeholder <br>.
+    _placeCaretAtEdge: function (el, atEnd) {
+      if (!el) return;
+      var node = el;
+      while (node.nodeType === 1 && node.childNodes.length) {
+        var kids = Array.prototype.filter.call(node.childNodes, function (c) {
+          return !(c.nodeType === 3 && !c.textContent.length) &&
+            !(c.nodeType === 1 && c.tagName === "BR" && c.hasAttribute("data-leaf-filler"));
+        });
+        if (!kids.length) break;
+        var next = atEnd ? kids[kids.length - 1] : kids[0];
+        if (next.nodeType === 1 && next.tagName === "BR") break;
+        if (next.nodeType === 1 && next.getAttribute("contenteditable") === "false") break;
+        node = next;
+      }
+      var range = document.createRange();
+      if (node.nodeType === 3) {
+        range.setStart(node, atEnd ? node.textContent.length : 0);
+      } else {
+        var brKid = node.lastChild && node.lastChild.tagName === "BR" ? node.lastChild : null;
+        if (brKid && atEnd) range.setStartBefore(brKid);
+        else range.setStart(node, atEnd ? node.childNodes.length : 0);
+      }
+      range.collapse(true);
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
     },
 
     // See `pastedLines`. An empty string is an empty line.
@@ -18345,6 +18539,7 @@
             this._visualEl.innerHTML = html;
             this._normalizeRenderedHtml(this._visualEl);
             this._ensureListItemPlaceholders(this._visualEl);
+            this._keepTrailingSpaces(content);
           }
 
           var markdownTextarea = this._getMarkdownTextarea();

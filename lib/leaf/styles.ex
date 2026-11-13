@@ -129,8 +129,23 @@ defmodule Leaf.Styles do
     .content-editor-visual {
       box-sizing: border-box;
       overflow: auto;
-      padding: 1rem;
-      padding-left: 2.5rem;
+    }
+    /* Padding at zero specificity (`:where`), so a host rule always wins
+       without `!important`. chrome={:minimal} has its own, set outright by
+       `--leaf-minimal-padding`; its right gutter is for the badge, so it
+       goes when the badge does, and `inset={false}` drops the rest. */
+    :where(.content-editor-visual) { padding: 1rem 1rem 1rem 2.5rem; }
+    :where([data-leaf-chrome="minimal"] .content-editor-visual) {
+      padding: var(--leaf-minimal-padding, 0.5rem 3rem 0.5rem 0.75rem);
+    }
+    :where([data-leaf-chrome="minimal"][data-leaf-badge-shown="false"] .content-editor-visual) {
+      padding: var(--leaf-minimal-padding, 0.5rem 0.75rem);
+    }
+    :where([data-leaf-chrome="minimal"][data-leaf-inset="false"] .content-editor-visual) {
+      padding: var(--leaf-minimal-padding, 0 3rem 0 0);
+    }
+    :where([data-leaf-chrome="minimal"][data-leaf-inset="false"][data-leaf-badge-shown="false"] .content-editor-visual) {
+      padding: var(--leaf-minimal-padding, 0);
     }
 
     /* Toolbar alignment — emitted inline so the icon row sits on a single

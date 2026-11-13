@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`inset={false}`** for `chrome={:minimal}`: no surface padding and a
+  one-line minimum height, for an editor inside the host's own padded box.
+- **`--leaf-minimal-padding`**: set the minimal surface's padding outright.
+
+### Fixed
+
+- **A pasted markdown list kept its nesting.** Plain text with block
+  syntax on more than one line (a list, headings, a quote, a fence) went
+  into one block as text, and every line after the first read as its
+  continuation: a nested list came back with its siblings re-indented under
+  the first item. It is now rendered by the server, as a loaded document
+  is, and goes in as blocks: replacing an empty line, or after (before) the
+  line the caret ends (starts).
+- **`set_content` kept a trailing space.** "Project: " came back as
+  "Project:" and the next word typed ran into it; the trailing spaces are
+  now kept (as no-break spaces, which both serializers read as spaces). The
+  initial `content` too.
+- **The minimal surface's padding no longer fights the host.** It was set
+  with `!important`; Leaf's padding rules now have zero specificity
+  (`:where`), so any host rule wins. Without a badge there is no right
+  gutter, and the first and last blocks have no outer margin, so one line
+  is one line tall.
+
 ## 0.13.0 — 2026-11-13
 
 ### Added

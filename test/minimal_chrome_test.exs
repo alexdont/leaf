@@ -46,14 +46,16 @@ defmodule Leaf.MinimalChromeTest do
     end
 
     test "shows the leaf badge bottom right", %{html: html} do
-      assert [_, "leaf"] = Regex.run(~r{data-leaf-badge[^>]*>\s*([^<]*?)\s*<}, html)
+      assert [_, "leaf"] = Regex.run(~r{data-leaf-badge(?!-)[^>]*>\s*([^<]*?)\s*<}, html)
     end
   end
 
   test "the badge text is the host's, and can be turned off" do
-    assert editor_html(chrome: :minimal, badge: "task") =~ ~r{data-leaf-badge[^>]*>\s*task\s*<}
-    refute editor_html(chrome: :minimal, badge: nil) =~ "data-leaf-badge"
-    refute editor_html(chrome: :minimal, badge: "") =~ "data-leaf-badge"
+    assert editor_html(chrome: :minimal, badge: "task") =~
+             ~r{data-leaf-badge(?!-)[^>]*>\s*task\s*<}
+
+    refute editor_html(chrome: :minimal, badge: nil) =~ ~r"data-leaf-badge(?!-)"
+    refute editor_html(chrome: :minimal, badge: "") =~ ~r"data-leaf-badge(?!-)"
   end
 
   test "ignores a mode or floating toolbar the host passes" do
@@ -66,6 +68,43 @@ defmodule Leaf.MinimalChromeTest do
     html = editor_html(chrome: :minimal, height: "80px", submit_on_enter: false)
     assert html =~ ~s(data-height="80px")
     assert html =~ ~s(data-submit-on-enter="false")
+  end
+
+  test "padding follows the badge and inset, one line tall without inset" do
+    html = editor_html(chrome: :minimal)
+    assert html =~ ~s(data-leaf-badge-shown="true")
+    assert html =~ ~s(data-leaf-inset="true")
+    assert html =~ ~s(data-min-height="2.5rem")
+
+    html = editor_html(chrome: :minimal, badge: nil, inset: false)
+    assert html =~ ~s(data-leaf-badge-shown="false")
+    assert html =~ ~s(data-leaf-inset="false")
+    assert html =~ ~s(data-min-height="1lh")
+  end
+
+  test "the surface padding has zero specificity and no !important" do
+    css = render_component(Leaf, id: "e", chrome: :minimal)
+    assert css =~ ~s{:where([data-leaf-chrome="minimal"] .content-editor-visual)}
+    assert css =~ "--leaf-minimal-padding"
+    refute css =~ ~r/padding:[^;]*!important/
+  end
+
+  test "render_paste replies with the markdown drawn as html, sanitized" do
+    socket = %Socket{assigns: %{__changed__: %{}, id: "editor-1", deny: [:links], notify: nil}}
+
+    assert {:reply, %{html: html}, _} =
+             Leaf.handle_event(
+               "render_paste",
+               %{
+                 "text" =>
+                   "- Book flights\n  - Compare [prices](https://x.test)\n- Renew passport"
+               },
+               socket
+             )
+
+    assert html =~ ~r{<li>\s*Book flights\s*<ul>\s*<li>\s*Compare prices}s
+    assert html =~ ~r{</ul>\s*</li>\s*<li>\s*Renew passport}s
+    refute html =~ "https://x.test"
   end
 
   test "denying hybrid mode with it raises" do
@@ -81,7 +120,7 @@ defmodule Leaf.MinimalChromeTest do
     assert html =~ ~s(data-height="480px")
     assert html =~ ~s(data-leaf-chrome="full")
     assert html =~ ~s(data-submit-on-enter="false")
-    refute html =~ "data-leaf-badge"
+    refute html =~ ~r"data-leaf-badge(?!-)"
   end
 
   test "submit_on_enter works with the full chrome too" do

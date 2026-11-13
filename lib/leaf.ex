@@ -503,6 +503,17 @@ defmodule Leaf do
     """
   )
 
+  attr(:inset, :boolean,
+    default: true,
+    doc: """
+    With `chrome={:minimal}`: `false` drops the surface's padding and makes
+    the minimum height one line, for an editor that sits inside the host's
+    own padded box. The padding can also be set outright with the CSS
+    variable `--leaf-minimal-padding`; Leaf's own rules have zero
+    specificity, so any host rule wins.
+    """
+  )
+
   attr(:submit_on_enter, :boolean,
     default: nil,
     doc: """
@@ -720,6 +731,7 @@ defmodule Leaf do
      |> assign_new(:chrome, fn -> :full end)
      |> assign_new(:badge, fn -> "leaf" end)
      |> assign_new(:submit_on_enter, fn -> nil end)
+     |> assign_new(:inset, fn -> true end)
      |> assign_new(:min_height, fn -> nil end)
      |> assign_new(:max_height, fn -> nil end)
      |> assign_new(:debounce, fn -> 400 end)
@@ -1030,7 +1042,8 @@ defmodule Leaf do
       |> assign(:minimal, minimal)
       |> assign(:submit_on_enter?, submit_on_enter?(assigns))
       |> assign(:height, assigns[:height] || default_height(assigns[:chrome]))
-      |> assign(:min_height, assigns[:min_height] || (minimal && "2.5rem") || nil)
+      |> assign(:min_height, assigns[:min_height] || minimal_min_height(minimal, assigns[:inset]))
+      |> assign(:badge_shown, minimal and assigns[:badge] not in [nil, ""])
       |> assign(:pinned_extra, pinned_extra)
       |> assign(:overflow_extra, overflow_extra)
 
@@ -1053,6 +1066,8 @@ defmodule Leaf do
       data-preserve-tags={Enum.map_join(@preserve_tags, ",", &String.downcase(to_string(&1)))}
       data-toolbar-layout={if @minimal, do: "fixed", else: to_string(@toolbar_layout)}
       data-leaf-chrome={if @minimal, do: "minimal", else: "full"}
+      data-leaf-inset={to_string(@inset != false)}
+      data-leaf-badge-shown={to_string(@badge_shown)}
       data-submit-on-enter={to_string(@submit_on_enter?)}
       data-readonly={@readonly}
       data-height={@height}
@@ -2427,7 +2442,7 @@ defmodule Leaf do
         </div>
 
         <span
-          :if={@minimal and @badge not in [nil, ""]}
+          :if={@badge_shown}
           data-leaf-badge
           class="pointer-events-none select-none"
           style="position: absolute; right: 0.5rem; bottom: 0.3rem; font-size: 10px; line-height: 1; opacity: 0.45;"
@@ -2821,6 +2836,21 @@ defmodule Leaf do
   # preview (attributes, thumbnail, rendered children) can be rebuilt by
   # the same code that built it on first render — the client has no
   # markdown renderer of its own.
+  # Plain text pasted into the visual or hybrid surface that has markdown
+  # block structure (a list, headings, a quote). The browser has no markdown
+  # renderer, so it is drawn here, the same way as a loaded document.
+  def handle_event("render_paste", %{"text" => text}, socket) when is_binary(text) do
+    deny = socket.assigns.deny
+
+    html =
+      text
+      |> sanitize_markdown(deny)
+      |> markdown_to_html(render_opts(socket))
+      |> sanitize_html(deny)
+
+    {:reply, %{html: html}, socket}
+  end
+
   def handle_event("render_preserved", %{"raw" => raw, "token" => token}, socket) do
     {:noreply,
      push_event(socket, "leaf-preserved-html:#{socket.assigns.id}", %{
@@ -3679,6 +3709,10 @@ defmodule Leaf do
       mode
     end
   end
+
+  defp minimal_min_height(false, _inset), do: nil
+  defp minimal_min_height(true, false), do: "1lh"
+  defp minimal_min_height(true, _inset), do: "2.5rem"
 
   defp default_height(:minimal), do: "auto"
   defp default_height(_), do: "480px"
