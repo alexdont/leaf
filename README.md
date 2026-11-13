@@ -25,7 +25,7 @@ Add `leaf` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:leaf, "~> 0.12"}
+    {:leaf, "~> 0.13"}
   ]
 end
 ```
@@ -126,12 +126,15 @@ Then use it in your templates:
 | `preserve_tags` | list | `[]` | Custom component tag names to protect from the HTML round-trip — **required** for content using them, see [Custom component tags](#custom-component-tags) |
 | `tag_previews` | map | `%{}` | How a preserved tag is drawn: `%{"Headline" => :headline, "Showcase" => :split, "Cta" => :button, "Embed" => :frame, "Track" => :audio}`. A tag with no entry keeps the generic box |
 | `media_url` | function | `nil` | `(tag_name, attrs) -> url \| nil`: which picture a preserved tag stands for (`<Image file_uuid=…/>`, a `<Gallery>` of them). Asked while the document is drawn and when a tag is inserted, so keep it cheap; a raise counts as `nil` |
+| `chrome` | `:full` \| `:minimal` | `:full` | `:minimal` is a bare hybrid input: no toolbar, switcher, bubble, counters or border — see [Minimal input](#minimal-input) |
+| `badge` | string | `"leaf"` | The small text in the bottom-right corner of a minimal editor; `nil` for none |
+| `submit_on_enter` | boolean | `nil` | Enter sends `{:leaf_submit, …}` instead of a new paragraph; Shift+Enter breaks the line. `nil` means on with `chrome={:minimal}`, off otherwise |
 | `toolbar_layout` | `:fixed` \| `:floating` \| `:both` | `:fixed` | The toolbar above the editor, a bubble over the selection, or both |
 | `maxlength` | integer | `nil` | Character cap, enforced while typing and pasting |
 | `toolbar_extra` | list | `[]` | Host-defined toolbar buttons — see [Host toolbar buttons](#host-toolbar-buttons) |
 | `placeholder` | string | `"Write something..."` | Placeholder text shown when the editor is empty |
 | `readonly` | boolean | `false` | Read-only mode |
-| `height` | string | `"480px"` | Editor height (the body resizes from this baseline) |
+| `height` | string | `nil` | Editor height (the body resizes from this baseline); `nil` is `"480px"`, or `"auto"` for a minimal editor. `"auto"` grows with the content |
 | `min_height`, `max_height` | string | `nil` | Bounds for that resizing |
 | `debounce` | integer | `400` | Debounce interval in ms for content-change events |
 | `flush_on_blur` | boolean | `true` | Push the pending keystrokes when the editor loses focus, not only when the debounce fires |
@@ -204,6 +207,31 @@ commits, Escape cancels.
 
 Silence the warning (e.g. for content that legitimately contains prose like
 `<Not A Tag>`) with `config :leaf, warn_unpreserved_tags: false`.
+
+### Minimal input
+
+`chrome={:minimal}` is the hybrid editor with nothing drawn around it, for a
+one-line input such as "add a task". No toolbar, mode switcher, selection
+bubble, counters or border (wrap it in your own); the height grows with the
+text; markdown shortcuts and Ctrl/⌘+B-style keys still work. A small badge
+("leaf" unless you pass `badge`, `nil` for none) sits bottom right.
+
+Enter submits, Shift+Enter breaks the line, Enter in an open suggestion list
+picks the item, and an empty editor sends nothing:
+
+```heex
+<.leaf_editor id="new-task" chrome={:minimal} badge="task" placeholder="Add a task…" />
+```
+
+```elixir
+def handle_info({:leaf_submit, %{editor_id: "new-task", markdown: md}}, socket) do
+  send_update(Leaf, id: "new-task", action: :set_content, content: "")
+  {:noreply, create_task(socket, md)}
+end
+```
+
+Leaf does not clear itself, so a host can keep the text when saving fails.
+`submit_on_enter` works with the full chrome too.
 
 ### Denying features
 
@@ -350,6 +378,11 @@ Handle these in your LiveView's `handle_info/2`:
 def handle_info({:leaf_changed, %{editor_id: id, markdown: md, html: html}}, socket) do
   # Content was updated
   {:noreply, assign(socket, :content, md)}
+end
+
+def handle_info({:leaf_submit, %{editor_id: id, markdown: md, html: html}}, socket) do
+  # Enter in an editor with `submit_on_enter` (minimal chrome)
+  {:noreply, socket}
 end
 
 def handle_info({:leaf_insert_request, %{editor_id: id, type: :image}}, socket) do
