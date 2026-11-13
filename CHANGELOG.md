@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Pasting into code stays code.** 0.13.1 rendered a markdown-looking
+  plain-text paste (`- a`, `# not a heading`) as blocks even inside a fenced
+  code block or inline code, dropping them after the block. Inside code a
+  paste is text again.
+- **A markdown paste in the middle of a line splits it.** "Hello |world" +
+  a list is "Hello", the list, "world"; the blocks used to go in through the
+  browser's insertHTML, which could land them before the line.
+
+### Changed
+
+- **No badge by default.** `chrome={:minimal}` shows a badge only when the
+  host passes `badge`; it used to show "leaf". Pass `badge="leaf"` to keep it.
+
 ## 0.13.1 — 2026-11-13
 
 ### Added

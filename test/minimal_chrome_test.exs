@@ -45,8 +45,9 @@ defmodule Leaf.MinimalChromeTest do
       assert html =~ ~s(data-height="auto")
     end
 
-    test "shows the leaf badge bottom right", %{html: html} do
-      assert [_, "leaf"] = Regex.run(~r{data-leaf-badge(?!-)[^>]*>\s*([^<]*?)\s*<}, html)
+    test "shows no badge unless the host asks for one", %{html: html} do
+      refute html =~ ~r"data-leaf-badge(?!-)"
+      assert html =~ ~s(data-leaf-badge-shown="false")
     end
   end
 
@@ -71,7 +72,7 @@ defmodule Leaf.MinimalChromeTest do
   end
 
   test "padding follows the badge and inset, one line tall without inset" do
-    html = editor_html(chrome: :minimal)
+    html = editor_html(chrome: :minimal, badge: "task")
     assert html =~ ~s(data-leaf-badge-shown="true")
     assert html =~ ~s(data-leaf-inset="true")
     assert html =~ ~s(data-min-height="2.5rem")

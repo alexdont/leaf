@@ -4151,10 +4151,15 @@
       //     that block's continuation (a pasted nested list came back with
       //     its siblings re-indented under the first item). Rendered by the
       //     server, the same as a loaded document, and inserted as blocks.
+      //     Not inside code (a fenced block, a <pre>, an inline `code` span):
+      //     there `# comment`, `- flag` and `> prompt` lines are code, and
+      //     the browser's plain paste keeps them as text. Ctrl/Cmd+Shift+V
+      //     (step 2) pastes plain text anywhere.
       if (
         text &&
         (this._mode === "visual" || this._mode === "hybrid") &&
-        looksLikeMarkdownBlocks(text)
+        looksLikeMarkdownBlocks(text) &&
+        !this._caretInCode()
       ) {
         e.preventDefault();
         this._pasteMarkdown(text);
@@ -4232,6 +4237,27 @@
       });
     },
 
+    // Is the caret in code? A rendered <pre>/<code>, or — in a hybrid block
+    // open as source, whose inline code is plain backticked text — after an
+    // odd number of backticks, or in a block whose source opens a fence.
+    _caretInCode: function () {
+      var sel = window.getSelection();
+      if (!sel || !sel.rangeCount || !this._visualEl) return false;
+      var node = sel.anchorNode;
+      var el = node && (node.nodeType === 1 ? node : node.parentNode);
+      if (!el || !this._visualEl.contains(el)) return false;
+      if (el.closest && el.closest("pre, code")) return true;
+      var block = this._sourceBlock;
+      if (!block || !block.isConnected || !block.contains(node)) return false;
+      var text = (block.textContent || "").replace(/[\u200B\uFEFF]/g, "");
+      if (/^ {0,3}(```|~~~)/.test(text)) return true;
+      var head = document.createRange();
+      head.selectNodeContents(block);
+      head.setEnd(sel.anchorNode, sel.anchorOffset);
+      var ticks = (head.toString().replace(/\\`/g, "").match(/`/g) || []).length;
+      return ticks % 2 === 1;
+    },
+
     // The top-level block holding `range`, and whether the caret is at its
     // start or end (ignoring placeholder characters).
     _pasteSpot: function (range) {
@@ -4246,7 +4272,15 @@
       before.setEnd(range.startContainer, range.startOffset);
       var head = clean(before.toString());
       var all = clean(block.textContent);
-      return { block: block, atStart: head.replace(/^[\s\u00a0]+/, "") === "", atEnd: head.length >= all.length };
+      var spot = { block: block, atStart: head.replace(/^[\s\u00a0]+/, "") === "", atEnd: head.length >= all.length, range: range.cloneRange() };
+      // A block open as source holds markdown text; remember the split
+      // point as an offset into it, which survives the refresh rebuilding
+      // its text nodes before the reply comes back.
+      if (block.hasAttribute("data-leaf-source")) {
+        spot.sourceText = block.textContent || "";
+        spot.sourceOffset = this._textOffsetInBlock(block, range.startContainer, range.startOffset);
+      }
+      return spot;
     },
 
     _insertRenderedBlocks: function (html, spot) {
@@ -4291,6 +4325,31 @@
         var ref = spot.atEnd ? block.nextSibling : block;
         nodes.forEach(function (n) { v.insertBefore(n, ref); });
         if (this._sourceBlock && !this._sourceBlock.isConnected) this._sourceBlock = null;
+        this._ensureListItemPlaceholders(v);
+        this._placeCaretAtEdge(last, true);
+      } else if (block.tagName !== "LI" && block.tagName !== "UL" && block.tagName !== "OL" &&
+                 (spot.sourceOffset != null || (spot.range && spot.range.startContainer.isConnected))) {
+        // In the middle of a line: split it, and put the blocks between the
+        // two halves — "Hello |world" + a list is "Hello", the list, "world".
+        var tail;
+        if (spot.sourceOffset != null) {
+          var head = this._renderBlockFromSource(spot.sourceText.slice(0, spot.sourceOffset).replace(/[\s\u00a0]+$/, ""));
+          tail = this._renderBlockFromSource(spot.sourceText.slice(spot.sourceOffset).replace(/^[\s\u00a0]+/, ""));
+          v.replaceChild(head, block);
+          block = head;
+          if (this._sourceBlock && !this._sourceBlock.isConnected) this._sourceBlock = null;
+        } else {
+          var cut = spot.range.cloneRange();
+          cut.setEnd(block, block.childNodes.length);
+          tail = block.cloneNode(false);
+          tail.appendChild(cut.extractContents());
+          if (tail.firstChild && tail.firstChild.nodeType === 3) {
+            tail.firstChild.textContent = tail.firstChild.textContent.replace(/^[\s\u00a0]+/, "");
+          }
+        }
+        var after = block.nextSibling;
+        nodes.forEach(function (n) { v.insertBefore(n, after); });
+        v.insertBefore(tail, after);
         this._ensureListItemPlaceholders(v);
         this._placeCaretAtEdge(last, true);
       } else {

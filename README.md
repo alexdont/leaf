@@ -127,7 +127,7 @@ Then use it in your templates:
 | `tag_previews` | map | `%{}` | How a preserved tag is drawn: `%{"Headline" => :headline, "Showcase" => :split, "Cta" => :button, "Embed" => :frame, "Track" => :audio}`. A tag with no entry keeps the generic box |
 | `media_url` | function | `nil` | `(tag_name, attrs) -> url \| nil`: which picture a preserved tag stands for (`<Image file_uuid=…/>`, a `<Gallery>` of them). Asked while the document is drawn and when a tag is inserted, so keep it cheap; a raise counts as `nil` |
 | `chrome` | `:full` \| `:minimal` | `:full` | `:minimal` is a bare hybrid input: no toolbar, switcher, bubble, counters or border — see [Minimal input](#minimal-input) |
-| `badge` | string | `"leaf"` | The small text in the bottom-right corner of a minimal editor; `nil` for none |
+| `badge` | string | `nil` | Small text in the bottom-right corner of a minimal editor saying what the input is (`"task"`); none by default |
 | `inset` | boolean | `true` | Minimal chrome only: `false` drops the surface padding and makes the editor one line tall |
 | `submit_on_enter` | boolean | `nil` | Enter sends `{:leaf_submit, …}` instead of a new paragraph; Shift+Enter breaks the line. `nil` means on with `chrome={:minimal}`, off otherwise |
 | `toolbar_layout` | `:fixed` \| `:floating` \| `:both` | `:fixed` | The toolbar above the editor, a bubble over the selection, or both |
@@ -214,8 +214,9 @@ Silence the warning (e.g. for content that legitimately contains prose like
 `chrome={:minimal}` is the hybrid editor with nothing drawn around it, for a
 one-line input such as "add a task". No toolbar, mode switcher, selection
 bubble, counters or border (wrap it in your own); the height grows with the
-text; markdown shortcuts and Ctrl/⌘+B-style keys still work. A small badge
-("leaf" unless you pass `badge`, `nil` for none) sits bottom right.
+text; markdown shortcuts and Ctrl/⌘+B-style keys still work. Pass `badge`
+("task", "note") for a small label in the bottom-right corner; there is none
+by default.
 
 Enter submits, Shift+Enter breaks the line, Enter in an open suggestion list
 picks the item, and an empty editor sends nothing:
@@ -238,6 +239,16 @@ The minimal surface's padding has zero specificity, so a rule of yours wins
 without `!important`; `--leaf-minimal-padding` sets it outright, and
 `inset={false}` drops it (one line tall) for an editor inside your own
 padded box. Without a badge there is no right gutter.
+
+### Pasting
+
+Rich content (from a web page, Word, another editor) is cleaned down to
+plain markup. Plain text with markdown block structure on more than one line
+— a list, headings, a quote, a fence — is rendered like a loaded document
+and goes in as blocks: replacing an empty line, after or before the line the
+caret ends or starts, or splitting the line around it. Inside code (a fenced
+block, inline `` `code` ``) a paste is always text. **Ctrl/Cmd+Shift+V**
+pastes plain text anywhere, unrendered.
 
 ### Denying features
 

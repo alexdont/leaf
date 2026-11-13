@@ -96,3 +96,65 @@ test("_placeCaretAtEdge lands inside the last text, not after the block", { skip
   assert.equal(window.getSelection().anchorNode, e._visualEl.firstChild, "an empty block: in front of its <br>");
   e.cleanup();
 });
+
+// ALEX-134: inside code a paste is text; mid-line a paste splits the line.
+const MD = "- a\n- b\n# not a heading";
+
+function caretIn(node, offset) {
+  const r = document.createRange();
+  r.setStart(node, offset);
+  r.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+}
+
+test("a paste into a fenced code block is left to the browser as text", { skip: dom.skip }, () => {
+  const e = withRender(dom.editor("<p>Before</p><pre><code>x = 1</code></pre><p>After</p>", "hybrid"), "<ul><li>a</li></ul>");
+  caretIn(e._visualEl.querySelector("code").firstChild, 5);
+  const ev = pasteText(e, MD);
+  assert.ok(!ev.defaultPrevented, "native plain paste");
+  assert.deepEqual(e.pushed, [], "nothing rendered");
+  e.cleanup();
+});
+
+test("a paste into rendered inline code is text too", { skip: dom.skip }, () => {
+  const e = withRender(dom.editor("<p>run <code>ls</code> now</p>", "visual"), "<ul><li>a</li></ul>");
+  caretIn(e._visualEl.querySelector("code").firstChild, 2);
+  assert.ok(!pasteText(e, MD).defaultPrevented);
+  e.cleanup();
+});
+
+test("in a source block: inside backticks, or a typed fence, is code", { skip: dom.skip }, () => {
+  for (const [html, at] of [["run `ls", 7], ["```\nx", 5]]) {
+    const e = withRender(dom.editor(`<p data-leaf-source="p">${html}</p>`, "hybrid"), "<ul><li>a</li></ul>");
+    e._sourceBlock = e._visualEl.firstChild;
+    caretIn(e._sourceBlock.firstChild, at);
+    assert.ok(!pasteText(e, MD).defaultPrevented, html);
+    e.cleanup();
+  }
+  const e = withRender(dom.editor('<p data-leaf-source="p">run `ls` now</p>', "hybrid"), "<ul><li>a</li></ul>");
+  e._sourceBlock = e._visualEl.firstChild;
+  caretIn(e._sourceBlock.firstChild, 12);
+  assert.ok(pasteText(e, "- a\n- b").defaultPrevented, "after a closed code span it is markdown again");
+  e.cleanup();
+});
+
+test("mid-line in a rendered block: the line splits around the blocks", { skip: dom.skip }, () => {
+  const e = withRender(dom.editor("<p>Hello world</p>", "visual"), "<ul><li>a</li><li>b</li></ul>");
+  caretIn(e._visualEl.firstChild.firstChild, 6);
+  pasteText(e, "- a\n- b");
+  assert.equal(e._visualEl.innerHTML, "<p>Hello </p><ul><li>a</li><li>b</li></ul><p>world</p>");
+  e.cleanup();
+});
+
+test("mid-line in a source block: split by its markdown text", { skip: dom.skip }, () => {
+  const e = withRender(dom.editor('<p data-leaf-source="p">Hello **big** world</p>', "hybrid"), "<ul><li>a</li></ul>");
+  e._sourceBlock = e._visualEl.firstChild;
+  e._renderBlockFromSource = (src) => { const p = document.createElement("p"); p.textContent = "[" + src + "]"; return p; };
+  caretIn(e._sourceBlock.firstChild, 13);
+  pasteText(e, "- a\n- b");
+  assert.equal(e._visualEl.innerHTML, "<p>[Hello **big**]</p><ul><li>a</li></ul><p>[world]</p>");
+  assert.equal(e._sourceBlock, null, "the source block was replaced");
+  e.cleanup();
+});

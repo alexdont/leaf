@@ -284,8 +284,8 @@ defmodule Leaf do
   a one-line input such as "add a task": no toolbar, no mode switcher, no
   selection bubble, no counters and no border (wrap it in your own). The
   height grows with the text, markdown shortcuts and Ctrl/⌘+B-style keys
-  still work, and a small `badge` ("leaf" unless you pass another, `nil`
-  for none) sits in the bottom-right corner.
+  still work. Pass `badge` ("task", "note") for a small label in the
+  bottom-right corner saying what the input is; there is none by default.
 
   Enter submits; Shift+Enter breaks the line:
 
@@ -490,17 +490,17 @@ defmodule Leaf do
     task": no toolbar, no switcher, no selection bubble, no counters, no
     border, and the height grows with the text. Markdown shortcuts and
     keyboard formatting still work. Enter submits (see `:submit_on_enter`)
-    and the `:badge` sits in the bottom-right corner. A minimal editor is
+    and a `:badge`, if given, sits in the bottom-right corner. A minimal editor is
     always in `:hybrid` mode, so denying `:hybrid_mode` with it raises.
     """
   )
 
   attr(:badge, :string,
-    default: "leaf",
+    default: nil,
     doc: """
-    The small text in the bottom-right corner of a `chrome={:minimal}`
-    editor, saying what the input is. `nil` or `""` shows none. Not drawn
-    with the full chrome.
+    Small text in the bottom-right corner of a `chrome={:minimal}` editor,
+    saying what the input is ("task"). None by default (`nil` or `""`).
+    Not drawn with the full chrome.
     """
   )
 
@@ -730,7 +730,7 @@ defmodule Leaf do
      |> assign_new(:placeholder, fn -> "Write something..." end)
      |> assign_new(:height, fn -> nil end)
      |> assign_new(:chrome, fn -> :full end)
-     |> assign_new(:badge, fn -> "leaf" end)
+     |> assign_new(:badge, fn -> nil end)
      |> assign_new(:submit_on_enter, fn -> nil end)
      |> assign_new(:inset, fn -> true end)
      |> assign_new(:min_height, fn -> nil end)
