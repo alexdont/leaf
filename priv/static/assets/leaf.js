@@ -520,6 +520,12 @@
     // link, the four most common inline formats. Hidden by default;
     // positioned via JS, animated on entry.
     "[data-toolbar-layout='floating'] [data-visual-toolbar-buttons] { display: none !important; }",
+    // chrome={:minimal}: a bare input, so no block grip either.
+    "[data-leaf-chrome='minimal'] [data-drag-handle] { display: none !important; }",
+    // Its padding lives here rather than in Tailwind classes, so
+    // they don't depend on the host's build scanning leaf's lib/.
+    "[data-leaf-chrome='minimal'] [data-editor-visual] { padding: 0.5rem 3rem 0.5rem 0.75rem !important; }",
+    "[data-leaf-chrome='minimal'] [data-leaf-body-wrapper] { position: relative; }",
     ".leaf-selection-toolbar {",
     "  position: absolute; z-index: 60;",
     "  display: flex; align-items: center; gap: 0.125rem;",
@@ -2740,6 +2746,7 @@
       // The textarea keeps a native stack of its own, but it is wiped by every
       // programmatic write and cannot cross a mode switch. Drive ours instead.
       textarea.addEventListener("keydown", function (e) {
+        if (self._maybeSubmit(e)) return;
         if (self._historyKeydown(e)) return;
         self._maybeSurroundTextarea(e, textarea);
       });
@@ -2774,6 +2781,7 @@
       });
 
       textarea.addEventListener("keydown", function (e) {
+        if (self._maybeSubmit(e)) return;
         if (self._historyKeydown(e)) return;
         self._maybeSurroundTextarea(e, textarea);
       });
@@ -2971,6 +2979,11 @@
       // has to come first so Enter can't also run the list auto-continue
       // further down.
       if (this._suggestKeydown(e)) return;
+
+      // `submit_on_enter`: Enter sends the text instead of splitting the
+      // block. After the suggestion list (Enter there picks an item) and
+      // before every other Enter handler below.
+      if (this._maybeSubmit(e)) return;
 
       // Before anything else: undo/redo must win over every shortcut below.
       if (this._historyKeydown(e)) return;
@@ -3638,6 +3651,26 @@
         var range = sel.getRangeAt(0);
         range.deleteContents();
 
+        // Hybrid source block: its content is markdown text, where a soft
+        // break is a literal "\n" (rendered by `white-space: pre-wrap`).
+        // A <br> there was re-serialized by the refresh with the caret
+        // still in front of it, so the next word landed before the break.
+        // The caret's block may not have opened as source yet (Chromium
+        // fires selectionchange late after a click or End), so open it now.
+        if (this._mode === "hybrid" && range.collapsed) {
+          this._updateSourceBlock();
+          if (sel.rangeCount) range = sel.getRangeAt(0);
+        }
+        if (
+          this._mode === "hybrid" &&
+          this._sourceBlock &&
+          this._sourceBlock.isConnected &&
+          this._sourceBlock.contains(range.startContainer)
+        ) {
+          this._insertSourceLineBreak(range, sel);
+          return;
+        }
+
         // Determine if cursor sits at the end of the current block before
         // we mutate the DOM. Using textContent length (rather than
         // checking br.nextSibling after the insert) avoids false negatives
@@ -3675,6 +3708,48 @@
         this._visualEl.dispatchEvent(new Event("input", { bubbles: true }));
         return;
       }
+    },
+
+    // Shift+Enter inside a hybrid source block: a "\n" in its text, the
+    // caret after it. pre-wrap shows no line after a trailing newline, and
+    // a caret placed there snaps back in front of it, so a break at the end
+    // also gets a filler <br> (`data-leaf-filler`, which every serializer
+    // skips) for the new line to sit on. The next refresh drops it once
+    // there is text after the break.
+    _insertSourceLineBreak: function (range, sel) {
+      var block = this._sourceBlock;
+      var text = document.createTextNode("\n");
+      if (!(block.textContent || "").replace(/[\u200B\uFEFF]/g, "")) {
+        // An empty block's lone <br> is its placeholder; next to real text
+        // it would serialize as a second break.
+        while (block.firstChild) block.removeChild(block.firstChild);
+        block.appendChild(text);
+      } else {
+        range.insertNode(text);
+      }
+      var after = document.createRange();
+      after.setStart(text, 1);
+      after.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(after);
+
+      this._refreshSourceBlock();
+
+      if (/\n$/.test(block.textContent || "")) {
+        var last = block.lastChild;
+        while (last && last.nodeType !== Node.TEXT_NODE && last.lastChild) last = last.lastChild;
+        var filler = document.createElement("br");
+        filler.setAttribute("data-leaf-filler", "");
+        block.appendChild(filler);
+        if (last && last.nodeType === Node.TEXT_NODE) {
+          var end = document.createRange();
+          end.setStart(last, last.textContent.length);
+          end.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(end);
+        }
+      }
+      this._visualEl.dispatchEvent(new Event("input", { bubbles: true }));
     },
 
     // Copy or cut a checklist row — or a run of them — with the checkboxes.
@@ -4750,6 +4825,30 @@
           html: flushedHtml,
         });
       }
+    },
+
+    // Enter with `submit_on_enter` (the default for `chrome={:minimal}`):
+    // flush the content, then push "submit", which reaches the host as
+    // `{:leaf_submit, %{editor_id, markdown, html}}`. Shift+Enter, an IME
+    // composition and a modified Enter fall through to the normal
+    // handling. An empty editor swallows the key and sends nothing.
+    // Returns true when it took the key.
+    _maybeSubmit: function (e) {
+      if (e.key !== "Enter" || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return false;
+      if (e.isComposing || e.keyCode === 229 || e.defaultPrevented) return false;
+      if (this._readonly || this.el.dataset.submitOnEnter !== "true") return false;
+      e.preventDefault();
+
+      var markdown = this._currentMarkdown();
+      if (!markdown || !markdown.trim()) return true;
+
+      this._flushPending();
+      this.pushEventTo(this.el, "submit", {
+        editor_id: this._editorId,
+        markdown: markdown,
+        html: this._mode === "markdown" ? "" : (this._visualEl ? this._visualEl.innerHTML : ""),
+      });
+      return true;
     },
 
     _computeDirty: function (markdown) {

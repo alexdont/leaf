@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`chrome={:minimal}`: a bare input.** The hybrid surface with no
+  toolbar, mode switcher, selection bubble, counters or border, growing
+  with its text — for a one-line input such as "add a task". A small
+  `badge` ("leaf" by default, `nil` for none) sits in the bottom-right
+  corner to say what the input is.
+- **`submit_on_enter`.** Enter sends `{:leaf_submit, %{editor_id, markdown,
+  html}}` to the parent instead of starting a paragraph; Shift+Enter still
+  breaks the line, Enter in an open suggestion list still picks the item,
+  and an empty editor sends nothing. On by default with the minimal
+  chrome, off otherwise.
+
+### Fixed
+
+- **Shift+Enter in hybrid mode put the break after the next word.**
+  "one", Shift+Enter, "two" came out as `onetwo⏎`: the `<br>` it inserted
+  into a source block was turned back into a newline with the caret left
+  in front of it. The break is now a newline in the block's text with the
+  caret after it, at the end of a block too, and in a block Chromium had
+  not opened as source yet.
+
+### Changed
+
+- `height` now defaults to `nil`, which means `"480px"` as before (or
+  `"auto"` with the minimal chrome).
+
 ## 0.12.0 — 2026-11-11
 
 ### Added

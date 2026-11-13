@@ -41,6 +41,8 @@ defmodule Leaf do
   - `{:leaf_mode_changed, %{editor_id, mode: :visual | :markdown}}` — Mode switched
   - `{:leaf_suggest, %{editor_id, trigger, query, seq}}` — Inline suggestion
     requested (only when `suggestions` is configured; see below)
+  - `{:leaf_submit, %{editor_id, markdown, html}}` — Enter was pressed in an
+    editor with `submit_on_enter` (the default for `chrome={:minimal}`)
   - `{:leaf_toolbar_action, %{editor_id, id, selection}}` — A `toolbar_extra`
     button was pressed
   - `{:leaf_paste_image, %{editor_id, data_url, name, mime}}` — A picture was
@@ -276,6 +278,28 @@ defmodule Leaf do
   The markdown a host saves is still the writer's text: render it on a public
   page through a sanitizer of your own, as you would any user content.
 
+  ## Minimal input
+
+  `chrome={:minimal}` is the hybrid editor with nothing drawn around it, for
+  a one-line input such as "add a task": no toolbar, no mode switcher, no
+  selection bubble, no counters and no border (wrap it in your own). The
+  height grows with the text, markdown shortcuts and Ctrl/⌘+B-style keys
+  still work, and a small `badge` ("leaf" unless you pass another, `nil`
+  for none) sits in the bottom-right corner.
+
+  Enter submits; Shift+Enter breaks the line:
+
+      <.leaf_editor id="new-task" chrome={:minimal} badge="task"
+                    placeholder="Add a task…" />
+
+      def handle_info({:leaf_submit, %{editor_id: "new-task", markdown: md}}, socket) do
+        send_update(Leaf, id: "new-task", action: :set_content, content: "")
+        {:noreply, create_task(socket, md)}
+      end
+
+  Leaf does not clear itself, so a host can keep the text when saving
+  fails. `submit_on_enter` works with the full chrome too.
+
   ## Denying features
 
   `deny` removes affordances entirely — the markup is never rendered, and
@@ -454,7 +478,48 @@ defmodule Leaf do
 
   attr(:placeholder, :string, default: "Write something...")
   attr(:readonly, :boolean, default: false)
-  attr(:height, :string, default: "480px")
+
+  attr(:chrome, :atom,
+    default: :full,
+    values: [:full, :minimal],
+    doc: """
+    How much editor is drawn around the text. `:full` (default) is the
+    toolbar, the mode switcher and the counters footer. `:minimal` is the
+    hybrid surface and nothing else, for a one-line input such as "add a
+    task": no toolbar, no switcher, no selection bubble, no counters, no
+    border, and the height grows with the text. Markdown shortcuts and
+    keyboard formatting still work. Enter submits (see `:submit_on_enter`)
+    and the `:badge` sits in the bottom-right corner. A minimal editor is
+    always in `:hybrid` mode, so denying `:hybrid_mode` with it raises.
+    """
+  )
+
+  attr(:badge, :string,
+    default: "leaf",
+    doc: """
+    The small text in the bottom-right corner of a `chrome={:minimal}`
+    editor, saying what the input is. `nil` or `""` shows none. Not drawn
+    with the full chrome.
+    """
+  )
+
+  attr(:submit_on_enter, :boolean,
+    default: nil,
+    doc: """
+    Enter sends `{:leaf_submit, %{editor_id, markdown, html}}` to the
+    parent instead of starting a new paragraph; Shift+Enter still breaks
+    the line. Defaults to `true` with `chrome={:minimal}` and `false`
+    otherwise. Enter inside an open suggestion list picks the item, and
+    an empty editor submits nothing. Leaf does not clear itself: reply
+    with `send_update(Leaf, id: …, action: :set_content, content: "")`.
+    """
+  )
+
+  attr(:height, :string,
+    default: nil,
+    doc: ~s|Surface height. `nil` means `"480px"`, or `"auto"` with `chrome={:minimal}`.|
+  )
+
   attr(:min_height, :string, default: nil)
   attr(:max_height, :string, default: nil)
   attr(:debounce, :integer, default: 400)
@@ -651,7 +716,10 @@ defmodule Leaf do
      |> assign_new(:toolbar, fn -> [] end)
      |> assign_new(:deny, fn -> [] end)
      |> assign_new(:placeholder, fn -> "Write something..." end)
-     |> assign_new(:height, fn -> "480px" end)
+     |> assign_new(:height, fn -> nil end)
+     |> assign_new(:chrome, fn -> :full end)
+     |> assign_new(:badge, fn -> "leaf" end)
+     |> assign_new(:submit_on_enter, fn -> nil end)
      |> assign_new(:min_height, fn -> nil end)
      |> assign_new(:max_height, fn -> nil end)
      |> assign_new(:debounce, fn -> 400 end)
@@ -898,9 +966,15 @@ defmodule Leaf do
     deny = Map.get(socket.assigns, :deny, [])
     validate_deny!(deny)
     validate_notify!(Map.get(socket.assigns, :notify))
-    mode = normalize_mode(socket.assigns.mode, deny)
+    chrome = validate_chrome!(Map.get(socket.assigns, :chrome, :full), deny)
 
-    socket = assign(socket, :mode, mode)
+    mode =
+      if chrome == :minimal, do: :hybrid, else: normalize_mode(socket.assigns.mode, deny)
+
+    socket =
+      socket
+      |> assign(:mode, mode)
+      |> assign(:height, socket.assigns[:height] || default_height(chrome))
 
     socket =
       assign_new(socket, :visual_html, fn ->
@@ -938,7 +1012,10 @@ defmodule Leaf do
 
     deny = assigns[:deny] || []
     validate_deny!(deny)
-    allowed_modes = Enum.reject(@mode_order, &mode_denied?(&1, deny))
+    minimal = assigns[:chrome] == :minimal
+
+    allowed_modes =
+      if minimal, do: [:hybrid], else: Enum.reject(@mode_order, &mode_denied?(&1, deny))
 
     {pinned_extra, overflow_extra} =
       Enum.split_with(assigns[:toolbar_extra] || [], &(efetch(&1, :collapse) == false))
@@ -950,6 +1027,10 @@ defmodule Leaf do
       # A lone tab is a dead affordance — nothing to switch to. Hide the
       # switcher entirely rather than render it.
       |> assign(:show_mode_switcher, length(allowed_modes) > 1)
+      |> assign(:minimal, minimal)
+      |> assign(:submit_on_enter?, submit_on_enter?(assigns))
+      |> assign(:height, assigns[:height] || default_height(assigns[:chrome]))
+      |> assign(:min_height, assigns[:min_height] || (minimal && "2.5rem") || nil)
       |> assign(:pinned_extra, pinned_extra)
       |> assign(:overflow_extra, overflow_extra)
 
@@ -970,7 +1051,9 @@ defmodule Leaf do
       data-autofocus={to_string(@autofocus)}
       data-emit-events={to_string(@emit_events)}
       data-preserve-tags={Enum.map_join(@preserve_tags, ",", &String.downcase(to_string(&1)))}
-      data-toolbar-layout={to_string(@toolbar_layout)}
+      data-toolbar-layout={if @minimal, do: "fixed", else: to_string(@toolbar_layout)}
+      data-leaf-chrome={if @minimal, do: "minimal", else: "full"}
+      data-submit-on-enter={to_string(@submit_on_enter?)}
       data-readonly={@readonly}
       data-height={@height}
       data-min-height={@min_height}
@@ -1037,6 +1120,7 @@ defmodule Leaf do
 
       <%!-- Toolbar --%>
       <div
+        :if={!@minimal}
         id={"#{@id}-toolbar"}
         phx-update="ignore"
         class="flex flex-wrap items-center gap-1 mb-2 p-2 bg-base-200 rounded-lg min-w-0"
@@ -2010,7 +2094,7 @@ defmodule Leaf do
         </details>
       </div>
 
-      <%= unless @readonly do %>
+      <%= unless @readonly or @minimal do %>
         <%!-- Mobile writing toolbar --%>
         <div
           id={"#{@id}-mobile-toolbar"}
@@ -2262,7 +2346,10 @@ defmodule Leaf do
       <% end %>
 
       <div
-        class="border border-base-300 overflow-hidden"
+        class={[
+          "overflow-hidden",
+          (@minimal && "relative") || "border border-base-300"
+        ]}
         style="border-radius: 0.5rem"
         data-leaf-body-wrapper
       >
@@ -2292,7 +2379,7 @@ defmodule Leaf do
             spellcheck={to_string(@spellcheck)}
             class={[
               "content-editor-visual",
-              "overflow-auto p-4 pl-10",
+              (@minimal && "overflow-auto") || "overflow-auto p-4 pl-10",
               "focus:outline-none",
               @readonly && "opacity-70 cursor-not-allowed"
             ]}
@@ -2338,7 +2425,17 @@ defmodule Leaf do
         </div>
         </div>
 
-        <div class="flex items-center justify-between gap-4 px-3 py-1 text-xs text-base-content/50 border-t border-base-300">
+        <span
+          :if={@minimal and @badge not in [nil, ""]}
+          data-leaf-badge
+          class="pointer-events-none select-none"
+          style="position: absolute; right: 0.5rem; bottom: 0.3rem; font-size: 10px; line-height: 1; opacity: 0.45;"
+        >{@badge}</span>
+
+        <div
+          :if={!@minimal}
+          class="flex items-center justify-between gap-4 px-3 py-1 text-xs text-base-content/50 border-t border-base-300"
+        >
           <%!-- Save-status badge: server-driven (NOT inside the ignored
                counts block), so updating the save_status assign re-renders it. --%>
           <span :if={@save_status} class="flex items-center gap-1">
@@ -2698,6 +2795,21 @@ defmodule Leaf do
          markdown: markdown,
          html: html
        }}
+    )
+
+    {:noreply, socket}
+  end
+
+  # Enter in an editor with `submit_on_enter`. The client pushes the
+  # matching content event first, so the host's `{:leaf_changed, …}` has
+  # already landed when this one arrives.
+  def handle_event("submit", params, socket) do
+    markdown = sanitize_markdown(Map.get(params, "markdown", ""), socket.assigns.deny)
+    html = sanitize_html(Map.get(params, "html", ""), socket.assigns.deny)
+
+    notify(
+      socket,
+      {:leaf_submit, %{editor_id: socket.assigns.id, markdown: markdown, html: html}}
     )
 
     {:noreply, socket}
@@ -3566,6 +3678,27 @@ defmodule Leaf do
       mode
     end
   end
+
+  defp default_height(:minimal), do: "auto"
+  defp default_height(_), do: "480px"
+
+  defp submit_on_enter?(assigns) do
+    case assigns[:submit_on_enter] do
+      nil -> assigns[:chrome] == :minimal
+      value -> value == true
+    end
+  end
+
+  defp validate_chrome!(:minimal, deny) do
+    if :hybrid_mode in deny do
+      raise ArgumentError,
+            "Leaf: chrome={:minimal} is a hybrid editor, so it cannot deny :hybrid_mode"
+    end
+
+    :minimal
+  end
+
+  defp validate_chrome!(chrome, _deny), do: chrome
 
   defp mode_denied?(:hybrid, deny), do: :hybrid_mode in deny
   defp mode_denied?(:visual, deny), do: :visual_mode in deny
