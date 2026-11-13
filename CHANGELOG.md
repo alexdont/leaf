@@ -24,6 +24,11 @@
   caret after it, at the end of a block too, and in a block Chromium had
   not opened as source yet.
 
+- **The `placeholder` never showed.** Its CSS read `data-placeholder` from
+  the editing surface, which did not carry it, and waited for `:empty`,
+  which an empty editor (`<p><br></p>`) never is. Empty visual and hybrid
+  editors now show it.
+
 ### Changed
 
 - `height` now defaults to `nil`, which means `"480px"` as before (or

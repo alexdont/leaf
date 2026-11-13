@@ -2371,6 +2371,7 @@ defmodule Leaf do
           <div
             id={"#{@id}-visual"}
             data-editor-visual
+            data-placeholder={@placeholder}
             phx-update="ignore"
             contenteditable={if @readonly, do: "false", else: "true"}
             autocapitalize="sentences"

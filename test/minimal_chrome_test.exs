@@ -36,6 +36,11 @@ defmodule Leaf.MinimalChromeTest do
       assert html =~ ~s(data-toolbar-layout="fixed")
     end
 
+    test "puts the placeholder on the editing surface, where its CSS reads it" do
+      html = editor_html(chrome: :minimal, placeholder: "Add a task…")
+      assert html =~ ~r{data-editor-visual[^>]*data-placeholder="Add a task…"}s
+    end
+
     test "grows with the text", %{html: html} do
       assert html =~ ~s(data-height="auto")
     end

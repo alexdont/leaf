@@ -63,7 +63,9 @@
 
   var EDITOR_CSS = [
     // Placeholder
-    ".content-editor-visual:empty::before {",
+    // `leaf-empty` is set by `_syncEmptyState`: an empty editor still holds
+    // a `<p><br></p>`, which `:empty` never matches.
+    ".content-editor-visual:empty::before, .content-editor-visual.leaf-empty::before {",
     "  content: attr(data-placeholder);",
     "  color: color-mix(in oklab, var(--color-base-content, #1f2937) 35%, transparent);",
     "  pointer-events: none;",
@@ -2895,6 +2897,7 @@
     // -- Footer counts --
 
     _updateCounts: function () {
+      this._syncEmptyState();
       if (!this._wordCountEl || !this._charCountEl) return;
 
       var text = "";
@@ -4849,6 +4852,17 @@
         html: this._mode === "markdown" ? "" : (this._visualEl ? this._visualEl.innerHTML : ""),
       });
       return true;
+    },
+
+    // The placeholder shows while the visual surface has no text and no
+    // media — only empty blocks.
+    _syncEmptyState: function () {
+      var v = this._visualEl;
+      if (!v || !v.classList) return;
+      var empty =
+        !(v.textContent || "").replace(/[\s\u200B\uFEFF]/g, "") &&
+        !v.querySelector("img, video, iframe, hr, table, input, [data-leaf-atomic], [contenteditable='false']");
+      v.classList.toggle("leaf-empty", empty);
     },
 
     _computeDirty: function (markdown) {
