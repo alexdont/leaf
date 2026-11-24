@@ -11975,6 +11975,24 @@
             block.getAttribute("data-checked") === "true" ? "[x] " : "[ ] ";
         }
       }
+      // An item's nested lists are not part of its line. Serialized with it
+      // they came out as text glued onto the line, and the lists themselves
+      // were dropped with the old item: arrowing up into a parent item
+      // flattened everything under it. They are lifted out to sit right after
+      // the source item — still drawn indented, and serialized as nested under
+      // it (`convertList` reads a list directly in a list that way) — and
+      // `_exitSourceMode` puts them back inside the rendered item.
+      var lifted = [];
+      if (origTag === "li") {
+        Array.prototype.slice.call(block.children).forEach(function (kid) {
+          var kt = kid.tagName ? kid.tagName.toLowerCase() : "";
+          if (kt === "ul" || kt === "ol") lifted.push(kid);
+        });
+        lifted.forEach(function (list) {
+          block.removeChild(list);
+        });
+      }
+
       var trace = this._serializeBlockInline(
         block,
         range.startContainer,
@@ -12010,6 +12028,12 @@
       this._syntaxMutating = true;
       try {
         block.parentNode.replaceChild(sourceBlock, block);
+        var liftAfter = sourceBlock;
+        lifted.forEach(function (list) {
+          list.setAttribute("data-leaf-lifted", "");
+          liftAfter.parentNode.insertBefore(list, liftAfter.nextSibling);
+          liftAfter = list;
+        });
 
         // Park the cursor at the text-content offset; `_refreshSourceBlock`
         // will then convert that to the correct DOM target after it
@@ -12623,8 +12647,50 @@
       this._syntaxMutating = true;
       try {
         sourceBlock.parentNode.replaceChild(rendered, sourceBlock);
+        if (origTag === "li") this._relandLiftedLists(rendered);
       } finally {
         this._syntaxMutating = false;
+      }
+    },
+
+    // The nested lists `_enterSourceMode` lifted out of an item go back
+    // inside it, the item's own line rendered. Only the lifted lists right
+    // after it: one the item no longer precedes (an Enter split it off)
+    // stays where it is, nested under whatever item now precedes it. The
+    // caret is kept where it was if it sat inside one of them — moving a node
+    // collapses a selection inside it.
+    _relandLiftedLists: function (li) {
+      var lists = [];
+      var next = li.nextElementSibling;
+      while (next && next.hasAttribute && next.hasAttribute("data-leaf-lifted")) {
+        lists.push(next);
+        next = next.nextElementSibling;
+      }
+      if (!lists.length) return;
+
+      var sel = window.getSelection();
+      var keep = null;
+      if (sel && sel.rangeCount) {
+        var r = sel.getRangeAt(0);
+        for (var i = 0; i < lists.length; i++) {
+          if (lists[i].contains(r.startContainer)) {
+            keep = { node: r.startContainer, offset: r.startOffset };
+            break;
+          }
+        }
+      }
+
+      lists.forEach(function (list) {
+        list.removeAttribute("data-leaf-lifted");
+        li.appendChild(list);
+      });
+
+      if (keep) {
+        var back = document.createRange();
+        back.setStart(keep.node, Math.min(keep.offset, keep.node.nodeType === Node.TEXT_NODE ? keep.node.length : keep.node.childNodes.length));
+        back.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(back);
       }
     },
 

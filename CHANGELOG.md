@@ -14,6 +14,13 @@
   only text and `<br>` (spans that style nothing included) is now pasted as
   its plain text — markdown becomes blocks, other text goes in line by line.
   HTML with real formatting (bold, links, lists, tables) keeps the rich path.
+- **Arrowing into a list item with a nested list no longer flattens it.**
+  In hybrid mode the item the caret enters becomes its markdown source; that
+  serialized the whole item, nested list included, into its one line and
+  dropped the nested list — the nested items came back glued onto the parent
+  line, and were saved that way. The nested lists now stay in place (drawn
+  indented, saved as nested) while the parent's own line is source, and go
+  back inside it when the caret leaves.
 
 ## 0.13.2 — 2026-11-13
 
