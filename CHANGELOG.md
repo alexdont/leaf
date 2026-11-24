@@ -1,5 +1,20 @@
 # Changelog
 
+
+## Unreleased
+
+### Fixed
+
+- **Pasting from a chat app (Telegram Desktop) in visual and hybrid mode.**
+  Telegram Desktop copies a message as text/plain and as HTML that is only
+  lines (`<html><body>line<br>line…</body></html>`). Leaf took the HTML, and
+  its rich path inserted the text as-is: a list or heading written in the
+  message stayed plain text (Firefox showed it as one block), unlike the same
+  text pasted from a plain-text clipboard or in markdown mode. HTML that is
+  only text and `<br>` (spans that style nothing included) is now pasted as
+  its plain text — markdown becomes blocks, other text goes in line by line.
+  HTML with real formatting (bold, links, lists, tables) keeps the rich path.
+
 ## 0.13.2 — 2026-11-13
 
 ### Fixed

@@ -1358,6 +1358,36 @@
   // Clean paste — strips Word/Google Docs junk, keeps structure
   // =========================================================================
 
+  // HTML that is only lines of text: text and <br>, perhaps inside spans that
+  // style nothing that matters. Telegram Desktop copies a message that way
+  // (`<html><body>line<br>line…</body></html>`), and so do other chat apps.
+  // It carries nothing the plain text does not — but taken as HTML, a list or
+  // a heading written in it never becomes one: the rich path inserts the text
+  // as it is, where the plain path renders markdown blocks. So a paste whose
+  // HTML is only this is handled as its plain text.
+  var PLAIN_HTML_WRAPPERS = { SPAN: 1, FONT: 1, META: 1, HTML: 1, HEAD: 1, BODY: 1, TITLE: 1, STYLE: 1 };
+  var FORMATTING_STYLE = /font-weight\s*:\s*(bold|[6-9]00)|font-style\s*:\s*italic|text-decoration[^;]*(underline|line-through)/i;
+
+  function htmlIsPlainLines(html) {
+    if (!html) return false;
+    // A <template> parses without running or loading anything.
+    var all;
+    try {
+      var tpl = document.createElement("template");
+      tpl.innerHTML = html;
+      all = tpl.content.querySelectorAll("*");
+    } catch (_) {
+      return false;
+    }
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (el.tagName === "BR") continue;
+      if (!PLAIN_HTML_WRAPPERS[el.tagName]) return false;
+      if (FORMATTING_STYLE.test(el.getAttribute("style") || "")) return false;
+    }
+    return true;
+  }
+
   function cleanPastedHtml(html) {
     var container = document.createElement("div");
     container.innerHTML = html;
@@ -4092,8 +4122,16 @@
         }
       }
 
-      // 3. Rich HTML — clean Word/web junk down to sane markup.
+      // 3. Rich HTML — clean Word/web junk down to sane markup. HTML that is
+      //    only lines of text (a chat app's copy) is taken as its plain text
+      //    instead (`htmlIsPlainLines`), so markdown in it becomes blocks the
+      //    way it does from a plain-text clipboard.
       var html = clipboardData.getData("text/html");
+      var plainOfHtml = false;
+      if (html && clipboardData.getData("text/plain") && htmlIsPlainLines(html)) {
+        html = "";
+        plainOfHtml = true;
+      }
       if (html) {
         e.preventDefault();
         var cleaned = cleanPastedHtml(html);
@@ -4168,7 +4206,15 @@
 
       // 5. A bare URL on the clipboard: if text is selected, turn it into a
       //    link to that URL; otherwise drop an autolinked anchor. Anything
-      //    else falls through to the browser's native plain-text paste.
+      //    else falls through to the browser's native plain-text paste —
+      //    except plain text whose clipboard also held HTML (step 3 set it
+      //    aside): the browser would paste that HTML, so the lines go in here.
+      if (plainOfHtml && text && !/^https?:\/\/\S+$/.test(text.trim())) {
+        e.preventDefault();
+        this._insertPastedLines(text.replace(/\r\n?/g, "\n").split("\n").map(escapeAttr));
+        return;
+      }
+
       if (text && !this._denyLinks && /^https?:\/\/\S+$/.test(text.trim())) {
         var url = text.trim();
         e.preventDefault();
