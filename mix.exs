@@ -1,7 +1,7 @@
 defmodule Leaf.MixProject do
   use Mix.Project
 
-  @version "0.13.4"
+  @version "0.13.5"
   @source_url "https://github.com/alexdont/leaf"
 
   def project do

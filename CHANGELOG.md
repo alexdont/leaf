@@ -2,6 +2,26 @@
 
 
 
+## 0.13.5 — 2026-11-28
+
+### Added
+
+- **`style_nonce`** (#9), for a host that issues separate nonces for
+  `script-src` and `style-src`: it nonces the inline `<style>`, which used
+  to take `script_nonce`. Without it the `<style>` still takes
+  `script_nonce`. Giving it also moves the editor's inline `style`
+  attributes, which a policy with a style nonce blocks (so the editor lost
+  its height and showed its drag handle), to `data-leaf-style`, applied by
+  the hook. Without a `style_nonce` the markup is unchanged.
+
+### Fixed
+
+- **The stylesheet `leaf.js` adds now carries the page's nonce** (#9). Under
+  a nonce-based `style-src` the browser dropped it, and the editor lost all
+  its CSS. The nonce comes from a nonced `<style>` on the page, else the
+  `<script>` that loaded the bundle, else any nonced script, or from
+  `window.LeafHooks.styleNonce`. See "Content-Security-Policy" in the README.
+
 ## 0.13.4 — 2026-11-27
 
 ### Added
