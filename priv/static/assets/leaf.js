@@ -24,6 +24,34 @@
 
   window.LeafHooks = window.LeafHooks || {};
 
+  // Content-Security-Policy. A page whose `style-src` (or `script-src`)
+  // allows only nonced elements drops a <style> or <script> this bundle
+  // creates unless it carries the page's nonce. Where it comes from, first
+  // match wins:
+  //   1. `window.LeafHooks.styleNonce` / `.scriptNonce`, set by the host;
+  //   2. for a style: a nonced <style> already on the page (the host's
+  //      style nonce, when it issues separate ones);
+  //   3. the <script> that loaded this file;
+  //   4. any nonced <script>, then any nonced <style>.
+  // Read through the `nonce` property: the attribute reads empty once the
+  // page is parsed (nonce hiding). No nonce anywhere (a page without such a
+  // policy) means nothing is set.
+  var LOADER_NONCE = (typeof document !== "undefined" && document.currentScript &&
+    document.currentScript.nonce) || "";
+  function cspNonce(kind) {
+    var cfg = window.LeafHooks || {};
+    var own = kind === "script" ? cfg.scriptNonce : cfg.styleNonce;
+    if (typeof own === "string" && own) return own;
+    if (typeof document === "undefined" || !document.querySelectorAll) return LOADER_NONCE;
+    var first = function(selector) {
+      var list = document.querySelectorAll(selector);
+      for (var i = 0; i < list.length; i++) if (list[i].nonce) return list[i].nonce;
+      return "";
+    };
+    return (kind === "style" && first("style[nonce]")) || LOADER_NONCE ||
+      first("script[nonce]") || first("style[nonce]");
+  }
+
   // Version of this bundle. Kept in lockstep with mix.exs's @version by
   // test/js_version_test.exs, and compared against the server-rendered
   // `data-leaf-js-version` on mount — a host that VENDORS this file into
@@ -847,11 +875,28 @@
     "}",
   ].join("\n");
 
+  // Under a strict style policy (the editor got a `style_nonce`) the server
+  // renders its few inline styles as `data-leaf-style`, because the policy
+  // blocks a `style` attribute; they are applied here through `el.style`,
+  // which it allows. An element that already has a `style` attribute is left
+  // alone: that is this script having changed it since. A LiveView patch
+  // that resets it removes the attribute, and the next call puts the
+  // server's value back, as the patch would with a plain `style`.
+  function applyDataStyles(root) {
+    var list = Array.prototype.slice.call(root.querySelectorAll("[data-leaf-style]"));
+    if (root.hasAttribute && root.hasAttribute("data-leaf-style")) list.unshift(root);
+    for (var i = 0; i < list.length; i++) {
+      if (!list[i].hasAttribute("style")) list[i].style.cssText = list[i].getAttribute("data-leaf-style");
+    }
+  }
+
   function injectStyles() {
     if (document.getElementById("leaf-content-editor-css")) return;
     var style = document.createElement("style");
     style.id = "leaf-content-editor-css";
     style.textContent = EDITOR_CSS;
+    var nonce = cspNonce("style");
+    if (nonce) style.nonce = nonce;
     document.head.appendChild(style);
   }
 
@@ -2090,6 +2135,7 @@
     mounted() {
       loadTranslations(this.el.dataset.leafI18n);
       injectStyles();
+      applyDataStyles(this.el);
       this.el.dataset.leafMountState = "ready";
 
       this._editorId = this.el.dataset.editorId;
@@ -2544,6 +2590,7 @@
       // is mounted we own the state, so keep it pinned to "ready" through
       // any parent-triggered re-render.
       this.el.dataset.leafMountState = "ready";
+      applyDataStyles(this.el);
       this._restoreToolbarState();
 
       // The host can add, change or drop trigger configs at runtime. This

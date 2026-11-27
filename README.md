@@ -157,7 +157,8 @@ Then use it in your templates:
 | `upload_handler` | any | `nil` | Hint that the consumer supports uploads. When set, the main image button asks the parent for an upload via `:leaf_insert_request`; when `nil`, it opens the by-URL dialog directly |
 | `suggestions` | list | `[]` | Inline-suggestion trigger configs — see [Inline suggestions](#inline-suggestions) |
 | `class` | string | `nil` | Extra classes for the wrapper |
-| `script_nonce` | string | `""` | CSP nonce applied to the inline `<style>` block and the bundle-check `<script>` |
+| `script_nonce` | string | `""` | CSP nonce for the bundle-check `<script>`, and for the inline `<style>` block unless `style_nonce` is given |
+| `style_nonce` | string | `nil` | CSP nonce for the inline `<style>` block, under a policy that allows only nonced styles. Also moves the editor's inline `style` attributes to `data-leaf-style`. See [Content-Security-Policy](#content-security-policy) |
 | `bundle_check` | boolean | `true` | Emit the inline `<script>` that reports a JS hook that never attached. Set `false` under a CSP that forbids inline scripts and cannot supply a nonce — it is a diagnostic, nothing depends on it |
 
 ### Custom component tags
@@ -745,6 +746,38 @@ sends their translations to the editor as `data-leaf-i18n`; a string with no
 translation shows in English. One `{tag}` placeholder (`Edit <{tag}> source`)
 is filled in by the browser, so keep it as written.
 
+## Content-Security-Policy
+
+Leaf works under a nonce-based policy with no `'unsafe-inline'`, for
+example:
+
+```
+script-src 'self' 'nonce-…'; style-src 'self' 'nonce-…'
+```
+
+Pass the request's nonces to the editor:
+
+```heex
+<.live_component module={Leaf} id="editor" content={@content}
+  script_nonce={@script_nonce} style_nonce={@style_nonce} />
+```
+
+Use the same value for both if your policy has one nonce. What each covers:
+
+- **The inline `<style>`** the editor renders (its look before the JS hook
+  runs) takes `style_nonce`, falling back to `script_nonce`.
+- **The inline `<script>`** (the bundle check) takes `script_nonce`.
+- **The stylesheet `leaf.js` adds** takes the page's nonce by itself, read
+  from the nonced `<style>` above, or else from the `<script>` that loaded
+  the bundle. To set it yourself, put `window.LeafHooks.styleNonce = "…"`
+  before the editor mounts.
+- **Inline `style` attributes.** Once `style-src` lists a nonce, browsers
+  block `style="…"` attributes too. With a `style_nonce`, the editor renders
+  its few inline styles as `data-leaf-style` instead, and the hook applies
+  them. Without one, they stay plain `style` attributes, and a policy with a
+  style nonce then needs `style-src-attr 'unsafe-inline'`, or the editor
+  loses its height.
+
 ## Checking the JS bundle is present and current
 
 Leaf does not bundle its JS into the host, and an editor whose hook never
@@ -754,8 +787,8 @@ looks ordinary, it captures nothing. Two guards:
 - If the hook has not attached shortly after paint, the editor logs a console
   error naming the likely causes and stays on its loading shimmer rather than
   pretending to be an editor. This is Leaf's only inline `<script>`; it takes
-  `script_nonce` like the inline `<style>` does, and `bundle_check={false}`
-  turns it off entirely for hosts whose CSP allows neither.
+  `script_nonce`, and `bundle_check={false}` turns it off entirely for hosts
+  whose CSP allows neither.
 - `window.LeafHooks.version` reports the loaded bundle's version. Leaf compares
   it against the library version on mount and warns on a mismatch — which is
   what catches a **vendored** copy of `leaf.js` that stayed behind after

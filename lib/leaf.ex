@@ -687,8 +687,21 @@ defmodule Leaf do
   attr(:script_nonce, :string,
     default: "",
     doc: """
-    CSP nonce applied to the inline `<style>` block and to the
-    bundle-presence `<script>` (see `:bundle_check`).
+    CSP nonce applied to the bundle-presence `<script>` (see
+    `:bundle_check`), and to the inline `<style>` block unless
+    `:style_nonce` is given.
+    """
+  )
+
+  attr(:style_nonce, :string,
+    default: nil,
+    doc: """
+    CSP nonce for the inline `<style>` block, for a page whose
+    `style-src` allows only nonced styles. Defaults to `:script_nonce`
+    for the block. Giving it also moves the editor's few inline `style`
+    attributes, which such a policy blocks, into `data-leaf-style`, applied
+    by the hook. The stylesheet the JS bundle adds takes its nonce from the
+    page. See "Content-Security-Policy" in the README.
     """
   )
 
@@ -771,6 +784,7 @@ defmodule Leaf do
      |> assign_new(:loading_text, fn -> nil end)
      |> assign_new(:class, fn -> nil end)
      |> assign_new(:script_nonce, fn -> "" end)
+     |> assign_new(:style_nonce, fn -> nil end)
      |> assign_new(:bundle_check, fn -> true end)}
   end
 
@@ -1085,6 +1099,7 @@ defmodule Leaf do
       |> assign(:height, assigns[:height] || default_height(assigns[:chrome]))
       |> assign(:min_height, assigns[:min_height] || minimal_min_height(minimal, assigns[:inset]))
       |> assign(:badge_shown, minimal and assigns[:badge] not in [nil, ""])
+      |> assign(:strict_styles, assigns[:style_nonce] not in [nil, ""])
       |> assign(:pinned_extra, pinned_extra)
       |> assign(:overflow_extra, overflow_extra)
 
@@ -1093,7 +1108,7 @@ defmodule Leaf do
       id={@id}
       phx-hook="Leaf"
       class={["min-w-0", @class]}
-      style="container-type: inline-size; container-name: leaf-editor;"
+      {inline_style(@strict_styles, "container-type: inline-size; container-name: leaf-editor;")}
       data-leaf-mount-state="loading"
       data-editor-id={@id}
       data-mode={to_string(@mode)}
@@ -1139,7 +1154,7 @@ defmodule Leaf do
       data-deny-html-mode={to_string(:html_mode in @deny)}
       data-fallback-mode={to_string(List.first(@allowed_modes))}
     >
-      {loading_state_style_tag(@height, @script_nonce)}
+      {loading_state_style_tag(@height, @style_nonce || @script_nonce)}
       <%= if @bundle_check do %>{bundle_check_script_tag(@script_nonce)}<% end %>
 
       <%!-- Inline-suggestion trigger configs. Rendered only when the host
@@ -2060,7 +2075,7 @@ defmodule Leaf do
                 stroke="currentColor"
                 class="w-3.5 h-3.5"
                 data-leaf-fullscreen-exit
-                style="display:none"
+                {inline_style(@strict_styles, "display:none")}
               >
                 <path
                   stroke-linecap="round"
@@ -2406,7 +2421,7 @@ defmodule Leaf do
           "overflow-hidden",
           (@minimal && "relative") || "border border-base-300"
         ]}
-        style="border-radius: 0.5rem"
+        {inline_style(@strict_styles, "border-radius: 0.5rem")}
         data-leaf-body-wrapper
       >
         <div data-leaf-loading>
@@ -2417,7 +2432,7 @@ defmodule Leaf do
         <%!-- Visual Editor (contenteditable) --%>
         <div data-visual-wrapper class={["relative", @mode not in [:visual, :hybrid] && "hidden"]}>
           <%!-- Block drag handle (positioned by JS) --%>
-          <div data-drag-handle class="leaf-drag-handle" style="display:none">
+          <div data-drag-handle class="leaf-drag-handle" {inline_style(@strict_styles, "display:none")}>
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor">
               <circle cx="5.5" cy="3.5" r="1.5" /><circle cx="10.5" cy="3.5" r="1.5" />
               <circle cx="5.5" cy="8" r="1.5" /><circle cx="10.5" cy="8" r="1.5" />
@@ -2440,7 +2455,7 @@ defmodule Leaf do
               "focus:outline-none",
               @readonly && "opacity-70 cursor-not-allowed"
             ]}
-            style={surface_style(@height, @min_height, @max_height)}
+            {inline_style(@strict_styles, surface_style(@height, @min_height, @max_height))}
           >
             {raw(@rendered_html)}
           </div>
@@ -2455,7 +2470,7 @@ defmodule Leaf do
               "textarea w-full font-mono text-sm leading-relaxed border-0 rounded-none focus:outline-none focus:ring-0",
               @readonly && "opacity-70 cursor-not-allowed"
             ]}
-            style={surface_style(@height, @min_height, @max_height)}
+            {inline_style(@strict_styles, surface_style(@height, @min_height, @max_height))}
             placeholder={@placeholder}
             readonly={@readonly}
             maxlength={@maxlength}
@@ -2474,7 +2489,7 @@ defmodule Leaf do
               "textarea w-full font-mono text-sm leading-relaxed border-0 rounded-none focus:outline-none focus:ring-0",
               @readonly && "opacity-70 cursor-not-allowed"
             ]}
-            style={surface_style(@height, @min_height, @max_height)}
+            {inline_style(@strict_styles, surface_style(@height, @min_height, @max_height))}
             placeholder="<p>Write HTML here...</p>"
             readonly={@readonly}
             phx-debounce={@debounce}
@@ -2486,7 +2501,10 @@ defmodule Leaf do
           :if={@badge_shown}
           data-leaf-badge
           class="pointer-events-none select-none"
-          style="position: absolute; right: 0.5rem; bottom: 0.3rem; font-size: 10px; line-height: 1; opacity: 0.45;"
+          {inline_style(
+            @strict_styles,
+            "position: absolute; right: 0.5rem; bottom: 0.3rem; font-size: 10px; line-height: 1; opacity: 0.45;"
+          )}
         >{@badge}</span>
 
         <div
@@ -2498,7 +2516,7 @@ defmodule Leaf do
           <span :if={@save_status} class="flex items-center gap-1">
             <span
               class="inline-block w-1.5 h-1.5 rounded-full"
-              style={save_status_dot(@save_status)}
+              {inline_style(@strict_styles, save_status_dot(@save_status))}
             >
             </span>
             {save_status_label(@save_status)}
@@ -2520,6 +2538,14 @@ defmodule Leaf do
   # sizes to its content between min_height and max_height (the textareas
   # also get a JS resize-to-content hook). A fixed height keeps the classic
   # user-resizable box.
+  # The few inline styles the template renders. Under a strict style policy
+  # (a `style_nonce` is given) a `style` attribute is blocked, so they go out
+  # as `data-leaf-style` instead and the hook applies them through
+  # `el.style`, which such a policy allows. Without a `style_nonce` the
+  # markup is the plain `style` attribute it always was.
+  defp inline_style(true, css), do: [{"data-leaf-style", css}]
+  defp inline_style(_, css), do: [style: css]
+
   defp surface_style("auto", min_h, max_h) do
     [
       "min-height: ",
