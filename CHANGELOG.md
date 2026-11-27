@@ -1,6 +1,41 @@
 # Changelog
 
 
+
+## Unreleased
+
+### Added
+
+- **Avatars in suggestion rows** (#6). A result may carry
+  `avatar: %{url: …, initials: …}` (or a bare URL): a round 20px picture
+  before the label, the initials while it loads, when it fails or when there
+  is no URL. Unsafe URLs are not used; initials are text only.
+- **Mention chips carry their token's parts** (#7):
+  `data-leaf-mention-type` and `data-leaf-mention-id` beside
+  `data-leaf-mention-raw`, in the visual chip, the hybrid source form and
+  the server's render, so a host can style or decorate mentions.
+
+### Fixed
+
+- **The toolbar no longer wraps and unwraps on every keystroke** (#8). Each
+  keystroke re-rendered the component (the template drew the document from
+  the live `content`), and LiveView's patch put back the server's markup —
+  undoing the toolbar's overflow state, so a narrow editor grew a line and
+  shrank back as you typed. The template now draws from a copy only the host
+  changes (`set_content`, a collaborative operation), so a keystroke sends
+  no patch; and the hook keeps the toolbar's overflow and sticky state across
+  any patch that does come.
+- **The sticky toolbar no longer flickers at the editor's bottom edge** (#5).
+  The placeholder now takes the toolbar's whole box (margins included),
+  scroll anchoring is off inside the editor (it "corrected" the scroll by the
+  toolbar's height on every switch, which flipped it back), unsticking has a
+  few pixels of slack, the check runs once per frame, and a toolbar the
+  layout hides never sticks.
+- **Enter keeps the caret in view** (#4). Most Enter branches build the new
+  block and move the selection themselves, which scrolls nothing: Enter on
+  the last visible line of a scrolling editor left the new line out of sight.
+  The editor (or the page) now scrolls just enough after Enter.
+
 ## 0.13.3 — 2026-11-24
 
 ### Fixed

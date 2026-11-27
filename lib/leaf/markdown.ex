@@ -324,10 +324,10 @@ defmodule Leaf.Markdown do
   # The text here is HTML: an `&amp;` in a label is decoded for the raw
   # source and re-escaped for both the attribute and the visible text.
   defp decorate_mentions_text(text) do
-    Regex.replace(@mention_re, text, fn whole, trigger, _type, _uuid, label ->
+    Regex.replace(@mention_re, text, fn whole, trigger, type, uuid, label ->
       raw = unescape_html(whole)
 
-      ~s(<span class="leaf-mention" contenteditable="false" data-leaf-mention-raw="#{escape_attr(raw)}">) <>
+      ~s(<span class="leaf-mention" contenteditable="false" data-leaf-mention-raw="#{escape_attr(raw)}" data-leaf-mention-type="#{escape_attr(type)}" data-leaf-mention-id="#{escape_attr(uuid)}">) <>
         escape_text(trigger <> unescape_html(label)) <> "</span>"
     end)
   end

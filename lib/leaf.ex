@@ -148,6 +148,12 @@ defmodule Leaf do
   CSS class name (the heroicons convention) and is rendered only when given,
   so an app without that plugin never shows an empty gutter.
 
+  A person can show their face instead: `avatar: %{url: "/u/anna.jpg",
+  initials: "AK"}` (either key alone, or a bare URL string) draws a round
+  20px picture before the label, the initials while it loads, when it fails,
+  or when there is no URL. A URL that is not http(s), relative or a raster
+  `data:` image is not used. An avatar takes the place of `:icon`.
+
   Two rules outrank the shape of any of this:
 
   - **Stale replies are dropped.** Keystrokes routinely outrun a round trip,
@@ -656,7 +662,10 @@ defmodule Leaf do
   # chips instead of their source, and kept byte for byte when the document
   # is written back (visual mode would otherwise escape the `[`). Leaf only
   # displays them: what the popup offers, and what a mention links to, are the
-  # host's (`suggestions`). Off by default.
+  # host's (`suggestions`). Off by default. Each chip carries the token's
+  # parts — `data-leaf-mention-type` ("user", "project", …) and
+  # `data-leaf-mention-id` — beside `data-leaf-mention-raw`, so a host can
+  # style or decorate it (a face beside a person) with its own CSS or JS.
   attr(:mentions, :boolean, default: false)
 
   # Multi-user editing. `%{operations: true}` makes the editor emit what
@@ -795,6 +804,7 @@ defmodule Leaf do
      socket
      |> assign(:content, sanitized_markdown)
      |> assign(:visual_html, html)
+     |> assign_rendered(sanitized_markdown, html)
      |> push_event("leaf-command:#{socket.assigns.id}", %{
        action: "set_content",
        content: sanitized_markdown,
@@ -868,6 +878,7 @@ defmodule Leaf do
      socket
      |> assign(:content, sanitized_markdown)
      |> assign(:visual_html, html)
+     |> assign_rendered(sanitized_markdown, html)
      |> assign(:collab_revision, Map.get(op, :revision))
      |> push_event("leaf-remote-operation:#{socket.assigns.id}", %{
        content: sanitized_markdown,
@@ -1008,7 +1019,27 @@ defmodule Leaf do
         |> sanitize_html(deny)
       end)
 
+    socket =
+      socket
+      |> assign_new(:rendered_markdown, fn -> socket.assigns.content end)
+      |> assign_new(:rendered_html, fn -> socket.assigns.visual_html end)
+
     {:ok, socket}
+  end
+
+  # What the template draws the document from: the content as it was when
+  # the editor was mounted, or last replaced by the host (`set_content`, a
+  # collaborator's operation). Not the live `:content` / `:visual_html`, which
+  # every keystroke updates: rendered from those, each keystroke re-rendered
+  # the component, and LiveView's patch put back everything the hook had
+  # changed on the server's markup (the toolbar's overflow state, the sticky
+  # placeholder) — the toolbar wrapped and unwrapped as you typed. The parts
+  # that draw the document are `phx-update="ignore"` anyway: the browser
+  # holds the text.
+  defp assign_rendered(socket, markdown, html) do
+    socket
+    |> assign(:rendered_markdown, markdown)
+    |> assign(:rendered_html, html)
   end
 
   # A parent that re-renders passes `content` again. Unchanged, it is the
@@ -2411,7 +2442,7 @@ defmodule Leaf do
             ]}
             style={surface_style(@height, @min_height, @max_height)}
           >
-            {raw(@visual_html)}
+            {raw(@rendered_html)}
           </div>
         </div>
 
@@ -2431,7 +2462,7 @@ defmodule Leaf do
             spellcheck={to_string(@spellcheck)}
             dir={@dir}
             phx-debounce={@debounce}
-          ><%= @content %></textarea>
+          ><%= @rendered_markdown %></textarea>
         </div>
 
         <%!-- HTML Mode: Plain textarea --%>
@@ -2447,7 +2478,7 @@ defmodule Leaf do
             placeholder="<p>Write HTML here...</p>"
             readonly={@readonly}
             phx-debounce={@debounce}
-          ><%= @visual_html %></textarea>
+          ><%= @rendered_html %></textarea>
         </div>
         </div>
 
@@ -3270,16 +3301,36 @@ defmodule Leaf do
         nil
 
       value ->
-        %{
+        row = %{
           value: value,
           label: to_string(efetch(result, :label) || value),
           sublabel: to_string(efetch(result, :sublabel) || ""),
           icon: to_string(efetch(result, :icon) || "")
         }
+
+        case normalize_suggestion_avatar(efetch(result, :avatar)) do
+          nil -> row
+          avatar -> Map.put(row, :avatar, avatar)
+        end
     end
   end
 
   defp normalize_suggestion_result(_), do: nil
+
+  # `avatar: %{url: "…"}` and/or `%{initials: "AK"}` (a bare string is a URL).
+  # Only strings go to the client, which checks the URL before using it.
+  defp normalize_suggestion_avatar(url) when is_binary(url) and url != "",
+    do: %{url: url, initials: ""}
+
+  defp normalize_suggestion_avatar(avatar) when is_map(avatar) do
+    url = efetch(avatar, :url)
+    initials = efetch(avatar, :initials)
+    url = if is_binary(url), do: url, else: ""
+    initials = if is_binary(initials), do: String.slice(initials, 0, 3), else: ""
+    if url == "" and initials == "", do: nil, else: %{url: url, initials: initials}
+  end
+
+  defp normalize_suggestion_avatar(_), do: nil
 
   # -- Helpers --
 

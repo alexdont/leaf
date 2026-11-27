@@ -357,6 +357,15 @@ def handle_info({:leaf_suggest, %{editor_id: id, trigger: "#", query: q, seq: se
 end
 ```
 
+A result can also show a person's face: `avatar: %{url: "/u/anna.jpg",
+initials: "AK"}` (either key, or a bare URL string) draws a round 20px picture
+before the label, falling back to the initials. It takes the place of `icon`.
+
+With `mentions={true}`, a picked mention token (`@[user:<id>|Ada]`,
+`#[project:<id>|Q3]`) shows as an "@Ada" chip. The chip carries
+`data-leaf-mention-type` and `data-leaf-mention-id`, so a host can style or
+decorate it with its own CSS or JS; the stored markdown keeps the token.
+
 Every config key but `:trigger` is optional; keys may be atoms or strings.
 `:boundary` (`:word_start` / `:line_start` / `:not_line_start` / `:any`),
 `:token`, `:first_char`, `:min_chars`, `:max_length`, `:debounce`,

@@ -653,6 +653,11 @@
     "  box-sizing: border-box;",
     "}",
     ".leaf-toolbar-placeholder { visibility: hidden; }",
+    // Scroll anchoring must never pick these: when the toolbar sticks or
+    // unsticks, the browser would move the page to keep them in place, that
+    // scroll would re-run the sticky check against the moved layout, and the
+    // toolbar would flip back — a flicker that fights the scroll.
+    "[data-visual-toolbar], .leaf-toolbar-placeholder { overflow-anchor: none; }",
 
     // Fullscreen mode — triggered via the browser Fullscreen API (see
     // `_toggleFullscreen` in the hook). The host element fills the screen
@@ -811,6 +816,16 @@
     ".leaf-suggest-row .leaf-suggest-icon {",
     "  flex: 0 0 auto; width: 1em; height: 1em;",
     "  background-color: currentColor; opacity: 0.55;",
+    "}",
+    // A person's face (or initials) before the label: `avatar` on a result.
+    ".leaf-suggest-row .leaf-suggest-avatar {",
+    "  flex: 0 0 auto; width: 20px; height: 20px; border-radius: 9999px;",
+    "  overflow: hidden; display: inline-flex; align-items: center; justify-content: center;",
+    "  font-size: 0.5625rem; font-weight: 600; line-height: 1; letter-spacing: 0.02em;",
+    "  background: color-mix(in oklab, var(--color-base-content, #1f2937) 14%, transparent);",
+    "}",
+    ".leaf-suggest-row .leaf-suggest-avatar img {",
+    "  width: 100%; height: 100%; object-fit: cover; display: block;",
     "}",
     ".leaf-suggest-create { border-top: 1px solid var(--color-base-300, #d1d5db); }",
     ".leaf-suggest-note {",
@@ -2503,11 +2518,33 @@
       }, 0);
     },
 
+    // A LiveView patch puts back the server's markup, and with it undoes what
+    // the hook changed on it: the toolbar's overflow state (which groups fit,
+    // whether the ⋯ menu shows) and the sticky toolbar with its placeholder.
+    // The toolbar wrapped to a second line and back on every patch. Saved
+    // here, restored in `updated()` — the same task as the patch, so the
+    // reset state is never painted.
+    beforeUpdate() {
+      var toolbar = this.el.querySelector("[data-visual-toolbar]");
+      if (!toolbar) {
+        this._toolbarState = null;
+        return;
+      }
+      this._toolbarState = {
+        compactModes: toolbar.dataset.compactModes,
+        overflowLevel: toolbar.dataset.toolbarOverflowLevel,
+        sticky: toolbar.classList.contains("leaf-toolbar-sticky"),
+        width: toolbar.style.width,
+        top: toolbar.style.top
+      };
+    },
+
     updated() {
       // Server always renders data-leaf-mount-state="loading"; once the hook
       // is mounted we own the state, so keep it pinned to "ready" through
       // any parent-triggered re-render.
       this.el.dataset.leafMountState = "ready";
+      this._restoreToolbarState();
 
       // The host can add, change or drop trigger configs at runtime. This
       // returns immediately when the config set is unchanged, so the very
@@ -3043,6 +3080,19 @@
       // has to come first so Enter can't also run the list auto-continue
       // further down.
       if (this._suggestKeydown(e)) return;
+
+      // Most Enter branches below build the new block themselves and move
+      // the selection with the Range API, which scrolls nothing: Enter on the
+      // last visible line left the new line out of sight until the next
+      // character. Once the caret is placed — by us or by the browser — bring
+      // it into view. Enter only: run after other keys it would fight a
+      // Shift+Arrow selection reaching past the top.
+      if (e.key === "Enter") {
+        var scrollSelf = this;
+        (window.requestAnimationFrame || setTimeout)(function () {
+          scrollSelf._scrollCaretIntoView();
+        });
+      }
 
       // `submit_on_enter`: Enter sends the text instead of splitting the
       // block. After the suggestion list (Enter there picks an item) and
@@ -5863,6 +5913,33 @@
       }
     },
 
+    // `avatar: {url, initials}` on a result: a round 20px face before the
+    // label, the initials while it loads or when it cannot (no URL, an unsafe
+    // one, a broken image). Text only — never markup from the host.
+    _suggestAvatar: function (avatar) {
+      var wrap = document.createElement("span");
+      wrap.className = "leaf-suggest-avatar";
+      wrap.setAttribute("aria-hidden", "true");
+      var initials = String(avatar.initials || "").trim().slice(0, 3);
+      var url = safeUrl(avatar.url, "image");
+      wrap.textContent = initials;
+      if (url) {
+        var img = document.createElement("img");
+        img.alt = "";
+        img.loading = "lazy";
+        img.decoding = "async";
+        img.referrerPolicy = "no-referrer";
+        img.addEventListener("error", function () {
+          if (img.parentNode) img.parentNode.removeChild(img);
+          wrap.textContent = initials;
+        });
+        img.src = url;
+        wrap.textContent = "";
+        wrap.appendChild(img);
+      }
+      return wrap;
+    },
+
     _suggestRowEl: function (row, index) {
       var st = this._suggest;
       var el = document.createElement("div");
@@ -5883,6 +5960,8 @@
         plus.textContent = "+";
         plus.style.backgroundColor = "transparent";
         el.appendChild(plus);
+      } else if (row.result.avatar && (row.result.avatar.url || row.result.avatar.initials)) {
+        el.appendChild(this._suggestAvatar(row.result.avatar));
       } else if (row.result.icon) {
         var icon = document.createElement("span");
         icon.className = "leaf-suggest-icon " + row.result.icon;
@@ -8169,8 +8248,21 @@
       span.className = "leaf-mention";
       span.setAttribute("contenteditable", "false");
       span.setAttribute("data-leaf-mention-raw", raw);
+      this._tagMention(span, raw);
       span.textContent = trigger + label;
       return span;
+    },
+
+    // The token's parts on the chip — `data-leaf-mention-type` ("user",
+    // "project", …) and `data-leaf-mention-id` — so a host can style or
+    // decorate it (a face beside a person) with CSS or its own JS, the same
+    // as the chips it draws outside the editor. The server's render sets the
+    // same two (`Leaf.Markdown.decorate_mentions/1`).
+    _tagMention: function (span, raw) {
+      var m = new RegExp(this._MENTION_RE.source).exec(raw || "");
+      if (!m) return;
+      span.setAttribute("data-leaf-mention-type", m[2]);
+      span.setAttribute("data-leaf-mention-id", m[3]);
     },
 
     _textWithMentions: function (text) {
@@ -12324,6 +12416,7 @@
             var mSpan = document.createElement("span");
             mSpan.className = "leaf-mention";
             mSpan.setAttribute("data-leaf-mention-raw", match.raw);
+            self._tagMention(mSpan, match.raw);
             if (mActive) mSpan.classList.add("leaf-source-active");
             appendPlain(mSpan, segText.slice(match.start, match.start + 1), mAbsStart);
             appendMarker(
@@ -13674,10 +13767,97 @@
       return maxBottom;
     },
 
+    // Scroll the editor (and the page, when it is the page that scrolls) just
+    // enough to show the caret. A caret in an empty new block has no box of
+    // its own, so the block's is used.
+    _scrollCaretIntoView: function () {
+      var box = this._visualEl;
+      var sel = window.getSelection();
+      if (!box || !sel || !sel.rangeCount) return;
+      var range = sel.getRangeAt(0);
+      if (!box.contains(range.startContainer)) return;
+
+      var caretRect = function () {
+        var r = range.getBoundingClientRect();
+        if (r && (r.height > 0 || r.top !== 0 || r.bottom !== 0)) return r;
+        var node = range.startContainer;
+        var el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          var child = node.childNodes[range.startOffset] || node.childNodes[range.startOffset - 1];
+          if (child && child.nodeType === Node.ELEMENT_NODE) el = child;
+        }
+        return el ? el.getBoundingClientRect() : null;
+      };
+      var PAD = 8;
+
+      var rect = caretRect();
+      if (!rect) return;
+      if (box.scrollHeight > box.clientHeight + 1) {
+        var b = box.getBoundingClientRect();
+        if (rect.bottom > b.bottom - PAD) {
+          box.scrollTop += rect.bottom - b.bottom + PAD;
+        } else if (rect.top < b.top + PAD) {
+          box.scrollTop -= b.top + PAD - rect.top;
+        }
+        rect = caretRect();
+        if (!rect) return;
+      }
+
+      var top = this._getStickyTopOffset ? this._getStickyTopOffset() : 0;
+      if (rect.bottom > window.innerHeight - PAD) {
+        window.scrollBy(0, rect.bottom - window.innerHeight + PAD);
+      } else if (rect.top < top + PAD) {
+        window.scrollBy(0, rect.top - top - PAD);
+      }
+    },
+
+    _restoreToolbarState: function () {
+      var saved = this._toolbarState;
+      this._toolbarState = null;
+      var toolbar = this.el.querySelector("[data-visual-toolbar]");
+      if (!saved || !toolbar) return;
+
+      if (saved.compactModes) toolbar.dataset.compactModes = saved.compactModes;
+      else delete toolbar.dataset.compactModes;
+      if (saved.overflowLevel) toolbar.dataset.toolbarOverflowLevel = saved.overflowLevel;
+      else delete toolbar.dataset.toolbarOverflowLevel;
+
+      // The patch may have dropped the placeholder (it is not in the
+      // server's markup) or swapped the toolbar element itself.
+      if (this._stickyToolbarEl !== toolbar) this._stickyToolbarEl = toolbar;
+      var placeholder = this._stickyPlaceholder;
+      if (placeholder && (placeholder.parentNode !== toolbar.parentNode ||
+          placeholder.nextSibling !== toolbar)) {
+        toolbar.parentNode.insertBefore(placeholder, toolbar);
+      }
+      if (saved.sticky) {
+        toolbar.classList.add("leaf-toolbar-sticky");
+        toolbar.style.width = saved.width;
+        toolbar.style.top = saved.top;
+      }
+    },
+
+    // The placeholder holds the toolbar's whole box — margins too — while the
+    // toolbar is fixed, so sticking and unsticking never move what is below.
+    _sizeStickyPlaceholder: function (toolbar, placeholder) {
+      var rect = toolbar.getBoundingClientRect();
+      var cs = window.getComputedStyle ? window.getComputedStyle(toolbar) : null;
+      placeholder.style.height = rect.height + "px";
+      placeholder.style.marginTop = cs ? cs.marginTop : "";
+      placeholder.style.marginBottom = cs ? cs.marginBottom : "";
+    },
+
     _setupStickyToolbar: function () {
       var self = this;
       this._stickyToolbarEl = this.el.querySelector("[data-visual-toolbar]");
       if (!this._stickyToolbarEl) return;
+
+      // The browser's scroll anchoring may pick anything in the editor — a
+      // paragraph under the toolbar — and "correct" the scroll by the
+      // toolbar's height when it sticks or unsticks, which re-runs the check
+      // against a moved layout. Nothing in the editor is a good anchor for
+      // the page; the page keeps anchoring on what is around it.
+      this.el.style.overflowAnchor = "none";
 
       // Create placeholder to prevent layout shift when toolbar becomes fixed
       this._stickyPlaceholder = document.createElement("div");
@@ -13691,6 +13871,14 @@
       this._stickyScrollHandler = function () {
         var toolbar = self._stickyToolbarEl;
         var placeholder = self._stickyPlaceholder;
+
+        // A toolbar the layout hides (a narrow editor shows the compact one
+        // instead) has nothing to pin, and a placeholder standing in for it
+        // would only push the page around.
+        if (toolbar.offsetParent === null && !toolbar.classList.contains("leaf-toolbar-sticky")) {
+          placeholder.style.display = "none";
+          return;
+        }
         var editorRect = self.el.getBoundingClientRect();
         var toolbarHeight = toolbar.offsetHeight;
         var topOffset = self._getStickyTopOffset();
@@ -13701,12 +13889,18 @@
           ? placeholder.getBoundingClientRect()
           : toolbar.getBoundingClientRect();
 
-        if (
-          refRect.top < topOffset &&
-          editorRect.bottom > toolbarHeight + topOffset
-        ) {
+        // Some slack before letting go, so a pixel or two of layout shift at
+        // the editor's bottom edge cannot flip the state back and forth.
+        var HYSTERESIS = 4;
+        var stay = isSticky
+          ? refRect.top < topOffset + HYSTERESIS &&
+            editorRect.bottom > toolbarHeight + topOffset - HYSTERESIS
+          : refRect.top < topOffset &&
+            editorRect.bottom > toolbarHeight + topOffset;
+
+        if (stay) {
           if (!isSticky) {
-            placeholder.style.height = toolbarHeight + "px";
+            self._sizeStickyPlaceholder(toolbar, placeholder);
             placeholder.style.display = "block";
             toolbar.style.width = self.el.offsetWidth + "px";
             toolbar.style.top = topOffset + "px";
@@ -13726,20 +13920,34 @@
         }
       };
 
-      window.addEventListener("scroll", this._stickyScrollHandler, {
+      // Once per frame: a fast scroll fires many events between paints, and
+      // each one measuring layout is wasted work.
+      var check = this._stickyScrollHandler;
+      var queued = false;
+      this._stickyScrollListener = function () {
+        if (queued) return;
+        queued = true;
+        (window.requestAnimationFrame || setTimeout)(function () {
+          queued = false;
+          if (self._stickyScrollHandler === check) check();
+        });
+      };
+
+      window.addEventListener("scroll", this._stickyScrollListener, {
         passive: true,
       });
-      window.addEventListener("resize", this._stickyScrollHandler, {
+      window.addEventListener("resize", this._stickyScrollListener, {
         passive: true,
       });
     },
 
     _cleanupStickyToolbar: function () {
-      if (this._stickyScrollHandler) {
-        window.removeEventListener("scroll", this._stickyScrollHandler);
-        window.removeEventListener("resize", this._stickyScrollHandler);
-        this._stickyScrollHandler = null;
+      if (this._stickyScrollListener) {
+        window.removeEventListener("scroll", this._stickyScrollListener);
+        window.removeEventListener("resize", this._stickyScrollListener);
+        this._stickyScrollListener = null;
       }
+      this._stickyScrollHandler = null;
       if (this._stickyPlaceholder && this._stickyPlaceholder.parentNode) {
         this._stickyPlaceholder.parentNode.removeChild(this._stickyPlaceholder);
         this._stickyPlaceholder = null;
